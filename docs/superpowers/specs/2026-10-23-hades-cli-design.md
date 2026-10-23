@@ -93,8 +93,10 @@ Even if everything technically works, it has failed if:
 
 ### What the host provides (installed by infra, not by hades)
 
-- Caddy on loopback with a `(worktree)` snippet and an include of `<sites_dir>/*.caddy`; each site
-  file is exactly one line `import worktree <host> <port>`.
+- Caddy on loopback with a `(worktree)` snippet and an include of `<caddy.live_dir>/*.caddy`, a
+  root-owned directory that only `hades caddy-reload` writes; the developer-writable
+  `<sites_dir>` is the staging area it validates and mirrors from. Each site file is exactly one
+  line `import worktree <host> <port>`.
 - A sudoers rule letting group `hades` run exactly `/usr/local/bin/hades caddy-reload` (and its
   `--check` form) as root without a password. The reload step is a hades subcommand (section 6.8),
   so the grammar that validates site files is the same code that writes them, tested in this
@@ -229,6 +231,7 @@ chrome_path = ""                     # optional; enables the chrome-devtools MCP
 
 [caddy]
 config = "/etc/caddy/Caddyfile"      # validated by `hades caddy-reload` before reloading
+live_dir = "/etc/caddy/hades-sites"  # root-owned; Caddy imports this, never sites_dir
 reload = ["systemctl", "reload", "caddy"]
 
 [postgres]
@@ -419,12 +422,18 @@ when a hook file exists without hades in it, it prints the lines to add.
   (root-owned, mode 0755) and installs the sudoers line for `hades caddy-reload`. Laptops: the
   release tarball or `go install`. A Homebrew tap only if goreleaser gives it for free (builder's
   call).
-- `hades caddy-reload` is the one subcommand meant to run as root. It validates every file in
-  `sites_dir` against the grammar `^import worktree [a-z0-9.-]+ [0-9]+$` (one line, newline
-  terminated), refuses to continue if any file fails and names it, runs `caddy validate --config
-  <caddy.config>`, then runs the configured reload command. With `--check` it stops after
-  validation. It reads only the host config and the sites directory and takes no other input, so
-  the sudoers rule exposes nothing else.
+- `hades caddy-reload` is the one subcommand meant to run as root. It reads every `*.caddy` in
+  `sites_dir` (at most 256 bytes each) and validates the bytes against the grammar
+  `^import worktree [a-z0-9.-]+ [0-9]+$` (one line, newline terminated), refusing to continue if
+  any file fails and naming it; then mirrors exactly those validated bytes into the root-owned
+  `caddy.live_dir` (temp file and rename per site, stale files removed), so a file swapped after
+  validation never reaches Caddy; then runs `caddy validate --config <caddy.config>`; then the
+  configured reload command. With `--check` it stops after validation and touches nothing. When
+  it runs as root it ignores `HADES_HOST_CONFIG` and `HOME`, reads `/etc/hades/host.toml` only,
+  and refuses a host config that is not a root-owned regular file free of group and world write
+  bits. Every command it runs gets a fixed `PATH` (`/usr/local/sbin:/usr/local/bin:/usr/sbin:
+  /usr/bin:/sbin:/bin`), never the caller's. It accepts no positional arguments. So the sudoers
+  rule exposes nothing beyond validating, mirroring and reloading.
 - Go 1.25, modules, no CGO. Dependencies kept to a TOML parser, a Postgres driver, and at most one
   CLI helper library; everything else from the standard library.
 

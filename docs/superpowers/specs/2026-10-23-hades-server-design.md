@@ -212,10 +212,14 @@ The playbook installs the pinned `hades_version` release to `/usr/local/bin/hade
 the `hades-port` companion, group `hades`, the registry `/srv/hades/{ports,sites,manifests}`
 (`root:hades`, mode 3775), `/etc/hades/host.toml` rendered from inventory (domain, label
 template, port range, registry paths, Postgres and RabbitMQ blocks, `chrome_path`, `tool_paths`,
-Caddy config path and reload command), a sudoers file allowing group `hades` to run exactly
-`/usr/local/bin/hades caddy-reload` and `/usr/local/bin/hades caddy-reload --check` as root, a
-weekly root timer running `hades gc`, and `/usr/local/bin/hades-status` for the operator (section
-6.10). `verify.yml` runs `hades doctor` as every dev user and requires exit 0.
+Caddy config path, reload command and `live_dir`), the root-owned Caddy import directory
+`/etc/caddy/hades-sites` (0755; only `hades caddy-reload` writes it), a sudoers file allowing
+group `hades` to run exactly `/usr/local/bin/hades caddy-reload` and
+`/usr/local/bin/hades caddy-reload --check` as root (with sudo's default `env_reset`; no
+`env_keep` for `HADES_*`, `HOME` or `PATH`), a weekly root timer running `hades gc`, and
+`/usr/local/bin/hades-status` for the operator (section 6.10). `/etc/hades/host.toml` is
+root-owned, mode 0644: `caddy-reload` refuses a group- or world-writable one. `verify.yml` runs
+`hades doctor` as every dev user and requires exit 0.
 
 ### 6.6 Dev Postgres
 
@@ -256,10 +260,11 @@ S3 objects.
 Cloudflare Tunnel (`cloudflared`, remotely managed, token from the operator's environment) with one
 ingress rule `*.<domain>` to `http://127.0.0.1:<caddy_port>`; TLS at Cloudflare's edge, plain HTTP
 on loopback, no firewall change. Caddy as a system service in `hades.slice`, `auto_https off`,
-listening on `127.0.0.1:<caddy_port>`, importing `/srv/hades/sites/*.caddy` (one line each,
-`import worktree <host> <port>`, written by `hades up`), a `(worktree)` snippet mapping the host to
-`127.0.0.1:<port>`, a 404 page for unknown hosts naming the convention, and
-`/phoenix/live_reload/*` refused. Dev-only paths are **gated at Cloudflare's edge, not blocked**: a
+listening on `127.0.0.1:<caddy_port>`, importing `/etc/caddy/hades-sites/*.caddy` (one line each,
+`import worktree <host> <port>`; `hades up` writes the developer-owned staging copy under
+`/srv/hades/sites/`, and `hades caddy-reload`, as root, validates and mirrors it into the import
+directory so Caddy never reads a developer-writable file), a `(worktree)` snippet mapping the host
+to `127.0.0.1:<port>`, and a 404 page for unknown hosts naming the convention. Dev-only paths are **gated at Cloudflare's edge, not blocked**: a
 Cloudflare Access application on `*` of the zone for paths `dev`, `dev/*`, `tidewave`,
 `tidewave/*` with the developers' email or domain policy, so the people on the box reach
 `/dev/mailbox` or Tidewave Web from any device after one login per hostname while everything else
