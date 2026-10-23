@@ -48,6 +48,12 @@ func TestMatch(t *testing.T) {
 	if got := pg.Match(names, nil, "_roman_foo"); len(got) != 0 {
 		t.Fatal(got)
 	}
+	if got := pg.Match(names, []string{"", "gym_nation"}, "_roman_foo"); !reflect.DeepEqual(got, want) {
+		t.Fatal("empty prefix must be skipped", got)
+	}
+	if got := pg.Match(names, []string{""}, "_roman_foo"); len(got) != 0 {
+		t.Fatal(got)
+	}
 	if got := pg.Match([]string{"a.b_x"}, []string{"a.b"}, "_x"); len(got) != 1 {
 		t.Fatal("quote meta")
 	}

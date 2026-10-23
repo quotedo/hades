@@ -84,13 +84,16 @@ func (c *Client) Drop(ctx context.Context, name string) error {
 
 // Match returns, in input order, the names that start with any prefix and end
 // with suffix followed by optional digits. It is the only place that decides
-// what gets dropped: an empty suffix or an empty prefix list matches nothing.
+// what gets dropped: an empty suffix, an empty prefix list or an empty prefix matches nothing.
 func Match(names, prefixes []string, suffix string) []string {
 	if suffix == "" || len(prefixes) == 0 {
 		return nil
 	}
 	res := make([]*regexp.Regexp, 0, len(prefixes))
 	for _, p := range prefixes {
+		if p == "" {
+			continue // an empty prefix would match every database with the suffix
+		}
 		res = append(res, regexp.MustCompile("^"+regexp.QuoteMeta(p)+".*"+regexp.QuoteMeta(suffix)+"[0-9]*$"))
 	}
 	var out []string

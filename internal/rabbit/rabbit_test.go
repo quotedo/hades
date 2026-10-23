@@ -2,6 +2,7 @@ package rabbit_test
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -58,5 +59,38 @@ func TestAMQPURLEscapesSlashVhost(t *testing.T) {
 	u, err := rabbit.AMQPURL("amqp://g:g@h:5672", "/")
 	if err != nil || u != "amqp://g:g@h:5672/%2F" {
 		t.Fatal(u, err)
+	}
+}
+
+func TestEnsureWireDetails(t *testing.T) {
+	type rec struct{ method, path, body, ctype, user, pass string }
+	var recs []rec
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		u, p, _ := r.BasicAuth()
+		recs = append(recs, rec{r.Method, r.URL.EscapedPath(), string(b), r.Header.Get("Content-Type"), u, p})
+		w.WriteHeader(204)
+	}))
+	defer srv.Close()
+	c := &rabbit.Client{ManagementURL: srv.URL, User: "guest", Password: "pw", HTTP: srv.Client()}
+	if err := c.Ensure(context.Background(), "/"); err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 2 {
+		t.Fatal(recs)
+	}
+	if recs[0].method != "PUT" || recs[0].path != "/api/vhosts/%2F" {
+		t.Fatal(recs[0])
+	}
+	if recs[1].method != "PUT" || recs[1].path != "/api/permissions/%2F/guest" {
+		t.Fatal(recs[1])
+	}
+	if want := `{"configure":".*","write":".*","read":".*"}`; recs[1].body != want {
+		t.Fatal(recs[1].body)
+	}
+	for _, r := range recs {
+		if r.ctype != "application/json" || r.user != "guest" || r.pass != "pw" {
+			t.Fatal(r)
+		}
 	}
 }
