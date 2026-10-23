@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/quotedo/hades/internal/pg"
 	"github.com/quotedo/hades/internal/registry"
 	"github.com/quotedo/hades/internal/testutil"
 )
@@ -365,5 +367,114 @@ func TestStatusOnLaptop(t *testing.T) {
 	code, out, errs := runMain(getenv, "status", "--json")
 	if code != 0 || !strings.Contains(out, `"mode": "laptop"`) || !strings.Contains(out, `"host_config": "laptop"`) || !strings.Contains(out, `"caddy_check": "n/a"`) {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+	}
+}
+
+// stubProbe makes the Postgres probe succeed for the test.
+func stubProbe(t *testing.T) {
+	t.Helper()
+	prev := pgProbe
+	pgProbe = func(context.Context, pg.Databases) ([]string, error) { return []string{"a", "b"}, nil }
+	t.Cleanup(func() { pgProbe = prev })
+}
+
+// withEnv overlays getenv with fixed values.
+func withEnv(getenv func(string) string, kv map[string]string) func(string) string {
+	return func(k string) string {
+		if v, ok := kv[k]; ok {
+			return v
+		}
+		return getenv(k)
+	}
+}
+
+// setgidRegistry gives the registry directories the bits doctor demands, or
+// skips the test where the filesystem or group membership does not allow it.
+func setgidRegistry(t *testing.T, state string, getenv func(string) string) {
+	t.Helper()
+	for _, d := range []string{"ports", "sites", "manifests"} {
+		p := filepath.Join(state, d)
+		if err := os.Chmod(p, 0o775|os.ModeSetgid); err != nil {
+			t.Skipf("cannot set setgid here: %v", err)
+		}
+		if fi, err := os.Stat(p); err != nil || fi.Mode()&os.ModeSetgid == 0 {
+			t.Skip("filesystem does not keep the setgid bit")
+		}
+	}
+	if _, checks, _ := doctorChecks(t, getenv); !checks["registry-perms"].OK {
+		t.Skipf("registry-perms cannot pass here: %s", checks["registry-perms"].Detail)
+	}
+}
+
+// phoenixDoctorFixture is a server host whose current worktree is a phoenix
+// project. PATH holds only the stub dir (with git, and mix when withMix, in
+// <home>/.asdf/shims), so direnv is absent.
+func phoenixDoctorFixture(t *testing.T, withMix bool) (getenv func(string) string, reg *registry.Registry, wt, shims string) {
+	t.Helper()
+	stubProbe(t)
+	var state string
+	reg, getenv, state = serverFixture(t, "")
+	_, wt, _ = laptopUpFixture(t, "phoenix")
+	bin := filepath.Join(state, "bin")
+	testutil.StubTool(t, bin, "git", "#!/bin/bash\nexit 0\n")
+	shims = filepath.Join(state, ".asdf", "shims")
+	if err := os.MkdirAll(shims, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if withMix {
+		testutil.StubTool(t, shims, "mix", "#!/bin/bash\nexit 0\n")
+	}
+	getenv = withEnv(getenv, map[string]string{"PATH": bin})
+	setgidRegistry(t, state, getenv)
+	return getenv, reg, wt, shims
+}
+
+func TestDoctorWarnOnlyFailuresKeepExitZero(t *testing.T) {
+	getenv, reg, wt, shims := phoenixDoctorFixture(t, true)
+	if err := reg.WriteManifest(&registry.Manifest{User: "u", Label: "demo-old", HadesVersion: "0.0.1-ancient", Worktree: "/w/old"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "paseo.json"), []byte(`{"setup":"echo hi"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"--root", filepath.Dir(wt), "--worktree", wt, "--name", "feature/x", "doctor"}
+	code, out, errs := runMain(getenv, args...)
+	if code != 0 {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+	}
+	for _, want := range []string{"WARN direnv:", "WARN versions:", "WARN ade-hooks: paseo.json", "ok   tools: " + shims, "ok   git:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in %q", want, out)
+		}
+	}
+}
+
+func TestDoctorToolsFailWhenMixMissing(t *testing.T) {
+	getenv, _, wt, _ := phoenixDoctorFixture(t, false)
+	code, out, errs := runMain(getenv, "--root", filepath.Dir(wt), "--worktree", wt, "--name", "feature/x", "doctor")
+	if code != 1 || !strings.Contains(out, "FAIL tools: phoenix preset needs mix") {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+	}
+}
+
+func TestDoctorGitMissingFails(t *testing.T) {
+	stubProbe(t)
+	_, getenv, _ := serverFixture(t, "")
+	getenv = withEnv(getenv, map[string]string{"PATH": t.TempDir()})
+	code, checks, _ := doctorChecks(t, getenv)
+	if code != 1 || checks["git"].OK || checks["git"].Warn {
+		t.Fatalf("code=%d git=%+v", code, checks["git"])
+	}
+}
+
+func TestDoctorOutsideRepoSkipsRepoChecks(t *testing.T) {
+	stubProbe(t)
+	_, getenv, _ := serverFixture(t, "")
+	t.Chdir(t.TempDir())
+	_, checks, order := doctorChecks(t, getenv)
+	for _, n := range []string{"tools", "ade-hooks"} {
+		if c := checks[n]; !c.OK || c.Detail != "skipped: not inside a git worktree" {
+			t.Fatalf("%s = %+v (order %v)", n, c, order)
+		}
 	}
 }

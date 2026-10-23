@@ -13,10 +13,14 @@ import (
 	"github.com/quotedo/hades/internal/caddy"
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/lifecycle"
+	"github.com/quotedo/hades/internal/pg"
 )
 
 // probeTimeout bounds each network probe of status and doctor.
 const probeTimeout = 3 * time.Second
+
+// pgProbe lists the databases to test Postgres; tests replace it.
+var pgProbe = func(ctx context.Context, db pg.Databases) ([]string, error) { return db.List(ctx) }
 
 type statusReport struct {
 	Mode       string      `json:"mode"`
@@ -95,7 +99,7 @@ func buildStatus(bg context.Context, ctx *Context, d lifecycle.Deps) (statusRepo
 
 	pgCtx, cancel := context.WithTimeout(bg, probeTimeout)
 	defer cancel()
-	if dbs, err := d.PG.List(pgCtx); err == nil {
+	if dbs, err := pgProbe(pgCtx, d.PG); err == nil {
 		r.Postgres = statusPG{Reachable: true, Databases: len(dbs)}
 	}
 

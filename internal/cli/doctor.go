@@ -116,7 +116,7 @@ func runChecks(bg context.Context, ctx *Context) []check {
 
 	pgCtx, cancel := context.WithTimeout(bg, probeTimeout)
 	defer cancel()
-	if dbs, err := d.PG.List(pgCtx); err != nil {
+	if dbs, err := pgProbe(pgCtx, d.PG); err != nil {
 		checks = append(checks, fail("postgres", err))
 	} else {
 		checks = append(checks, pass("postgres", fmt.Sprintf("reachable, %d databases", len(dbs))))
@@ -133,10 +133,14 @@ func runChecks(bg context.Context, ctx *Context) []check {
 		checks = append(checks, pass("git", p))
 	}
 
-	var wtDir string
-	if wt, err := resolveWorktree(bg, ctx); err == nil {
-		wtDir = wt.Worktree
-		checks = append(checks, checkTools(wtDir, lookup))
+	wt, wtErr := resolveWorktree(bg, ctx)
+	switch {
+	case wtErr == nil:
+		checks = append(checks, checkTools(wt.Worktree, lookup))
+	case notInRepo(wtErr):
+		checks = append(checks, pass("tools", skipNoRepo))
+	default:
+		checks = append(checks, fail("tools", wtErr))
 	}
 
 	_, derr := lookup("direnv")
@@ -146,11 +150,24 @@ func runChecks(bg context.Context, ctx *Context) []check {
 	}
 	checks = append(checks, warnIf("direnv", problem, "found"))
 
-	if wtDir != "" {
-		checks = append(checks, checkADEHooks(wtDir))
+	switch {
+	case wtErr == nil:
+		checks = append(checks, checkADEHooks(wt.Worktree))
+	case notInRepo(wtErr):
+		checks = append(checks, pass("ade-hooks", skipNoRepo))
+	default:
+		checks = append(checks, check{Name: "ade-hooks", Warn: true, Detail: wtErr.Error()})
 	}
 	checks = append(checks, checkVersions(d))
 	return checks
+}
+
+const skipNoRepo = "skipped: not inside a git worktree"
+
+// notInRepo reports whether resolving the worktree failed because the current
+// directory is not in a git repository.
+func notInRepo(err error) bool {
+	return strings.Contains(err.Error(), "not a git repository")
 }
 
 func modeName(m config.Mode) string {
@@ -248,25 +265,8 @@ func toolLookup(d lifecycle.Deps, path string) func(string) (string, error) {
 	if d.LookPath != nil {
 		return d.LookPath
 	}
-	var dirs []string
-	for _, p := range execx.ToolPrepend(d.User.Home, d.Host.ToolPaths) {
-		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
-			dirs = append(dirs, p)
-		}
-	}
-	dirs = append(dirs, filepath.SplitList(path)...)
-	return func(name string) (string, error) {
-		for _, dir := range dirs {
-			if dir == "" {
-				dir = "."
-			}
-			p := filepath.Join(dir, name)
-			if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0 {
-				return p, nil
-			}
-		}
-		return "", fmt.Errorf("%s not found on PATH", name)
-	}
+	prepend := execx.ToolPrepend(d.User.Home, d.Host.ToolPaths)
+	return func(name string) (string, error) { return execx.LookPath(name, prepend, path) }
 }
 
 // checkTools verifies the toolchain of the worktree's preset is installed.

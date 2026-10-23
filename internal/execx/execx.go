@@ -116,16 +116,10 @@ func (r *Real) withPath(env []string) ([]string, string) {
 	if idx < 0 {
 		path = os.Getenv("PATH")
 	}
-	var dirs []string
-	for _, d := range r.Prepend {
-		if fi, err := os.Stat(d); err == nil && fi.IsDir() {
-			dirs = append(dirs, d)
-		}
-	}
-	if len(dirs) == 0 {
+	path, changed := prependPath(r.Prepend, path)
+	if !changed {
 		return env, path
 	}
-	path = strings.Join(append(dirs, path), string(os.PathListSeparator))
 	out := append([]string(nil), env...)
 	if idx >= 0 {
 		out[idx] = "PATH=" + path
@@ -133,6 +127,28 @@ func (r *Real) withPath(env []string) ([]string, string) {
 		out = append(out, "PATH="+path)
 	}
 	return out, path
+}
+
+// prependPath puts the prepend directories that exist on disk in front of
+// path, reporting whether any were added.
+func prependPath(prepend []string, path string) (string, bool) {
+	var dirs []string
+	for _, d := range prepend {
+		if fi, err := os.Stat(d); err == nil && fi.IsDir() {
+			dirs = append(dirs, d)
+		}
+	}
+	if len(dirs) == 0 {
+		return path, false
+	}
+	return strings.Join(append(dirs, path), string(os.PathListSeparator)), true
+}
+
+// LookPath resolves name the way Real runs it: the existing prepend
+// directories first, then pathEnv.
+func LookPath(name string, prepend []string, pathEnv string) (string, error) {
+	path, _ := prependPath(prepend, pathEnv)
+	return lookPath(name, path, "")
 }
 
 // lookPath resolves name against the given PATH value (not the process PATH).
