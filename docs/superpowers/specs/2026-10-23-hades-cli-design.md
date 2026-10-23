@@ -197,7 +197,8 @@ a value wins, per value:
 
 The name is sanitised to a hostname fragment: lower-cased, every run outside `[a-z0-9]` becomes one
 `-`, leading and trailing `-` stripped. The project slug comes from `hades.toml` `project`, else
-the root checkout's directory name, sanitised the same way, and must be at most 30 characters.
+the root checkout's directory name; either source is sanitised the same way and must be at most
+30 characters, else `up` fails naming the value.
 
 The label is rendered from the host's `label_template` (section 6.3), by default
 `{{project}}-{{name}}`, which is what Roman chose for tokyo (`jarl-<worktree>.romanc.io`). On a
@@ -248,7 +249,8 @@ password = "guest"
 ```
 
 Hades refuses to start in server mode when a required key is missing or a registry directory is
-missing or has the wrong group or mode; `doctor` says which.
+missing, lacks the setgid or sticky bit, is not group-writable, is world-writable, or belongs to
+a group the process is not in; `doctor` says which directory and which property.
 
 **Project config** `hades.toml` at the repository root, committed. Read from the worktree first,
 then from the root checkout if the worktree's branch predates the file, then preset defaults.
@@ -320,8 +322,9 @@ only the manifest knows how to find; the user re-runs `up` after fixing the caus
    base64); `PHX_HOST`, `HADES_URL`, `HADES_LABEL`; the `[env]` entries; and, when a RabbitMQ vhost
    is requested, `RABBITMQ_VHOST` and `AMQP_URL`. These are the documented variables of the
    credentials safety rule in 6.9.
-   `DB_SUFFIX` is `_<user>_<name>` with `-` turned into `_` and everything outside `[a-z0-9_]`
-   dropped, guaranteed at most 32 bytes: when longer, the first 22 bytes followed by `_` and the
+   `DB_SUFFIX` is `_<user>_<name>` where the user part keeps only `[a-z0-9]` (so the first
+   `_`-delimited segment is always the owner's login) and the name has `-` turned into `_` and
+   everything outside `[a-z0-9_]` dropped, guaranteed at most 32 bytes: when longer, the first 22 bytes followed by `_` and the
    first 8 hex characters of the SHA-256 of the full string. A suffix never ends in a digit (a `_`
    is appended when it would), so a database name ending in digits after the suffix can only be
    this worktree's `MIX_TEST_PARTITION`, never a sibling worktree whose name ends in a digit. A
@@ -348,9 +351,17 @@ Laptop mode runs the same steps minus 7 and 8, with a per-user registry.
 
 What `down` does: read the manifest; if none exists or it is not this user's or not this
 worktree's, print why and exit 0 (the ADE must still be allowed to archive). Then, each step
-independent of the others' success: project `teardown` steps; drop the databases matched by the
-project's rule with `DROP DATABASE ... WITH (FORCE)`; delete the vhost; remove the site file and
-reload; remove the port link; remove the manifest. Exit 0 unless `--strict`.
+independent of the others' success: project `teardown` steps (only when the manifest is the
+invoking user's own; root does not run another user's commands); drop the databases matched by
+the project's rule with `DROP DATABASE ... WITH (FORCE)`; delete the vhost; remove the site file
+and reload; remove the port link. The manifest itself is removed only when every step succeeded;
+otherwise it is kept so the leak stays visible to `ls` and `gc` retries it later, and `down`
+prints `manifest kept (failed: <steps>)`. Exit 0 unless `--strict`.
+
+A re-run of `up` on a worktree whose `hades.toml` changed keeps what the earlier run recorded:
+the database base names become the union of the recorded and the newly configured ones, and a
+recorded vhost is kept when the configuration no longer asks for one, so `down` can still release
+what the first run created.
 
 Database rule (phoenix and elixir): `databases` in `hades.toml` lists database **base names**,
 everything before the suffix (`gym_nation_dev`, `gym_nation_internal_dev`, `gym_nation_test`,
@@ -374,8 +385,30 @@ database base names in effect, services created (vhost name), ADE that invoked `
 
 Lookup is by worktree path: `down`, `env`, `port` and a repeated `up` find the manifest whose
 recorded worktree path equals the resolved worktree path (paths compared after resolving
-symlinks). The implementation may keep a reverse index (for example `paths/<hash of path>` as a
-symlink to the manifest) or scan the manifests directory; both are small (builder's call).
+symlinks), considering only manifests owned by the invoking user (root sees all). The
+implementation may keep a reverse index (for example `paths/<hash of path>` as a symlink to the
+manifest) or scan the manifests directory; both are small (builder's call).
+
+**The registry is untrusted input.** Every developer in group `hades` can write files into the
+registry directories, so nothing in a manifest is believed without checking it against what the
+file system guarantees (the file's owner, its name, its type):
+
+- A manifest is read only if it is a regular file (no symlinks) and its file name is
+  `<label>.toml` for the label it records; labels are plain names (never a path). A manifest that
+  is misnamed, not a regular file, or fails to parse is skipped and reported as
+  `ignored manifest <path>: <reason>` by `ls`, `gc` and `doctor` (a FAIL for `doctor`), and never
+  stops `up`, `down`, `ls` or `port` for anyone else.
+- Each manifest carries, in memory only, the uid of the file's owner. `down` acts only on the
+  invoking user's manifests; `up` treats a label as taken when a manifest of that label exists
+  that is not the invoking user's or not for this worktree.
+- `gc` (root) releases a manifest only after verifying its claims against the file owner: the
+  recorded `DB_SUFFIX` equals the suffix hades would compute for that owner's login and the
+  recorded name (so a forged manifest can only name its author's own databases), the vhost is
+  either empty or the label, the port link is owned by the same uid and points at the recorded
+  worktree, and the site file is `<label>.caddy`. A manifest that fails verification is reported
+  and left alone. `gc --owner <user>` selects by file owner, never by the `user` field.
+- The `user` and `uid` fields inside a manifest are informational (shown by `ls`), never a basis
+  for a decision.
 
 Ownership rule: `down` acts only on a manifest owned by the invoking user whose worktree path is
 the worktree being torn down. `gc` as root acts on any manifest whose worktree path no longer
@@ -434,8 +467,10 @@ when a hook file exists without hades in it, it prints the lines to add.
   call).
 - `hades caddy-reload` is the one subcommand meant to run as root. It reads every `*.caddy` in
   `sites_dir` (at most 256 bytes each) and validates the bytes against the grammar
-  `^import worktree [a-z0-9.-]+ [0-9]+$` (one line, newline terminated), refusing to continue if
-  any file fails and naming it; then mirrors exactly those validated bytes into the root-owned
+  `^import worktree [a-z0-9.-]+ [0-9]+$` (one line, newline terminated), requires the host of
+  `<label>.caddy` to be exactly `<label>.<domain>` and a regular `manifests/<label>.toml` owned by
+  the same uid as the site file (so a developer can publish only hostnames of worktrees they own),
+  refusing to continue if any file fails and naming it; then mirrors exactly those validated bytes into the root-owned
   `caddy.live_dir` (temp file and rename per site, stale files removed), so a file swapped after
   validation never reaches Caddy; then runs `caddy validate --config <caddy.config>`; then the
   configured reload command. With `--check` it stops after validation and touches nothing. When
