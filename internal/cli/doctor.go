@@ -165,11 +165,17 @@ func runChecks(bg context.Context, ctx *Context) []check {
 
 const skipNoRepo = "skipped: not inside a git worktree"
 
-// repoWorktree resolves the current worktree when the working directory is
-// inside a git worktree. git's own exit status decides that, not its message
-// (which is localized); inRepo is false only when git ran and said no. A git
-// that cannot start, or a resolution failure, is returned as err.
+// repoWorktree resolves the worktree the repo checks look at: the one the
+// flags or the ADE environment name, else the current one when the working
+// directory is inside a git worktree. git's own exit status decides that, not
+// its message (which is localized); inRepo is false only when git ran and
+// said no. A git that cannot start, or a resolution failure, is returned as
+// err.
 func repoWorktree(bg context.Context, ctx *Context, d lifecycle.Deps) (wt wtctx.Context, err error, inRepo bool) {
+	if wtctx.NamesWorktree(wtFlags(ctx.Flags), ctx.Getenv) {
+		wt, err = resolveWorktree(bg, ctx)
+		return wt, err, true
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return wt, err, true

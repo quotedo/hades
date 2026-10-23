@@ -32,23 +32,41 @@ var (
 	orca  = family{"orca", []string{"ORCA_ROOT_PATH"}, "ORCA_WORKTREE_PATH", "ORCA_WORKSPACE_NAME"}
 )
 
+// familiesFor returns the ADE environment families consulted for ade, in
+// order.
+func familiesFor(ade string) []family {
+	switch ade {
+	case "paseo":
+		return []family{paseo}
+	case "orca":
+		return []family{orca}
+	case "wt", "shell":
+		return nil
+	}
+	return []family{paseo, orca}
+}
+
+// NamesWorktree reports whether the flags, or the ADE environment Resolve
+// would consult, give the worktree path, so Resolve does not take it from git
+// in the current directory.
+func NamesWorktree(f Flags, getenv func(string) string) bool {
+	if f.Worktree != "" {
+		return true
+	}
+	for _, fam := range familiesFor(f.ADE) {
+		if getenv(fam.worktreeVar) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // Resolve fills in each value from flags, then Paseo env, then Orca env, then
 // git. Git is consulted only for values still missing.
 func Resolve(ctx context.Context, f Flags, getenv func(string) string, cwd string, run execx.Runner) (Context, error) {
-	var families []family
-	switch f.ADE {
-	case "paseo":
-		families = []family{paseo}
-	case "orca":
-		families = []family{orca}
-	case "wt", "shell":
-	default:
-		families = []family{paseo, orca}
-	}
-
 	c := Context{Root: f.Root, Worktree: f.Worktree, Name: f.Name}
 	used := ""
-	for _, fam := range families {
+	for _, fam := range familiesFor(f.ADE) {
 		fill := func(cur *string, names ...string) {
 			if *cur != "" {
 				return

@@ -21,8 +21,15 @@ func git(t *testing.T, dir string, args ...string) {
 // linked worktree on branch feature/x, returning both paths.
 func TempGitRepoWithWorktree(t *testing.T) (root, worktree string) {
 	t.Helper()
+	return TempGitRepo(t, "root", "feature/x")
+}
+
+// TempGitRepo creates a repository in <tmp>/<rootName> with one commit on main
+// and a linked worktree <tmp>/wt on the given branch, returning both paths.
+func TempGitRepo(t *testing.T, rootName, branch string) (root, worktree string) {
+	t.Helper()
 	tmp := t.TempDir()
-	root = filepath.Join(tmp, "root")
+	root = filepath.Join(tmp, rootName)
 	worktree = filepath.Join(tmp, "wt")
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
@@ -30,7 +37,7 @@ func TempGitRepoWithWorktree(t *testing.T) (root, worktree string) {
 	git(t, root, "init", "-b", "main")
 	git(t, root, "-c", "user.name=hades-test", "-c", "user.email=hades@test",
 		"commit", "--allow-empty", "-m", "init")
-	git(t, root, "worktree", "add", worktree, "-b", "feature/x")
+	git(t, root, "worktree", "add", worktree, "-b", branch)
 	return root, worktree
 }
 

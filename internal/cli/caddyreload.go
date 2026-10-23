@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	"github.com/quotedo/hades/internal/caddy"
@@ -67,7 +68,14 @@ func caddyReload(ctx *Context, args []string) int {
 		fmt.Fprintln(ctx.Stderr, "caddy-reload: no host config; nothing to reload")
 		return 1
 	}
-	if err := caddy.Reload(context.Background(), host.Caddy, host.SitesDir, *check, &execx.Real{}); err != nil {
+	// As root the commands search only caddy's fixed PATH. A non-root run
+	// escalates nothing, so it finds caddy and the reload command on the
+	// caller's PATH first, as every other hades command does.
+	run := &execx.Real{}
+	if os.Geteuid() != 0 {
+		run.Prepend = filepath.SplitList(ctx.Getenv("PATH"))
+	}
+	if err := caddy.Reload(context.Background(), host.Caddy, host.SitesDir, *check, run); err != nil {
 		fmt.Fprintf(ctx.Stderr, "caddy-reload: %v\n", err)
 		return 1
 	}

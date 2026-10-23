@@ -1,0 +1,4 @@
+%{
+  "phoenix": {:hex, :phoenix, "1.8.0", []},
+  "tidewave": {:hex, :tidewave, "0.1.0", []},
+}

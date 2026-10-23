@@ -81,8 +81,11 @@ func resolveWorktree(bg context.Context, ctx *Context) (wtctx.Context, error) {
 	if err != nil {
 		return wtctx.Context{}, err
 	}
-	g := ctx.Flags
-	return wtctx.Resolve(bg, wtctx.Flags{Root: g.Root, Worktree: g.Worktree, Name: g.Name, ADE: g.ADE}, ctx.Getenv, cwd, &execx.Real{})
+	return wtctx.Resolve(bg, wtFlags(ctx.Flags), ctx.Getenv, cwd, &execx.Real{})
+}
+
+func wtFlags(g Globals) wtctx.Flags {
+	return wtctx.Flags{Root: g.Root, Worktree: g.Worktree, Name: g.Name, ADE: g.ADE}
 }
 
 // newDeps builds the lifecycle dependencies from the current user and the

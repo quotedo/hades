@@ -20,8 +20,9 @@ import (
 
 // serverFixture writes a server host config under a temp dir and returns the
 // registry, a getenv pointing at it (HADES_BIN at a stub that accepts
-// `caddy-reload --check`) and the state directory. Postgres points at a closed
-// port, so the postgres check fails fast. extra is appended to the host config.
+// `caddy-reload --check`) and the state directory. Caddy's live directory is
+// <state>/live. Postgres points at a closed port, so the postgres check fails
+// fast. extra is appended to the host config.
 func serverFixture(t *testing.T, extra string) (*registry.Registry, func(string) string, string) {
 	t.Helper()
 	state := t.TempDir()
@@ -34,7 +35,7 @@ func serverFixture(t *testing.T, extra string) (*registry.Registry, func(string)
 	testutil.StubTool(t, bin, "sudo", "#!/bin/bash\nshift\nexec \"$@\"\n")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	for _, d := range []string{"ports", "sites", "manifests"} {
+	for _, d := range []string{"ports", "sites", "manifests", "live"} {
 		if err := os.Mkdir(filepath.Join(state, d), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -47,8 +48,8 @@ sites_dir = "` + filepath.Join(state, "sites") + `"
 manifests_dir = "` + filepath.Join(state, "manifests") + `"
 [caddy]
 config = "/etc/caddy/Caddyfile"
-live_dir = "/etc/caddy/worktrees"
-reload = ["caddy", "reload"]
+live_dir = "` + filepath.Join(state, "live") + `"
+reload = ["systemctl", "reload", "caddy"]
 [postgres]
 host = "127.0.0.1"
 port = 1

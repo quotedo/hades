@@ -68,3 +68,26 @@ func TestResolveDetachedHeadFallsBackToBase(t *testing.T) {
 		t.Fatalf("%+v", c)
 	}
 }
+
+func TestNamesWorktree(t *testing.T) {
+	env := map[string]string{"PASEO_WORKTREE_PATH": "/p/wt"}
+	paseoEnv := func(k string) string { return env[k] }
+	none := func(string) string { return "" }
+	for _, tc := range []struct {
+		f      wtctx.Flags
+		getenv func(string) string
+		want   bool
+	}{
+		{wtctx.Flags{}, none, false},
+		{wtctx.Flags{Worktree: "/f/wt"}, none, true},
+		{wtctx.Flags{}, paseoEnv, true},
+		{wtctx.Flags{ADE: "paseo"}, paseoEnv, true},
+		{wtctx.Flags{ADE: "orca"}, paseoEnv, false},
+		{wtctx.Flags{ADE: "shell"}, paseoEnv, false},
+		{wtctx.Flags{Root: "/r", Name: "n"}, none, false},
+	} {
+		if got := wtctx.NamesWorktree(tc.f, tc.getenv); got != tc.want {
+			t.Errorf("NamesWorktree(%+v) = %v, want %v", tc.f, got, tc.want)
+		}
+	}
+}
