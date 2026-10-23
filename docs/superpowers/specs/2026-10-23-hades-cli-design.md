@@ -168,7 +168,8 @@ hades down      [--strict]                       tear it down (best effort, exit
 hades ls        [--mine] [--json]                 worktrees known on this machine
 hades status    [--json]                          host summary: config, services, ports used/free
 hades doctor    [--json]                          what is misconfigured, exit 1 if anything is
-hades gc        [--dry-run]                       clean up worktrees that vanished (root on servers)
+hades gc        [--dry-run] [--owner <user>]      clean up worktrees that vanished (root on servers);
+                                                   --owner releases everything that user owns (offboarding)
 hades init      [--ade paseo,orca,wt] [--force]   write hades.toml and ADE hook files into a repo
 hades env       [--shell|--json]                  print the worktree's hades environment
 hades port                                         print the worktree's port (for ADE port scripts)
@@ -363,8 +364,10 @@ symlink to the manifest) or scan the manifests directory; both are small (builde
 Ownership rule: `down` acts only on a manifest owned by the invoking user whose worktree path is
 the worktree being torn down. `gc` as root acts on any manifest whose worktree path no longer
 exists, and on `ports/` links whose target no longer exists, releasing exactly what the manifest
-lists, then reloads Caddy once. `gc` never touches a manifest whose worktree still exists. `ls`
-reads all manifests; `--mine` filters by user.
+lists, then reloads Caddy once. `gc` never touches a manifest whose worktree still exists, with
+one exception: `gc --owner <user>`, root only, releases every manifest of that user whether or not
+the worktree exists, for offboarding by the server playbook. `ls` reads all manifests; `--mine`
+filters by user.
 
 Laptop mode uses the same files under `~/.local/state/hades/`.
 

@@ -1,6 +1,7 @@
 # Hades server: turning a Linux box into a dev server for ADEs
 
-Status: draft (2026-10-23), awaiting builder check and Roman's approval. Companion of the CLI design
+Status: revised after the builder check (2026-10-23); Roman approved continuing to plans and
+implementation the same day. Companion of the CLI design
 (`2026-10-23-hades-cli-design.md`). Ported and generalised from the GymNation infra design
 `2026-10-20-tokyo-dev-server-design.md`, which Roman approved on 2026-10-20 and which becomes a thin
 site document once this is approved. Decisions marked "(builder's call)" are mine.
@@ -141,7 +142,8 @@ terminals, agents, builds) live in their `user-<uid>.slice`. Dev system services
 | each dev user's slice | `MemoryHigh=88G MemoryMax=96G MemorySwapMax=2G CPUWeight=900 TasksMax=infinity` |
 | `hades.slice` (dev Postgres, shared services, Caddy, cloudflared) | `MemoryMax=16G CPUWeight=300` |
 | protected floor (`system.slice`) | `MemoryLow=10G CPUWeight=300`; `user.slice CPUWeight=700` |
-| capped users (inventory list, e.g. CI runner accounts) | `CPUWeight=100 MemoryMax=6G` each |
+| capped users (inventory list, e.g. CI runner accounts running as user services) | `CPUWeight=100 MemoryMax=6G` each, as `user-<uid>.slice` drop-ins |
+| capped units (inventory list of system units, for runners installed as system services) | same values, as drop-ins on the named units |
 | Orca terminals (if Orca enabled) | `ORCA_TERMINAL_MEMORY_MAX=28G`, swap 0 |
 
 Plus `vm.swappiness=10`, governor `performance` when the host exposes one,
@@ -220,10 +222,23 @@ weekly root timer running `hades gc`, and `/usr/local/bin/hades-status` for the 
 A dedicated cluster (`pg_createcluster <major> dev`) on `127.0.0.1:<dev_pg_port>` (5433 by
 default), under `hades.slice`, tuned for throwaway data: `fsync=off`, `synchronous_commit=off`,
 `full_page_writes=off`, `shared_buffers`, `work_mem`, `max_connections=1000`, `max_wal_size=4GB`,
-`log_min_messages=warning` from inventory. Role `postgres`/`postgres` (dev convention, documented
-in `host.toml`), `pg_hba` scram on loopback only. Dev users may create and drop databases; names
-carry hades' per-user suffix so users do not collide. A pre-existing Postgres on the box is a
-protected workload: an owner-match firewall rule rejects TCP from gid `hades` to
+`log_min_messages=warning` from inventory.
+
+The cluster runs as its **own OS user** `hades-postgres` (`pg_createcluster --user`), not as the
+distribution's `postgres` user. The login role is `postgres`/`postgres`, a superuser of this
+cluster only (dev convention; jarl, pops and stock Phoenix configs use it). Superuser is required
+because projects create extensions Postgres does not mark trusted: jarl's migrations need
+`postgis` (plus `citext`, `pg_trgm`, `unaccent`, which are trusted). What a superuser can do beyond
+SQL, read files and run programs as the cluster's OS user, is therefore confined to
+`hades-postgres`, which owns nothing but this cluster and can read neither dev homes (0750) nor a
+protected cluster's data (0700, owned by `postgres`). Accepted residual: developers on one box
+share the role, so an agent could drop or read a colleague's dev databases; dev data is
+reproducible and the people are colleagues. Per-user roles become possible when no project on the
+box needs an untrusted extension (builder's call to leave that as an inventory switch, not built).
+
+`pg_hba`: scram on loopback only. Dev users may create and drop databases; names carry hades'
+per-user suffix so users do not collide. A pre-existing Postgres on the box is a protected
+workload: the loopback isolation rules (6.12) reject TCP from gid `hades` to
 `dev_group_blocked_ports` (e.g. 5432) on every local address, including Docker bridge addresses
 discovered at run time.
 
@@ -248,18 +263,32 @@ listening on `127.0.0.1:<caddy_port>`, importing `/srv/hades/sites/*.caddy` (one
 Cloudflare Access application on `*` of the zone for paths `dev`, `dev/*`, `tidewave`,
 `tidewave/*` with the developers' email or domain policy, so the people on the box reach
 `/dev/mailbox` or Tidewave Web from any device after one login per hostname while everything else
-stays public. Caddy additionally requires the `Cf-Access-Jwt-Assertion` header on those paths as a
-tripwire; the tunnel-only origin is the real boundary. Wildcard DNS over per-worktree records
-because it needs no API token on the box and nothing to clean up; a per-record mode stays an
-inventory switch that is not built now.
+stays public. `/phoenix/live_reload/*` is gated the same way rather than refused, so a developer
+browsing the public URL keeps live reload while anonymous clients get nothing. Caddy additionally
+requires the `Cf-Access-Jwt-Assertion` header on those paths as a tripwire, by presence only; the
+tunnel-only origin plus the loopback isolation of 6.12 are the real boundary, so stock Caddy from
+apt is enough and no JWT validation module is needed. `cloudflare_team_domain` is optional and used
+only by `verify.yml`, which expects an anonymous request to a gated path to redirect to that team
+domain; no audience tag is needed anywhere.
+
+Zone constraint: wildcard mode needs a zone whose wildcard record is dedicated to this server, and
+whose other hostnames tolerate the Access gating of `/dev*`, `/tidewave*` and
+`/phoenix/live_reload*` (the Access application applies zone-wide). On tokyo that is `romanc.io`:
+its other hostnames (the apex, the hex registry) have no such paths. Two servers cannot share one
+zone's wildcard, and a production zone should not carry this gating, so each company server gets a
+dedicated, cheap domain of its own (builder's call; Roman decides the names). Wildcard DNS over
+per-worktree records because it needs no API token on the box and nothing to clean up; a
+per-record mode for shared zones stays an inventory switch that is not built now.
 
 ### 6.9 Protected workloads (optional role, inventory `protected`)
 
 For a box that already runs something: the `system.slice` floor and `user.slice` weight from 6.2;
-`capped_users` drop-ins (e.g. CI runner accounts); `dev_group_blocked_ports` (6.6);
-`private_homes` (home directories made 0750 so dev users cannot read them). Anything beyond that
-(on tokyo: shrinking the existing Postgres cluster's `shared_buffers`) is a site task in the
-caller's repository, not in hades.
+`capped_users` and `capped_units` drop-ins (on tokyo the six GitHub runner accounts are lingering
+user sessions running the runner as a user service, verified 2026-10-23, so `capped_users` is the
+right one there; runners installed as system services take `capped_units`);
+`dev_group_blocked_ports` (6.6); `private_homes` (home directories made 0750 so dev users cannot
+read them). Anything beyond that (on tokyo: shrinking the existing Postgres cluster's
+`shared_buffers`) is a site task in the caller's repository, not in hades.
 
 ### 6.10 Ops
 
@@ -268,10 +297,36 @@ caller's repository, not in hades.
   and agent logins (`~/.claude`, `~/.codex`, `~/.config/gh`) to `backup_dir`, keep 7. Dev data is
   reproducible; this is insurance against an accidental `rm`.
 - `hades-status`: slice memory and CPU pressure, live worktrees with ports and URLs (from
-  `hades ls --json`), dev Postgres connection count, last OOM kills from the journal. It answers
-  "why did my test die".
+  `hades ls --json`), dev Postgres connection count, last OOM kills from the journal, filesystem
+  usage with the largest dev homes. It answers "why did my test die" and "who is filling the disk".
 - `hades-ade-update <ade>` per user (6.3).
+- Disk space is an accepted risk in version 1: homes, the dev cluster and Docker share the root
+  filesystem, and per-user quotas would mean fstab changes and remounts on a live box with
+  protected workloads. The playbook caps what it can without that (journald size, Docker log
+  rotation) and `hades-status` makes the rest visible. Quotas are a later option behind an
+  inventory switch, not built.
+- Offboarding: a user with `state: absent` in `dev_users` is converged away: their ADE units are
+  stopped and disabled, `hades gc --owner <user>` (root) releases every manifest they own
+  (databases, vhosts, sites, ports), linger is disabled and their processes killed, the home is
+  tarred into `backup_dir` once, then the account and home are removed. Users are never inferred
+  from group membership; only inventory says who exists.
 - `unattended-upgrades` left as is; reboots are manual; everything returns on boot.
+
+### 6.12 Loopback isolation
+
+Loopback is not private on a shared box: every local account, CI runner users included, can open
+`127.0.0.1:<port>`. A worktree's port carries Tidewave, which runs code as that developer; Caddy
+on loopback would accept a forged tripwire header; the dev Postgres password is known. So the
+`host` role installs an owner-match rule set (nftables, or iptables under ufw where that is what
+the box runs; builder's call) rejecting TCP to the dev port set from any uid outside the allowed
+set, on every local address: the set is `port_range`, the dev Postgres port, the shared services'
+ports, the Caddy port and every ADE daemon port; allowed are uids in group `hades`, root, and the
+service accounts that must reach those ports (`caddy`, `cloudflared`, `hades-postgres`). The same
+mechanism carries `dev_group_blocked_ports` (6.6). Accepted residual for version 1: developers on
+the same box can reach each other's loopback apps and Tidewave, because group-level rules cannot
+tell them apart and the CLI writes no firewall rules. The documented extension is one loopback
+address per developer (inventory-driven static rules, `hades up` exporting a bind address); it is
+an inventory switch that is not built now.
 
 ### 6.11 Provisioning layout
 
@@ -279,7 +334,7 @@ The repository ships an Ansible collection under `ansible/` (installable with `a
 collection install git+https://github.com/quotedo/hades.git#/ansible/`), with roles:
 
 - `host`: packages, sysctl, governor, slices, group and registry, hades binary and host config,
-  sudoers, direnv, Chrome, gc and backup timers, status script;
+  sudoers, loopback isolation rules, direnv, Chrome, gc and backup timers, status script;
 - `postgres`: the dev cluster;
 - `services`: the compose stack;
 - `ingress`: Caddy, cloudflared, Access expectations, optional Tailscale;
@@ -309,13 +364,13 @@ dev_servers:
       ansible_user: <sudo user>
       hades_domain: <domain>
       hades_label_template: "{{project}}-{{name}}"      # shared boxes: "{{project}}-{{user}}-{{name}}"
-      cloudflare_team_domain: <team>.cloudflareaccess.com
-      cloudflare_access_aud: <aud>
+      cloudflare_team_domain: <team>.cloudflareaccess.com     # optional, verify only
       dev_services: [rabbitmq, localstack]
-      protected: { floor: true, capped_users: [...], blocked_ports: [5432], private_homes: [...] }
+      protected: { floor: true, capped_users: [...], capped_units: [...], blocked_ports: [5432],
+                   private_homes: [...] }
       dev_users:
-        - { name: roman, uid: 2001, ssh_keys: [...], ades: [paseo, orca], paseo_port: 6767,
-            orca_port: 6768, gpg_key: true, repos: [...] }
+        - { name: roman, uid: 2001, state: present, ssh_keys: [...], ades: [paseo, orca],
+            paseo_port: 6767, orca_port: 6768, gpg_key: true, repos: [...] }
 ```
 
 Secrets (`CLOUDFLARE_TUNNEL_TOKEN`, hex repository keys) come only from the operator's
@@ -342,7 +397,12 @@ environment; `.env.example` names them.
    slices; dev Postgres never refuses a connection.
 6. Isolation from a dev user's shell: `docker ps` fails; TCP to each blocked port is refused on
    loopback, bridge, and public addresses; private homes are unreadable; ADE ports are not
-   reachable from the public address.
+   reachable from the public address. From a non-dev local account (a capped user or a throwaway
+   test user): TCP to a worktree port, the dev Postgres port, the Caddy port and an ADE port is
+   refused.
+7. Offboarding: setting a test user to `state: absent` and re-running the playbook leaves no
+   account, home, unit, manifest, database, site or port of theirs, and one archive in
+   `backup_dir`.
 
 ## 8. Left to the builder
 
