@@ -77,6 +77,7 @@ type upRun struct {
 	preset     preset.Preset
 	project    string
 	label      string
+	vhost      string             // the vhost this run asks for; the manifest may also record an earlier one
 	noRegistry bool               // dry run on a laptop whose registry does not exist yet
 	existing   *registry.Manifest // this worktree's manifest from an earlier up
 	m          *registry.Manifest
@@ -226,8 +227,13 @@ func (u *upRun) identify() error {
 		}
 	}
 
-	u.project = u.cfg.Project
-	if u.project == "" {
+	if p := u.cfg.Project; p != "" {
+		slug, err := naming.Slug(p)
+		if err != nil {
+			return fmt.Errorf("project %q in hades.toml: %w", p, err)
+		}
+		u.project = slug
+	} else {
 		slug, err := naming.Slug(filepath.Base(c.Root))
 		if err != nil {
 			return fmt.Errorf("project name from %s: %w", c.Root, err)
@@ -271,10 +277,10 @@ func (u *upRun) plan() {
 		bases = []string{u.preset.AppName + "_dev", u.preset.AppName + "_test"}
 	}
 
-	vhost := ""
+	u.vhost = ""
 	if u.cfg.Services.RabbitMQ.Vhost {
 		if d.Rabbit != nil {
-			vhost = label
+			u.vhost = label
 		} else {
 			fmt.Fprintln(d.Log, "up: vhost requested but this host has no rabbitmq; skipping")
 		}
@@ -293,13 +299,31 @@ func (u *upRun) plan() {
 		Preset:       string(u.preset.Kind),
 		DBSuffix:     naming.Suffix(d.User.Name, naming.Sanitize(c.Name)),
 		DBBases:      bases,
-		Vhost:        vhost,
+		Vhost:        u.vhost,
 		ADE:          c.ADE,
 	}
 	if e := u.existing; e != nil {
-		// A rename must not orphan the databases created under the old suffix.
+		// A rename must not orphan the databases created under the old suffix,
+		// and a config change must not orphan the databases or the vhost an
+		// earlier run created: the bases only grow, and a recorded vhost stays
+		// recorded (so down deletes it) even when no longer asked for.
 		u.m.CreatedAt, u.m.Name, u.m.DBSuffix = e.CreatedAt, e.Name, e.DBSuffix
+		u.m.DBBases = union(e.DBBases, bases)
+		if u.m.Vhost == "" {
+			u.m.Vhost = e.Vhost
+		}
 	}
+}
+
+// union returns a followed by the elements of b not in a, without duplicates.
+func union(a, b []string) []string {
+	var out []string
+	for _, s := range append(slices.Clone(a), b...) {
+		if !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // checkOwned fails unless m's file is owned by this user and m records this
@@ -446,7 +470,7 @@ func (u *upRun) computeEnv() (*undo, error) {
 		User:           u.d.User.Name,
 		Preset:         u.preset,
 		HostCfg:        *u.d.Host,
-		Vhost:          u.m.Vhost,
+		Vhost:          u.vhost,
 		Extra:          u.cfg.Env,
 		ExistingSecret: prev["SECRET_KEY_BASE"],
 	})
@@ -505,7 +529,7 @@ func (u *upRun) revealSecrets() (*undo, error) {
 // ensureVhost is step 7. Only a vhost this run asked for first is deleted on
 // rollback; one an earlier up created stays.
 func (u *upRun) ensureVhost() (*undo, error) {
-	vhost := u.m.Vhost
+	vhost := u.vhost
 	if vhost == "" {
 		return nil, nil
 	}

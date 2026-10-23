@@ -79,18 +79,37 @@ func TestDownBestEffortAndStrict(t *testing.T) {
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	d.PG.(*fakePG).failDrop = true
 	d.PG.(*fakePG).names = []string{"demo_dev_roman_feature_x"}
+	var log bytes.Buffer
+	d.Log = &log
 	res, err := Down(context.Background(), d, c, false)
 	if err != nil {
 		t.Fatal("best effort must not error")
 	}
-	if all, _, _ := d.Reg.All(); len(all) != 0 {
-		t.Fatal("manifest should still be removed")
+	// The other steps still ran, but the manifest stays as the record of the
+	// databases that are left, for ls to show and gc to retry.
+	if _, err := d.Reg.PortOwner(4100); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("port left")
 	}
-	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
+	if all, _, _ := d.Reg.All(); len(all) != 1 {
+		t.Fatal("manifest removed although a step failed")
+	}
+	if r := res[len(res)-1]; r.Step != "manifest" || !r.Skipped || r.Reason != "kept (failed: databases); gc will retry" {
+		t.Fatalf("%+v", res)
+	}
+	if !strings.Contains(log.String(), "down: manifest kept (failed: databases); gc will retry\n") {
+		t.Fatal(log.String())
+	}
+	// A strict down fails; once the cause is fixed a plain down finishes.
 	if _, err := Down(context.Background(), d, c, true); err == nil {
 		t.Fatal("strict must error")
 	}
-	_ = res
+	d.PG.(*fakePG).failDrop = false
+	if res, err := Down(context.Background(), d, c, true); err != nil {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if all, _, _ := d.Reg.All(); len(all) != 0 {
+		t.Fatal("manifest left after a successful down")
+	}
 }
 
 func TestGCReleasesVanishedWorktreesAndOwner(t *testing.T) {
@@ -206,11 +225,11 @@ func TestDownTeardownFailureIsReportedAndOthersStillRun(t *testing.T) {
 	if !hasCall(argvs(d.Run.(*execx.Fake)), "sh -c echo after") {
 		t.Fatal("later teardown command did not run")
 	}
-	if !strings.Contains(log.String(), "down: failed teardown: ") {
+	if !strings.Contains(log.String(), "down: failed teardown: ") || !strings.Contains(log.String(), "down: manifest kept (failed: teardown)") {
 		t.Fatal(log.String())
 	}
-	if all, _, _ := d.Reg.All(); len(all) != 0 {
-		t.Fatal("manifest left")
+	if all, _, _ := d.Reg.All(); len(all) != 1 {
+		t.Fatal("manifest removed although teardown failed")
 	}
 }
 
@@ -443,18 +462,34 @@ func TestGCReportsStepErrorsAndCarriesOn(t *testing.T) {
 	mustUp(t, d2, c2)
 	d.PG.(*fakePG).names = []string{"demo_dev_roman_feature_x"}
 	d.PG.(*fakePG).failDrop = true
-	if err := os.RemoveAll(c.Worktree); err != nil {
-		t.Fatal(err)
+	for _, wt := range []string{c.Worktree, c2.Worktree} {
+		if err := os.RemoveAll(wt); err != nil {
+			t.Fatal(err)
+		}
 	}
+	var log bytes.Buffer
+	d.Log = &log
 	rep, err := GC(context.Background(), d, "", false)
-	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 1 {
+	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-y"}) || len(rep.Errors) != 1 {
 		t.Fatalf("%+v %v", rep, err)
 	}
 	if msg := rep.Errors[0].Error(); !strings.Contains(msg, "demo-feature-x") || !strings.Contains(msg, "databases") {
 		t.Fatal(msg)
 	}
-	if all, _, _ := d.Reg.All(); len(all) != 1 || all[0].Label != "demo-feature-y" {
-		t.Fatal("released the wrong manifests")
+	if !strings.Contains(log.String(), "gc: demo-feature-x: manifest kept (failed: databases)") {
+		t.Fatal(log.String())
+	}
+	if all, _, _ := d.Reg.All(); len(all) != 1 || all[0].Label != "demo-feature-x" {
+		t.Fatal("the failed manifest must stay for the next gc")
+	}
+	// The next gc retries, and finds the port already released.
+	d.PG.(*fakePG).failDrop = false
+	rep, err = GC(context.Background(), d, "", false)
+	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 0 {
+		t.Fatalf("retry: %+v %v", rep, err)
+	}
+	if !reflect.DeepEqual(d.PG.(*fakePG).dropped, []string{"demo_dev_roman_feature_x"}) {
+		t.Fatal(d.PG.(*fakePG).dropped)
 	}
 }
 
@@ -475,5 +510,24 @@ func TestGCOnLaptopLeavesOtherUsersManifests(t *testing.T) {
 	all, _, _ := d.Reg.All()
 	if !slices.ContainsFunc(all, func(m *registry.Manifest) bool { return m.User == "other" }) {
 		t.Fatal("released another user's manifest")
+	}
+}
+
+// A port link that is already gone is a skip, so it cannot keep the manifest.
+func TestDownMissingPortLinkIsASkip(t *testing.T) {
+	d, c := newServerDeps(t, "phoenix")
+	mustUp(t, d, c)
+	if err := os.Remove(filepath.Join(d.Reg.PortsDir, "4100")); err != nil {
+		t.Fatal(err)
+	}
+	res, err := Down(context.Background(), d, c, true)
+	if err != nil {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if r, ok := findStep(res, "port"); !ok || !r.Skipped || r.Reason != "port link 4100 is already gone" {
+		t.Fatalf("%+v", res)
+	}
+	if all, _, _ := d.Reg.All(); len(all) != 0 {
+		t.Fatal("manifest left")
 	}
 }

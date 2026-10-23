@@ -254,17 +254,32 @@ func TestEndToEndUpThenDown(t *testing.T) {
 		t.Fatalf("down: code=%d\n%s", code, h.stderr)
 	}
 	// There is no Postgres here, so dropping the databases is the one step
-	// that may fail; the site, port and manifest must all go.
-	for _, line := range strings.Split(h.stderr, "\n") {
-		if strings.HasPrefix(line, "down: failed ") && !strings.HasPrefix(line, "down: failed databases: ") {
+	// that may fail; the site and port must go, and the manifest goes too
+	// unless that step failed, in which case it stays for gc to retry.
+	downErr, dbFailed := h.stderr, false
+	for _, line := range strings.Split(downErr, "\n") {
+		if strings.HasPrefix(line, "down: failed databases: ") {
+			dbFailed = true
+		} else if strings.HasPrefix(line, "down: failed ") {
 			t.Fatalf("down: %s\n%s", line, h.stderr)
 		}
 	}
 	assertGone(t, filepath.Join(h.sitesDir, "demo-feature-e2e.caddy"))
 	assertGone(t, filepath.Join(h.live, "demo-feature-e2e.caddy"))
 	assertGone(t, filepath.Join(h.reg.PortsDir, "4100"))
-	if code := h.run("ls", "--json"); code != 0 || strings.TrimSpace(h.stdout) != "[]" {
-		t.Fatalf("ls after down: code=%d out=%q err=%q", code, h.stdout, h.stderr)
+	if code := h.run("ls", "--json"); code != 0 {
+		t.Fatalf("ls after down: code=%d err=%q", code, h.stderr)
+	}
+	listed = nil
+	if err := json.Unmarshal([]byte(h.stdout), &listed); err != nil {
+		t.Fatalf("ls --json after down: %v: %s", err, h.stdout)
+	}
+	if dbFailed {
+		if !strings.Contains(downErr, "down: manifest kept (failed: databases); gc will retry\n") || len(listed) != 1 || listed[0].Label != "demo-feature-e2e" {
+			t.Fatalf("manifest not kept after a failed step: %s\n%s", h.stdout, downErr)
+		}
+	} else if len(listed) != 0 {
+		t.Fatalf("manifest left after a clean down: %s", h.stdout)
 	}
 }
 

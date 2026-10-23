@@ -110,7 +110,7 @@ func TestGCIgnoresTraversalLabel(t *testing.T) {
 	// The same label in memory is refused by every release step that would
 	// build a path from it.
 	m := &registry.Manifest{Label: "../victim"}
-	if res, _ := release(context.Background(), d, m, false); len(res) == 0 {
+	if res, _, _ := release(context.Background(), d, m, false, nil); len(res) == 0 {
 		t.Fatal("no results")
 	} else {
 		for _, r := range res {

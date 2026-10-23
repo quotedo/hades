@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/quotedo/hades/internal/caddy"
 	"github.com/quotedo/hades/internal/config"
@@ -81,7 +82,7 @@ func GC(ctx context.Context, d Deps, owner string, dryRun bool) (GCReport, error
 			rep.Released = append(rep.Released, m.Label)
 			continue
 		}
-		res, siteRemoved := release(ctx, d, m, false)
+		res, siteRemoved, kept := release(ctx, d, m, false, nil)
 		reload = reload || siteRemoved
 		removed := false
 		for _, r := range res {
@@ -93,6 +94,9 @@ func GC(ctx context.Context, d Deps, owner string, dryRun bool) (GCReport, error
 			case r.Step == "manifest":
 				removed = true
 			}
+		}
+		if len(kept) > 0 {
+			fmt.Fprintf(d.Log, "gc: %s: manifest kept (failed: %s); the next gc retries\n", m.Label, strings.Join(kept, ", "))
 		}
 		if removed {
 			rep.Released = append(rep.Released, m.Label)

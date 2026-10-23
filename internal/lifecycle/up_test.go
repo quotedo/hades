@@ -385,3 +385,82 @@ func TestUpNonePresetTouchesNoRegistry(t *testing.T) {
 		t.Fatal("registry created for none")
 	}
 }
+
+// A re-run after a config change keeps what earlier runs recorded: the bases
+// only grow and a vhost no longer asked for stays recorded, so down still
+// releases everything the first run created.
+func TestUpRerunKeepsRecordedBasesAndVhost(t *testing.T) {
+	d, c := newServerDeps(t, "phoenix")
+	rmq := &fakeRabbit{}
+	d.Rabbit = rmq
+	d.Host.RabbitMQ = &config.RabbitMQ{AMQPURL: "amqp://u:p@127.0.0.1:5672"}
+	writeFile(t, filepath.Join(c.Root, "hades.toml"), "project = \"demo\"\n[services.rabbitmq]\nvhost = true\n")
+	mustUp(t, d, c)
+
+	writeFile(t, filepath.Join(c.Worktree, "hades.toml"), "databases = [\"only_this\", \"demo_test\"]\n[services.rabbitmq]\nvhost = false\n")
+	out, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := d.Reg.ByLabel("demo-feature-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"demo_dev", "demo_test", "only_this"}; !reflect.DeepEqual(m.DBBases, want) || !reflect.DeepEqual(out.Manifest.DBBases, want) {
+		t.Fatalf("bases %v, want %v", m.DBBases, want)
+	}
+	if m.Vhost != "demo-feature-x" {
+		t.Fatalf("vhost %q", m.Vhost)
+	}
+	// Not asked for any more: not ensured again and not in the environment.
+	if len(rmq.ensured) != 1 || toMap(out.Env)["RABBITMQ_VHOST"] != "" {
+		t.Fatalf("ensured %v env %v", rmq.ensured, toMap(out.Env))
+	}
+
+	d.PG.(*fakePG).names = []string{"demo_dev_roman_feature_x", "only_this_roman_feature_x"}
+	if _, err := Down(context.Background(), d, c, true); err != nil {
+		t.Fatal(err)
+	}
+	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_roman_feature_x", "only_this_roman_feature_x"}) {
+		t.Fatal(got)
+	}
+	if !reflect.DeepEqual(rmq.deleted, []string{"demo-feature-x"}) {
+		t.Fatal(rmq.deleted)
+	}
+}
+
+func TestUnion(t *testing.T) {
+	if got := union([]string{"a", "b"}, []string{"c", "a", "c"}); !reflect.DeepEqual(got, []string{"a", "b", "c"}) {
+		t.Fatal(got)
+	}
+	if got := union(nil, nil); len(got) != 0 {
+		t.Fatal(got)
+	}
+}
+
+// project from hades.toml is a slug like the directory-derived one.
+func TestUpProjectFromConfigIsSlugged(t *testing.T) {
+	d, c := newServerDeps(t, "phoenix")
+	writeFile(t, filepath.Join(c.Root, "hades.toml"), "project = \"My Demo App\"\n[env]\nP = \"{{project}}\"\n")
+	out, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Manifest.Project != "my-demo-app" || out.Manifest.Label != "my-demo-app-feature-x" || toMap(out.Env)["P"] != "my-demo-app" {
+		t.Fatalf("%+v %v", out.Manifest, toMap(out.Env))
+	}
+
+	d2, c2 := newServerDeps(t, "phoenix")
+	long := "My Very Long Project Name That Exceeds Thirty Characters!!"
+	writeFile(t, filepath.Join(c2.Root, "hades.toml"), "project = \""+long+"\"\n")
+	if _, err := Up(context.Background(), d2, c2, UpOptions{SkipSetup: true}); err == nil || !strings.Contains(err.Error(), long) || !strings.Contains(err.Error(), "30 characters") {
+		t.Fatal(err)
+	}
+	if all, _, _ := d2.Reg.All(); len(all) != 0 {
+		t.Fatal("claimed something for an invalid project")
+	}
+	writeFile(t, filepath.Join(c2.Root, "hades.toml"), "project = \"!!!\"\n")
+	if _, err := Up(context.Background(), d2, c2, UpOptions{SkipSetup: true}); err == nil || !strings.Contains(err.Error(), `"!!!"`) {
+		t.Fatal(err)
+	}
+}
