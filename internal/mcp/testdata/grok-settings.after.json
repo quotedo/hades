@@ -1,0 +1,17 @@
+{
+  "mcpServers": [
+    {
+      "name": "other",
+      "transport": {
+        "type": "stdio"
+      }
+    },
+    {
+      "name": "tidewave",
+      "transport": {
+        "type": "http",
+        "url": "http://localhost:4100/tidewave/mcp"
+      }
+    }
+  ]
+}

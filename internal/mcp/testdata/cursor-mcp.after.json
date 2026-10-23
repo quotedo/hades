@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "other": {
+      "command": "x"
+    },
+    "tidewave": {
+      "url": "http://localhost:4100/tidewave/mcp"
+    }
+  }
+}

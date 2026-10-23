@@ -1,0 +1,13 @@
+{
+  "worktree": {
+    "setup": [
+      "hades up"
+    ],
+    "teardown": [
+      "hades down"
+    ],
+    "servicePorts": {
+      "portScript": "hades-port"
+    }
+  }
+}

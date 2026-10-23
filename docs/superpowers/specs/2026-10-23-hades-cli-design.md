@@ -93,8 +93,10 @@ Even if everything technically works, it has failed if:
 
 ### What the host provides (installed by infra, not by hades)
 
-- Caddy on loopback with a `(worktree)` snippet and an include of `<sites_dir>/*.caddy`; each site
-  file is exactly one line `import worktree <host> <port>`.
+- Caddy on loopback with a `(worktree)` snippet and an include of `<caddy.live_dir>/*.caddy`, a
+  root-owned directory that only `hades caddy-reload` writes; the developer-writable
+  `<sites_dir>` is the staging area it validates and mirrors from. Each site file is exactly one
+  line `import worktree <host> <port>`.
 - A sudoers rule letting group `hades` run exactly `/usr/local/bin/hades caddy-reload` (and its
   `--check` form) as root without a password. The reload step is a hades subcommand (section 6.8),
   so the grammar that validates site files is the same code that writes them, tested in this
@@ -195,7 +197,8 @@ a value wins, per value:
 
 The name is sanitised to a hostname fragment: lower-cased, every run outside `[a-z0-9]` becomes one
 `-`, leading and trailing `-` stripped. The project slug comes from `hades.toml` `project`, else
-the root checkout's directory name, sanitised the same way, and must be at most 30 characters.
+the root checkout's directory name; either source is sanitised the same way and must be at most
+30 characters, else `up` fails naming the value.
 
 The label is rendered from the host's `label_template` (section 6.3), by default
 `{{project}}-{{name}}`, which is what Roman chose for tokyo (`jarl-<worktree>.romanc.io`). On a
@@ -212,7 +215,10 @@ site file, vhost. The worktree's identity, used to find its manifest, is its pat
 ### 6.3 Configuration layers
 
 **Host config** `/etc/hades/host.toml` (override with `HADES_HOST_CONFIG`). Its presence means
-server mode; its absence means laptop mode. Written by the infra playbook, never by hades.
+server mode; its absence means laptop mode. An explicit `HADES_HOST_CONFIG` that names a missing
+file is an error, not laptop mode, so a typo cannot silently demote a server; the literal
+`HADES_HOST_CONFIG=laptop` forces laptop mode (tests, or a developer who wants laptop behaviour on
+a box that has a host config). Written by the server playbook, never by hades.
 
 ```toml
 domain = "example.test"             # public URLs are <label>.<domain>
@@ -226,6 +232,7 @@ chrome_path = ""                     # optional; enables the chrome-devtools MCP
 
 [caddy]
 config = "/etc/caddy/Caddyfile"      # validated by `hades caddy-reload` before reloading
+live_dir = "/etc/caddy/hades-sites"  # root-owned; Caddy imports this, never sites_dir
 reload = ["systemctl", "reload", "caddy"]
 
 [postgres]
@@ -242,7 +249,8 @@ password = "guest"
 ```
 
 Hades refuses to start in server mode when a required key is missing or a registry directory is
-missing or has the wrong group or mode; `doctor` says which.
+missing, lacks the setgid or sticky bit, is not group-writable, is world-writable, or belongs to
+a group the process is not in; `doctor` says which directory and which property.
 
 **Project config** `hades.toml` at the repository root, committed. Read from the worktree first,
 then from the root checkout if the worktree's branch predates the file, then preset defaults.
@@ -254,7 +262,7 @@ preset = "phoenix"               # default: detected (section 6.4)
 web = true                       # default: per preset
 setup = ["mix setup"]            # replaces the preset's setup steps
 teardown = ["mix some.cleanup"]  # extra steps, run before hades' own teardown
-databases = ["gym_nation"]       # database name prefixes; default: the Mix app name (6.4)
+databases = ["gym_nation_dev", "gym_nation_internal_dev", "gym_nation_test"]  # base names (6.4)
 
 [env]                            # extra variables, templated with {{host}} {{port}} {{url}}
 JARL_ENDPOINT = "{{host}}"       # {{suffix}} {{name}} {{project}} {{label}}
@@ -287,9 +295,13 @@ Detection runs in the worktree, in this order, first match wins; `preset = "..."
 | `node` | `package.json` | false | `npm ci`, or `pnpm install --frozen-lockfile` / `yarn install --frozen-lockfile` by lockfile | none |
 | `none` | anything else | false | nothing | none |
 
-`none` does nothing and exits 0 with one line saying so; it writes no manifest. Any preset with
-`web = true` gets a port and, in server mode, a URL. A non-web preset still gets a manifest and a
-port only when `web = true` is set in config (Expo's Metro server is the expected case).
+`none` does nothing and exits 0 with one line saying so; it touches no registry and writes no
+manifest. Every other preset gets a manifest (so `down`, `ls` and `gc` know about its databases
+and vhost), env files, secrets, and its setup steps. `web` decides only the port and the URL: a
+preset with `web = true` claims a port and, in server mode, publishes a site; a non-web preset
+claims no port, publishes nothing, exports no `PORT`, `PHX_HOST` or `HADES_URL`, and skips the
+Tidewave MCP rewiring (it needs a port). A Go or Expo project that wants a URL sets `web = true`
+in `hades.toml` (Expo's Metro server is the expected case).
 
 What `up` does, in order, for a web preset in server mode. Each step is idempotent. A failure in
 steps 1 to 9 releases everything claimed in this run and exits 1: nothing outside hades' own
@@ -310,10 +322,14 @@ only the manifest knows how to find; the user re-runs `up` after fixing the caus
    base64); `PHX_HOST`, `HADES_URL`, `HADES_LABEL`; the `[env]` entries; and, when a RabbitMQ vhost
    is requested, `RABBITMQ_VHOST` and `AMQP_URL`. These are the documented variables of the
    credentials safety rule in 6.9.
-   `DB_SUFFIX` is `_<user>_<name>` with `-` turned into `_` and everything outside `[a-z0-9_]`
-   dropped, guaranteed at most 32 bytes: when longer, the first 23 bytes followed by `_` and the
-   first 8 hex characters of the SHA-256 of the full string. A suffix that is already short never
-   triggers jarl's own hashing, so the names hades expects are the names the project creates.
+   `DB_SUFFIX` is `_<user>_<name>` where the user part keeps only `[a-z0-9]` (so the first
+   `_`-delimited segment is always the owner's login) and the name has `-` turned into `_` and
+   everything outside `[a-z0-9_]` dropped, guaranteed at most 32 bytes: when longer, the first 22 bytes followed by `_` and the
+   first 8 hex characters of the SHA-256 of the full string. A suffix never ends in a digit (a `_`
+   is appended when it would), so a database name ending in digits after the suffix can only be
+   this worktree's `MIX_TEST_PARTITION`, never a sibling worktree whose name ends in a digit. A
+   suffix that is already short never triggers jarl's own hashing, so the names hades expects are
+   the names the project creates.
 5. Write the environment to two files in the worktree, both of which `init` adds to
    `.gitignore`: `.env.worktree` (KEY=VALUE, fully owned by hades, read by projects such as jarl
    through a loader) and `.envrc` (a managed block between `# hades:begin` and `# hades:end`
@@ -335,31 +351,75 @@ Laptop mode runs the same steps minus 7 and 8, with a per-user registry.
 
 What `down` does: read the manifest; if none exists or it is not this user's or not this
 worktree's, print why and exit 0 (the ADE must still be allowed to archive). Then, each step
-independent of the others' success: project `teardown` steps; drop the databases matched by the
-project's rule with `DROP DATABASE ... WITH (FORCE)`; delete the vhost; remove the site file and
-reload; remove the port link; remove the manifest. Exit 0 unless `--strict`.
+independent of the others' success: project `teardown` steps (only when the manifest is the
+invoking user's own; root does not run another user's commands); drop the databases matched by
+the project's rule with `DROP DATABASE ... WITH (FORCE)`; delete the vhost; remove the site file
+and reload; remove the port link. The manifest itself is removed only when every step succeeded;
+otherwise it is rewritten without the claims that were released (port, vhost, databases) and kept
+so the leak stays visible to `ls` and `gc` retries exactly what failed, and `down` prints
+`manifest kept (failed: <steps>)`. A later `up` on that worktree claims a fresh port. Exit 0
+unless `--strict`.
 
-Database rule (phoenix and elixir): hades lists the cluster's database names and matches each
-against `^<prefix>.*<suffix>[0-9]*$` with both parts escaped literally, where `<prefix>` is each
-entry of `databases` in `hades.toml`, or the Mix application name (`app:` in `mix.exs`) when the
-key is absent, and `<suffix>` is the worktree's `DB_SUFFIX`. The trailing digits allow
-`MIX_TEST_PARTITION`. There is no SQL LIKE and no wildcard for the author to get wrong; the suffix
-guard is always applied. A database belonging to another worktree can never match, because the
-suffix embeds the user and the full sanitised name and must end the database name (up to
-partition digits). The concrete prefixes and suffix are recorded in the manifest at `up` time, and
-`down` and `gc` match against the recorded values, not against the current config.
+A re-run of `up` on a worktree whose `hades.toml` changed keeps what the earlier run recorded:
+the database base names become the union of the recorded and the newly configured ones, and a
+recorded vhost is kept when the configuration no longer asks for one, so `down` can still release
+what the first run created.
+
+Database rule (phoenix and elixir): `databases` in `hades.toml` lists database **base names**,
+everything before the suffix (`gym_nation_dev`, `gym_nation_internal_dev`, `gym_nation_test`,
+…); when the key is absent the bases are `<app>_dev` and `<app>_test` from the Mix application
+name. hades lists the cluster's database names and keeps a name only when, for some base, it
+equals `<base><suffix>` or `<base><suffix><digits>` (regex `^<base><suffix>[0-9]*$` with both
+parts escaped literally), `<suffix>` being the worktree's `DB_SUFFIX`. Base and suffix are
+adjacent: nothing may sit between them, so another user's or another project's database cannot
+match, and because a suffix never ends in a digit the trailing digits can only be this
+worktree's `MIX_TEST_PARTITION`. There is no SQL LIKE and no wildcard for the author to get
+wrong; an empty suffix or an empty base matches nothing. The concrete bases and suffix are
+recorded in the manifest at `up` time, and `down` and `gc` match against the recorded values,
+not against the current config.
 
 ### 6.5 Manifests and the registry
 
 `manifests/<label>.toml`, written by the user running `up`, so owned by that user; the sticky
 registry directories mean nobody else can remove it. Contents: hades version, created-at, user,
 uid, project, name, label, host, port, worktree path, root path, preset, `DB_SUFFIX`, the
-database prefixes in effect, services created (vhost name), ADE that invoked `up`.
+database base names in effect, services created (vhost name), ADE that invoked `up`.
 
 Lookup is by worktree path: `down`, `env`, `port` and a repeated `up` find the manifest whose
 recorded worktree path equals the resolved worktree path (paths compared after resolving
-symlinks). The implementation may keep a reverse index (for example `paths/<hash of path>` as a
-symlink to the manifest) or scan the manifests directory; both are small (builder's call).
+symlinks), considering only manifests owned by the invoking user (root sees all). The
+implementation may keep a reverse index (for example `paths/<hash of path>` as a symlink to the
+manifest) or scan the manifests directory; both are small (builder's call).
+
+**The registry is untrusted input.** Every developer in group `hades` can write files into the
+registry directories, so nothing in a manifest is believed without checking it against what the
+file system guarantees (the file's owner, its name, its type):
+
+- A manifest is read only if it is a regular file (no symlinks) and its file name is
+  `<label>.toml` for the label it records; labels are plain names (never a path). A manifest that
+  is misnamed, not a regular file, or fails to parse is skipped and reported as
+  `ignored manifest <path>: <reason>` by `ls`, `gc` and `doctor` (a FAIL for `doctor`), and never
+  stops `up`, `down`, `ls` or `port` for anyone else.
+- Each manifest carries, in memory only, the uid of the file's owner. `down` acts only on the
+  invoking user's manifests; `up` treats a label as taken when a manifest of that label exists
+  that is not the invoking user's or not for this worktree.
+- `gc` (root) releases a manifest only after verifying its claims against the file owner: the
+  recorded `DB_SUFFIX` equals the suffix hades would compute for that owner's login and the
+  recorded name (so a forged manifest can only name databases carrying its author's own suffix),
+  the vhost is either empty or the label, a port link that points at the recorded worktree is
+  owned by the same uid (a link that is missing or points elsewhere is simply not this manifest's
+  to release), and the site file is `<label>.caddy`. The owner's login must resolve through the
+  system account database (hades is built without cgo, so on Linux that means `/etc/passwd`; the
+  server playbook creates local accounts); an unresolvable owner is a refusal, never a fallback to
+  the manifest's `user` field. A manifest that fails verification is reported and left alone.
+  `gc --owner <user>` selects by file owner, never by the `user` field.
+- Accepted residuals of this model: a verified manifest may still name another worktree's
+  database by choosing a base name that itself embeds that worktree's suffix, and two logins that
+  differ only in punctuation produce the same suffix; both are bounded by the shared dev Postgres
+  role (every developer can already drop every dev database) and by the server playbook keeping
+  logins unique after stripping non-alphanumerics.
+- The `user` and `uid` fields inside a manifest are informational (shown by `ls`), never a basis
+  for a decision.
 
 Ownership rule: `down` acts only on a manifest owned by the invoking user whose worktree path is
 the worktree being torn down. `gc` as root acts on any manifest whose worktree path no longer
@@ -416,12 +476,20 @@ when a hook file exists without hades in it, it prints the lines to add.
   (root-owned, mode 0755) and installs the sudoers line for `hades caddy-reload`. Laptops: the
   release tarball or `go install`. A Homebrew tap only if goreleaser gives it for free (builder's
   call).
-- `hades caddy-reload` is the one subcommand meant to run as root. It validates every file in
-  `sites_dir` against the grammar `^import worktree [a-z0-9.-]+ [0-9]+$` (one line, newline
-  terminated), refuses to continue if any file fails and names it, runs `caddy validate --config
-  <caddy.config>`, then runs the configured reload command. With `--check` it stops after
-  validation. It reads only the host config and the sites directory and takes no other input, so
-  the sudoers rule exposes nothing else.
+- `hades caddy-reload` is the one subcommand meant to run as root. It reads every `*.caddy` in
+  `sites_dir` (at most 256 bytes each) and validates the bytes against the grammar
+  `^import worktree [a-z0-9.-]+ [0-9]+$` (one line, newline terminated), requires the host of
+  `<label>.caddy` to be exactly `<label>.<domain>` and a regular `manifests/<label>.toml` owned by
+  the same uid as the site file (so a developer can publish only hostnames of worktrees they own),
+  refusing to continue if any file fails and naming it; then mirrors exactly those validated bytes into the root-owned
+  `caddy.live_dir` (temp file and rename per site, stale files removed), so a file swapped after
+  validation never reaches Caddy; then runs `caddy validate --config <caddy.config>`; then the
+  configured reload command. With `--check` it stops after validation and touches nothing. When
+  it runs as root it ignores `HADES_HOST_CONFIG` and `HOME`, reads `/etc/hades/host.toml` only,
+  and refuses a host config that is not a root-owned regular file free of group and world write
+  bits. Every command it runs gets a fixed `PATH` (`/usr/local/sbin:/usr/local/bin:/usr/sbin:
+  /usr/bin:/sbin:/bin`), never the caller's. It accepts no positional arguments. So the sudoers
+  rule exposes nothing beyond validating, mirroring and reloading.
 - Go 1.25, modules, no CGO. Dependencies kept to a TOML parser, a Postgres driver, and at most one
   CLI helper library; everything else from the standard library.
 

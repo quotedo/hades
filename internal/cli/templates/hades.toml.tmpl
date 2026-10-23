@@ -1,0 +1,32 @@
+# hades.toml: optional per-project settings for hades.
+# Every key is commented out with its default; uncomment to override.
+
+# Project name used in labels, hostnames and database names.
+@PROJECT@
+
+# Project kind: phoenix | elixir | go | node | none. Default: detected.
+# preset = "none"
+
+# Whether the project serves HTTP and gets a port and URL. Default: per preset.
+# web = false
+
+# Setup commands run by `hades up`; replaces the preset's steps.
+# setup = ["mix deps.get", "mix ecto.setup"]
+
+# Extra commands run by `hades down`, before the environment is removed.
+# teardown = []
+
+# Database base names (everything before the suffix). Default: <app>_dev and <app>_test.
+# databases = ["gym_nation_dev", "gym_nation_internal_dev", "gym_nation_test"]
+
+# Extra environment variables. Values may use {{host}} {{port}} {{url}} {{suffix}} {{name}} {{project}} {{label}}.
+# [env]
+# PUBLIC_URL = "{{url}}"
+
+# Give each worktree its own RabbitMQ vhost. Default: false.
+# [services.rabbitmq]
+# vhost = false
+
+# Expose Tidewave MCP for the worktree. Default: detected from mix.lock.
+# [mcp]
+# tidewave = false

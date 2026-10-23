@@ -1,0 +1,3 @@
+%{
+  "tidewave": {:hex, :tidewave, "0.1.0", []},
+}
