@@ -260,7 +260,7 @@ preset = "phoenix"               # default: detected (section 6.4)
 web = true                       # default: per preset
 setup = ["mix setup"]            # replaces the preset's setup steps
 teardown = ["mix some.cleanup"]  # extra steps, run before hades' own teardown
-databases = ["gym_nation"]       # database name prefixes; default: the Mix app name (6.4)
+databases = ["gym_nation_dev", "gym_nation_internal_dev", "gym_nation_test"]  # base names (6.4)
 
 [env]                            # extra variables, templated with {{host}} {{port}} {{url}}
 JARL_ENDPOINT = "{{host}}"       # {{suffix}} {{name}} {{project}} {{label}}
@@ -321,9 +321,12 @@ only the manifest knows how to find; the user re-runs `up` after fixing the caus
    is requested, `RABBITMQ_VHOST` and `AMQP_URL`. These are the documented variables of the
    credentials safety rule in 6.9.
    `DB_SUFFIX` is `_<user>_<name>` with `-` turned into `_` and everything outside `[a-z0-9_]`
-   dropped, guaranteed at most 32 bytes: when longer, the first 23 bytes followed by `_` and the
-   first 8 hex characters of the SHA-256 of the full string. A suffix that is already short never
-   triggers jarl's own hashing, so the names hades expects are the names the project creates.
+   dropped, guaranteed at most 32 bytes: when longer, the first 22 bytes followed by `_` and the
+   first 8 hex characters of the SHA-256 of the full string. A suffix never ends in a digit (a `_`
+   is appended when it would), so a database name ending in digits after the suffix can only be
+   this worktree's `MIX_TEST_PARTITION`, never a sibling worktree whose name ends in a digit. A
+   suffix that is already short never triggers jarl's own hashing, so the names hades expects are
+   the names the project creates.
 5. Write the environment to two files in the worktree, both of which `init` adds to
    `.gitignore`: `.env.worktree` (KEY=VALUE, fully owned by hades, read by projects such as jarl
    through a loader) and `.envrc` (a managed block between `# hades:begin` and `# hades:end`
@@ -349,22 +352,25 @@ independent of the others' success: project `teardown` steps; drop the databases
 project's rule with `DROP DATABASE ... WITH (FORCE)`; delete the vhost; remove the site file and
 reload; remove the port link; remove the manifest. Exit 0 unless `--strict`.
 
-Database rule (phoenix and elixir): hades lists the cluster's database names and matches each
-against `^<prefix>.*<suffix>[0-9]*$` with both parts escaped literally, where `<prefix>` is each
-entry of `databases` in `hades.toml`, or the Mix application name (`app:` in `mix.exs`) when the
-key is absent, and `<suffix>` is the worktree's `DB_SUFFIX`. The trailing digits allow
-`MIX_TEST_PARTITION`. There is no SQL LIKE and no wildcard for the author to get wrong; the suffix
-guard is always applied. A database belonging to another worktree can never match, because the
-suffix embeds the user and the full sanitised name and must end the database name (up to
-partition digits). The concrete prefixes and suffix are recorded in the manifest at `up` time, and
-`down` and `gc` match against the recorded values, not against the current config.
+Database rule (phoenix and elixir): `databases` in `hades.toml` lists database **base names**,
+everything before the suffix (`gym_nation_dev`, `gym_nation_internal_dev`, `gym_nation_test`,
+…); when the key is absent the bases are `<app>_dev` and `<app>_test` from the Mix application
+name. hades lists the cluster's database names and keeps a name only when, for some base, it
+equals `<base><suffix>` or `<base><suffix><digits>` (regex `^<base><suffix>[0-9]*$` with both
+parts escaped literally), `<suffix>` being the worktree's `DB_SUFFIX`. Base and suffix are
+adjacent: nothing may sit between them, so another user's or another project's database cannot
+match, and because a suffix never ends in a digit the trailing digits can only be this
+worktree's `MIX_TEST_PARTITION`. There is no SQL LIKE and no wildcard for the author to get
+wrong; an empty suffix or an empty base matches nothing. The concrete bases and suffix are
+recorded in the manifest at `up` time, and `down` and `gc` match against the recorded values,
+not against the current config.
 
 ### 6.5 Manifests and the registry
 
 `manifests/<label>.toml`, written by the user running `up`, so owned by that user; the sticky
 registry directories mean nobody else can remove it. Contents: hades version, created-at, user,
 uid, project, name, label, host, port, worktree path, root path, preset, `DB_SUFFIX`, the
-database prefixes in effect, services created (vhost name), ADE that invoked `up`.
+database base names in effect, services created (vhost name), ADE that invoked `up`.
 
 Lookup is by worktree path: `down`, `env`, `port` and a repeated `up` find the manifest whose
 recorded worktree path equals the resolved worktree path (paths compared after resolving
