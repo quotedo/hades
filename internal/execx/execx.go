@@ -195,8 +195,11 @@ func readOnly(c Cmd) bool {
 		return false
 	}
 	switch args[0] {
-	case "rev-parse", "branch":
+	case "rev-parse":
 		return true
+	case "branch":
+		// Only listing forms; `git branch <name>` or `-D` would mutate.
+		return len(args) == 1 || args[1] == "--show-current" || args[1] == "--list"
 	}
 	return false
 }

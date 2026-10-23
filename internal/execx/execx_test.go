@@ -80,6 +80,30 @@ func TestDryRunPrintsMutatingAndPassesReadOnlyGit(t *testing.T) {
 	}
 }
 
+func TestDryRunGitBranchOnlyListingForms(t *testing.T) {
+	cases := []struct {
+		argv    []string
+		forward bool
+	}{
+		{[]string{"git", "-C", "d", "branch", "-D", "x"}, false},
+		{[]string{"git", "branch", "newname"}, false},
+		{[]string{"git", "-C", "d", "branch", "--show-current"}, true},
+		{[]string{"git", "branch", "--list", "feat*"}, true},
+		{[]string{"git", "branch"}, true},
+	}
+	for _, tc := range cases {
+		var out bytes.Buffer
+		next := &execx.Fake{}
+		d := &execx.DryRun{Out: &out, Next: next}
+		if _, err := d.Run(context.Background(), execx.Cmd{Argv: tc.argv}); err != nil {
+			t.Fatal(err)
+		}
+		if got := len(next.Calls) == 1; got != tc.forward || (!tc.forward && !strings.HasPrefix(out.String(), "would run: ")) {
+			t.Errorf("%v: forwarded=%v out=%q", tc.argv, got, out.String())
+		}
+	}
+}
+
 func TestToolPrepend(t *testing.T) {
 	got := execx.ToolPrepend("/h", []string{"/e"})
 	if strings.Join(got, ",") != "/h/.asdf/shims,/h/.local/bin,/e" {
