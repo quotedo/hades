@@ -1,0 +1,24 @@
+domain = "example.test"
+label_template = "{{project}}-{{name}}"
+port_range = "4100-4999"
+ports_dir = "/srv/hades/ports"
+sites_dir = "/srv/hades/sites"
+manifests_dir = "/srv/hades/manifests"
+tool_paths = []
+chrome_path = ""
+
+[caddy]
+config = "/etc/caddy/Caddyfile"
+reload = ["systemctl", "reload", "caddy"]
+
+[postgres]
+host = "127.0.0.1"
+port = 5433
+user = "postgres"
+password = "postgres"
+
+[rabbitmq]
+management_url = "http://127.0.0.1:15672"
+amqp_url = "amqp://guest:guest@127.0.0.1:5672"
+user = "guest"
+password = "guest"

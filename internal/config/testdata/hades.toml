@@ -1,0 +1,15 @@
+project = "jarl"
+preset = "phoenix"
+web = true
+setup = ["mix setup"]
+teardown = ["mix some.cleanup"]
+databases = ["gym_nation"]
+
+[env]
+JARL_ENDPOINT = "{{host}}"
+
+[services.rabbitmq]
+vhost = true
+
+[mcp]
+tidewave = true
