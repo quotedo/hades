@@ -130,8 +130,11 @@ Python, Ansible. Each developer wants their own toolchain versions, like on a la
 
 ### 6.1 Topology: direct on the host, one Linux user per developer
 
-No container or VM wall. Each developer is a Linux user in group `hades`, no sudo, no docker group,
-lingering enabled, home on the root filesystem. All of a developer's processes (ADE daemons,
+No container or VM wall. Each developer is a local Linux user (in `/etc/passwd`; hades resolves
+owners without cgo) in group `hades`, no sudo, no docker group, lingering enabled, home on the
+root filesystem. Logins must stay unique after stripping everything outside `[a-z0-9]`
+(`j-smith` and `jsmith` cannot both exist), because hades derives database suffixes from that
+projection; the playbook asserts it over `dev_users`. All of a developer's processes (ADE daemons,
 terminals, agents, builds) live in their `user-<uid>.slice`. Dev system services live in
 `hades.slice`. Protected workloads keep their own slices with a floor.
 

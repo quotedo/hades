@@ -355,8 +355,10 @@ independent of the others' success: project `teardown` steps (only when the mani
 invoking user's own; root does not run another user's commands); drop the databases matched by
 the project's rule with `DROP DATABASE ... WITH (FORCE)`; delete the vhost; remove the site file
 and reload; remove the port link. The manifest itself is removed only when every step succeeded;
-otherwise it is kept so the leak stays visible to `ls` and `gc` retries it later, and `down`
-prints `manifest kept (failed: <steps>)`. Exit 0 unless `--strict`.
+otherwise it is rewritten without the claims that were released (port, vhost, databases) and kept
+so the leak stays visible to `ls` and `gc` retries exactly what failed, and `down` prints
+`manifest kept (failed: <steps>)`. A later `up` on that worktree claims a fresh port. Exit 0
+unless `--strict`.
 
 A re-run of `up` on a worktree whose `hades.toml` changed keeps what the earlier run recorded:
 the database base names become the union of the recorded and the newly configured ones, and a
@@ -403,10 +405,19 @@ file system guarantees (the file's owner, its name, its type):
   that is not the invoking user's or not for this worktree.
 - `gc` (root) releases a manifest only after verifying its claims against the file owner: the
   recorded `DB_SUFFIX` equals the suffix hades would compute for that owner's login and the
-  recorded name (so a forged manifest can only name its author's own databases), the vhost is
-  either empty or the label, the port link is owned by the same uid and points at the recorded
-  worktree, and the site file is `<label>.caddy`. A manifest that fails verification is reported
-  and left alone. `gc --owner <user>` selects by file owner, never by the `user` field.
+  recorded name (so a forged manifest can only name databases carrying its author's own suffix),
+  the vhost is either empty or the label, a port link that points at the recorded worktree is
+  owned by the same uid (a link that is missing or points elsewhere is simply not this manifest's
+  to release), and the site file is `<label>.caddy`. The owner's login must resolve through the
+  system account database (hades is built without cgo, so on Linux that means `/etc/passwd`; the
+  server playbook creates local accounts); an unresolvable owner is a refusal, never a fallback to
+  the manifest's `user` field. A manifest that fails verification is reported and left alone.
+  `gc --owner <user>` selects by file owner, never by the `user` field.
+- Accepted residuals of this model: a verified manifest may still name another worktree's
+  database by choosing a base name that itself embeds that worktree's suffix, and two logins that
+  differ only in punctuation produce the same suffix; both are bounded by the shared dev Postgres
+  role (every developer can already drop every dev database) and by the server playbook keeping
+  logins unique after stripping non-alphanumerics.
 - The `user` and `uid` fields inside a manifest are informational (shown by `ls`), never a basis
   for a decision.
 
