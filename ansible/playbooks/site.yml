@@ -1,0 +1,30 @@
+---
+# Provision a dev server.
+#
+# Interactive one-time steps that no playbook can do for you:
+#   1. Cloudflare dashboard: create the tunnel (copy its token to CLOUDFLARE_TUNNEL_TOKEN)
+#      and the Access application protecting the dev domain.
+#   2. Per user, as that user: `gh auth login` and each agent CLI's own login.
+#   3. Paseo: enter the daemon password in the desktop client; for a phone run
+#      `paseo daemon pair --relay`.
+#   4. When Orca is enabled: `tailscale up`, then pair the Orca client over Tailscale.
+#   5. A project's key holder runs `git secret tell` for the new users.
+- name: Preflight
+  ansible.builtin.import_playbook: preflight.yml
+
+- name: Provision dev servers
+  hosts: dev_servers
+  become: true
+  vars_files:
+    - ../roles/host/defaults/main.yml
+  roles:
+    - { role: host, tags: [host] }
+    - { role: postgres, tags: [postgres] }
+    - { role: services, tags: [services] }
+    - { role: ingress, tags: [ingress] }
+    - { role: user, tags: [user] }
+    - { role: protected, tags: [protected] }
+  tasks:
+    - name: Loopback isolation rules
+      ansible.builtin.include_tasks: ../roles/host/tasks/isolation.yml
+      tags: [host, isolation]

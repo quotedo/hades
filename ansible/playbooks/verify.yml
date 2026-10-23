@@ -1,0 +1,13 @@
+---
+# Verification playbook. Each check set is selected by a tag.
+- name: Import preflight
+  ansible.builtin.import_playbook: preflight.yml
+  tags: [preflight]
+
+- name: Verify the collection
+  hosts: dev_servers
+  gather_facts: false
+  tasks:
+    - name: Preflight tests
+      ansible.builtin.import_tasks: tasks/preflight_tests.yml
+      tags: [preflight]

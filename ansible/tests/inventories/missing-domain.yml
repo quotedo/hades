@@ -1,0 +1,7 @@
+---
+dev_servers:
+  hosts:
+    box:
+      ansible_connection: local
+      dev_users:
+        - { name: alice, uid: 2001 }

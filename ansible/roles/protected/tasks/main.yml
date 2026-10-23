@@ -1,0 +1,4 @@
+---
+- name: Placeholder until this role is implemented
+  ansible.builtin.debug:
+    msg: "protected role placeholder"

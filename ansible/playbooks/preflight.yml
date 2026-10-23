@@ -1,0 +1,65 @@
+---
+# Input validation. Runs before anything touches a host.
+- name: Preflight
+  hosts: dev_servers
+  gather_facts: false
+  tasks:
+    - name: Assert hades_domain is a non-empty string
+      ansible.builtin.assert:
+        that:
+          - hades_domain is defined
+          - hades_domain is string
+          - hades_domain | length > 0
+        fail_msg: hades_domain must be defined as a non-empty string
+        quiet: true
+
+    - name: Assert dev_users is a list
+      ansible.builtin.assert:
+        that:
+          - dev_users is defined
+          - dev_users is sequence
+          - dev_users is not string
+          - dev_users is not mapping
+        fail_msg: dev_users must be defined as a list
+        quiet: true
+
+    - name: Assert every dev_users entry is well formed
+      ansible.builtin.assert:
+        that:
+          - item.name is defined
+          - item.name is string
+          - item.name is match('^[a-z][a-z0-9_-]{0,31}$')
+          - item.uid is defined
+          - item.uid is integer
+          - item.uid >= 1000
+          - (item.state | default('present')) in ['present', 'absent']
+          - (item.ades | default([])) is sequence
+          - (item.ades | default([])) is not string
+          - (item.ades | default([])) is subset(['paseo', 'orca'])
+        fail_msg: >-
+          dev_users entry {{ item.name | default('<unnamed>') }} is invalid: name must match
+          ^[a-z][a-z0-9_-]{0,31}$, uid must be an integer >= 1000, state must be present or
+          absent, ades must be a list drawn from paseo and orca
+        quiet: true
+      loop: "{{ dev_users }}"
+      loop_control:
+        label: "{{ item.name | default('<unnamed>') }}"
+
+    - name: Group present logins by alphanumeric projection
+      ansible.builtin.set_fact:
+        hades_login_groups: >-
+          {%- set ns = namespace(groups={}) -%}
+          {%- for u in dev_users if (u.state | default('present')) == 'present' -%}
+          {%- set key = u.name | regex_replace('[^a-z0-9]', '') -%}
+          {%- set _ = ns.groups.update({key: ns.groups.get(key, []) + [u.name]}) -%}
+          {%- endfor -%}
+          {{ ns.groups }}
+
+    - name: Assert alphanumeric projections of present logins are unique
+      ansible.builtin.assert:
+        that:
+          - hades_login_groups.values() | map('length') | select('gt', 1) | list | length == 0
+        fail_msg: >-
+          Logins collide after dropping non-alphanumerics:
+          {% for g in hades_login_groups.values() if g | length > 1 %}[{{ g | join(', ') }}] {% endfor %}
+        quiet: true

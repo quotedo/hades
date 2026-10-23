@@ -1,0 +1,42 @@
+---
+- name: Preflight rejects an inventory without hades_domain
+  ansible.builtin.command:
+    cmd: >-
+      ansible-playbook -i {{ playbook_dir }}/../tests/inventories/missing-domain.yml
+      {{ playbook_dir }}/preflight.yml
+  delegate_to: localhost
+  run_once: true
+  register: preflight_missing_domain
+  changed_when: false
+  failed_when: preflight_missing_domain.rc == 0
+
+- name: Preflight names the colliding logins
+  ansible.builtin.command:
+    cmd: >-
+      ansible-playbook -i {{ playbook_dir }}/../tests/inventories/colliding-logins.yml
+      {{ playbook_dir }}/preflight.yml
+  delegate_to: localhost
+  run_once: true
+  register: preflight_colliding
+  changed_when: false
+  failed_when: preflight_colliding.rc == 0
+
+- name: Preflight accepts a valid inventory
+  ansible.builtin.command:
+    cmd: >-
+      ansible-playbook -i {{ playbook_dir }}/../tests/inventories/valid.yml
+      {{ playbook_dir }}/preflight.yml
+  delegate_to: localhost
+  run_once: true
+  register: preflight_valid
+  changed_when: false
+  failed_when: preflight_valid.rc != 0
+
+- name: Assert the failure messages are the expected ones
+  ansible.builtin.assert:
+    that:
+      - "'hades_domain' in preflight_missing_domain.stdout"
+      - "'j-smith' in preflight_colliding.stdout"
+      - "'jsmith' in preflight_colliding.stdout"
+    quiet: true
+  run_once: true

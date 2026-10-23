@@ -1,0 +1,5 @@
+---
+# Shared defaults for every role; site.yml loads this file for the whole play.
+# The hades_ prefix is deliberate (shared across roles), so the role-prefix rule is waived per line.
+hades_version: "0.1.0" # noqa: var-naming[no-role-prefix]
+hades_port_range: "4100-4999" # noqa: var-naming[no-role-prefix]

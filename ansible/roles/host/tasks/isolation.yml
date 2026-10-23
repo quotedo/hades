@@ -1,0 +1,4 @@
+---
+- name: Placeholder until loopback isolation is implemented
+  ansible.builtin.debug:
+    msg: "isolation placeholder"
