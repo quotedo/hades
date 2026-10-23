@@ -21,6 +21,7 @@ import (
 	"github.com/quotedo/hades/internal/lifecycle"
 	"github.com/quotedo/hades/internal/preset"
 	"github.com/quotedo/hades/internal/version"
+	"github.com/quotedo/hades/internal/wtctx"
 )
 
 // check is one line of the doctor report. A failed check with Warn set is
@@ -133,12 +134,12 @@ func runChecks(bg context.Context, ctx *Context) []check {
 		checks = append(checks, pass("git", p))
 	}
 
-	wt, wtErr := resolveWorktree(bg, ctx)
+	wt, wtErr, inRepo := repoWorktree(bg, ctx, d)
 	switch {
+	case !inRepo:
+		checks = append(checks, pass("tools", skipNoRepo))
 	case wtErr == nil:
 		checks = append(checks, checkTools(wt.Worktree, lookup))
-	case notInRepo(wtErr):
-		checks = append(checks, pass("tools", skipNoRepo))
 	default:
 		checks = append(checks, fail("tools", wtErr))
 	}
@@ -151,10 +152,10 @@ func runChecks(bg context.Context, ctx *Context) []check {
 	checks = append(checks, warnIf("direnv", problem, "found"))
 
 	switch {
+	case !inRepo:
+		checks = append(checks, pass("ade-hooks", skipNoRepo))
 	case wtErr == nil:
 		checks = append(checks, checkADEHooks(wt.Worktree))
-	case notInRepo(wtErr):
-		checks = append(checks, pass("ade-hooks", skipNoRepo))
 	default:
 		checks = append(checks, check{Name: "ade-hooks", Warn: true, Detail: wtErr.Error()})
 	}
@@ -164,10 +165,26 @@ func runChecks(bg context.Context, ctx *Context) []check {
 
 const skipNoRepo = "skipped: not inside a git worktree"
 
-// notInRepo reports whether resolving the worktree failed because the current
-// directory is not in a git repository.
-func notInRepo(err error) bool {
-	return strings.Contains(err.Error(), "not a git repository")
+// repoWorktree resolves the current worktree when the working directory is
+// inside a git worktree. git's own exit status decides that, not its message
+// (which is localized); inRepo is false only when git ran and said no. A git
+// that cannot start, or a resolution failure, is returned as err.
+func repoWorktree(bg context.Context, ctx *Context, d lifecycle.Deps) (wt wtctx.Context, err error, inRepo bool) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return wt, err, true
+	}
+	env := append(os.Environ(), "LC_ALL=C", "LANG=C")
+	_, err = d.Run.Run(bg, execx.Cmd{Argv: []string{"git", "-C", cwd, "rev-parse", "--is-inside-work-tree"}, Env: env})
+	var xe *execx.ExitError
+	if errors.As(err, &xe) {
+		return wt, nil, false
+	}
+	if err != nil {
+		return wt, err, true
+	}
+	wt, err = resolveWorktree(bg, ctx)
+	return wt, err, true
 }
 
 func modeName(m config.Mode) string {

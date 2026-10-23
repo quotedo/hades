@@ -392,17 +392,22 @@ func withEnv(getenv func(string) string, kv map[string]string) func(string) stri
 // skips the test where the filesystem or group membership does not allow it.
 func setgidRegistry(t *testing.T, state string, getenv func(string) string) {
 	t.Helper()
+	// CI must run these tests, so an unusable environment fails there.
+	skip := t.Skipf
+	if os.Getenv("CI") != "" {
+		skip = t.Fatalf
+	}
 	for _, d := range []string{"ports", "sites", "manifests"} {
 		p := filepath.Join(state, d)
 		if err := os.Chmod(p, 0o775|os.ModeSetgid); err != nil {
-			t.Skipf("cannot set setgid here: %v", err)
+			skip("cannot set setgid here: %v", err)
 		}
 		if fi, err := os.Stat(p); err != nil || fi.Mode()&os.ModeSetgid == 0 {
-			t.Skip("filesystem does not keep the setgid bit")
+			skip("filesystem does not keep the setgid bit")
 		}
 	}
 	if _, checks, _ := doctorChecks(t, getenv); !checks["registry-perms"].OK {
-		t.Skipf("registry-perms cannot pass here: %s", checks["registry-perms"].Detail)
+		skip("registry-perms cannot pass here: %s", checks["registry-perms"].Detail)
 	}
 }
 
@@ -476,5 +481,20 @@ func TestDoctorOutsideRepoSkipsRepoChecks(t *testing.T) {
 		if c := checks[n]; !c.OK || c.Detail != "skipped: not inside a git worktree" {
 			t.Fatalf("%s = %+v (order %v)", n, c, order)
 		}
+	}
+}
+
+func TestDoctorResolveErrorInsideRepoIsGeneric(t *testing.T) {
+	stubProbe(t)
+	_, getenv, state := serverFixture(t, "")
+	// git says it is inside a worktree but cannot resolve it.
+	testutil.StubTool(t, filepath.Join(state, "bin"), "git",
+		"#!/bin/bash\ncase \"$*\" in *--is-inside-work-tree*) echo true; exit 0;; esac\necho boom >&2\nexit 1\n")
+	_, checks, _ := doctorChecks(t, getenv)
+	if c := checks["tools"]; c.OK || c.Warn || !strings.Contains(c.Detail, "boom") {
+		t.Fatalf("tools = %+v", c)
+	}
+	if c := checks["ade-hooks"]; c.OK || !c.Warn || !strings.Contains(c.Detail, "boom") {
+		t.Fatalf("ade-hooks = %+v", c)
 	}
 }
