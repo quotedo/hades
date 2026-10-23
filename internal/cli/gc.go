@@ -1,0 +1,69 @@
+package cli
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+
+	"github.com/quotedo/hades/internal/config"
+	"github.com/quotedo/hades/internal/lifecycle"
+	"github.com/quotedo/hades/internal/registry"
+)
+
+const gcUsage = "usage: hades gc [--dry-run] [--owner USER]"
+
+// geteuid is os.Geteuid; tests replace it.
+var geteuid = os.Geteuid
+
+// gc releases the manifests of vanished worktrees, or of one user. On a
+// server it must run as root; on a laptop it acts for the current user only.
+func gc(ctx *Context, args []string) int {
+	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	dryRun := fs.Bool("dry-run", false, "print what would be released; change nothing")
+	owner := fs.String("owner", "", "release every manifest of this user")
+	if err := fs.Parse(args); err != nil {
+		fmt.Fprintf(ctx.Stderr, "gc: %v\n%s\n", err, gcUsage)
+		return 2
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(ctx.Stderr, "gc: unexpected arguments %q\n%s\n", fs.Args(), gcUsage)
+		return 2
+	}
+	d, err := newDeps(ctx)
+	if err != nil {
+		fmt.Fprintf(ctx.Stderr, "hades: gc: %v\n", err)
+		return 1
+	}
+	if d.Mode == config.Server && geteuid() != 0 {
+		fmt.Fprintln(ctx.Stderr, "hades: gc: must run as root on a server")
+		return 1
+	}
+	if d.Mode == config.Laptop {
+		if err := d.Reg.Check(); errors.Is(err, registry.ErrRegistryMissing) {
+			return 0 // nothing was ever set up here
+		}
+	}
+	rep, err := lifecycle.GC(context.Background(), d, *owner, *dryRun)
+	if err != nil {
+		fmt.Fprintf(ctx.Stderr, "hades: gc: %v\n", err)
+		return 1
+	}
+	verb := "released"
+	if *dryRun {
+		verb = "would release"
+	}
+	for _, label := range rep.Released {
+		fmt.Fprintf(ctx.Stderr, "hades: gc: %s %s\n", verb, label)
+	}
+	for _, err := range rep.Errors {
+		fmt.Fprintf(ctx.Stderr, "hades: gc: %v\n", err)
+	}
+	if len(rep.Errors) > 0 {
+		return 1
+	}
+	return 0
+}

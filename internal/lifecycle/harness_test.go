@@ -101,6 +101,19 @@ func newServerDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 	return d, wtctx.Context{Root: root, Worktree: wt, Name: "feature/x", ADE: "shell"}
 }
 
+// newServerDepsSharing returns Deps and Context for a second worktree,
+// feature/y of another demo checkout, sharing d's host, registry and fakes.
+// The user is "other" with the same UID, because tests cannot chown.
+func newServerDepsSharing(t *testing.T, d Deps, fixture string) (Deps, wtctx.Context) {
+	t.Helper()
+	root, wt := testutil.TempGitRepoWithWorktree(t)
+	root, wt = resolved(t, root), resolved(t, wt)
+	copyDir(t, filepath.Join("..", "preset", "testdata", fixture), wt)
+	writeFile(t, filepath.Join(root, "hades.toml"), "project = \"demo\"\n")
+	d.User.Name = "other"
+	return d, wtctx.Context{Root: root, Worktree: wt, Name: "feature/y", ADE: "shell"}
+}
+
 // newLaptopDeps is newServerDeps in laptop mode: no domain, no Caddy.
 func newLaptopDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 	t.Helper()

@@ -64,32 +64,48 @@ func up(ctx *Context, args []string) int {
 }
 
 func runUp(bg context.Context, ctx *Context, opt lifecycle.UpOptions) (*lifecycle.Outcome, error) {
+	wt, err := resolveWorktree(bg, ctx)
+	if err != nil {
+		return nil, err
+	}
+	d, err := newDeps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return lifecycle.Up(bg, d, wt, opt)
+}
+
+// resolveWorktree finds the worktree the command acts on.
+func resolveWorktree(bg context.Context, ctx *Context) (wtctx.Context, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, err
+		return wtctx.Context{}, err
 	}
 	g := ctx.Flags
-	wt, err := wtctx.Resolve(bg, wtctx.Flags{Root: g.Root, Worktree: g.Worktree, Name: g.Name, ADE: g.ADE}, ctx.Getenv, cwd, &execx.Real{})
-	if err != nil {
-		return nil, err
-	}
+	return wtctx.Resolve(bg, wtctx.Flags{Root: g.Root, Worktree: g.Worktree, Name: g.Name, ADE: g.ADE}, ctx.Getenv, cwd, &execx.Real{})
+}
+
+// newDeps builds the lifecycle dependencies from the current user and the
+// host config. PG is always set (a host always has Postgres settings, server
+// or laptop defaults); Rabbit only when the host has a RabbitMQ block.
+func newDeps(ctx *Context) (lifecycle.Deps, error) {
 	user, err := lifecycle.CurrentUser()
 	if err != nil {
-		return nil, fmt.Errorf("current user: %w", err)
+		return lifecycle.Deps{}, fmt.Errorf("current user: %w", err)
 	}
 	if h := ctx.Getenv("HOME"); h != "" {
 		user.Home = h
 	}
 	host, mode, err := config.Load(ctx.Getenv, user.Home)
 	if err != nil {
-		return nil, err
+		return lifecycle.Deps{}, err
 	}
 	d := lifecycle.Deps{
 		Host: host,
 		Mode: mode,
 		Reg:  registry.New(host),
 		Run:  &execx.Real{Prepend: execx.ToolPrepend(user.Home, host.ToolPaths)},
-		// Up never connects; the client is here for the commands sharing Deps.
+		// The client connects only when a command lists or drops databases.
 		PG:      &pg.Client{DSN: pg.DSN(host.Postgres, "postgres")},
 		User:    user,
 		Version: version.Version,
@@ -99,5 +115,5 @@ func runUp(bg context.Context, ctx *Context, opt lifecycle.UpOptions) (*lifecycl
 	if r := host.RabbitMQ; r != nil {
 		d.Rabbit = &rabbit.Client{ManagementURL: r.ManagementURL, User: r.User, Password: r.Password, HTTP: &http.Client{Timeout: 30 * time.Second}}
 	}
-	return lifecycle.Up(bg, d, wt, opt)
+	return d, nil
 }
