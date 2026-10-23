@@ -9,8 +9,8 @@ import (
 )
 
 // laptopUpFixture lays out a root checkout named demo and a worktree holding
-// the phoenix preset fixture, so no git is needed when both are passed as flags.
-func laptopUpFixture(t *testing.T) (root, wt string, getenv func(string) string) {
+// the given preset fixture, so no git is needed when both are passed as flags.
+func laptopUpFixture(t *testing.T, fixture string) (root, wt string, getenv func(string) string) {
 	t.Helper()
 	tmp := t.TempDir()
 	root, wt = filepath.Join(tmp, "demo"), filepath.Join(tmp, "wt")
@@ -19,7 +19,7 @@ func laptopUpFixture(t *testing.T) (root, wt string, getenv func(string) string)
 			t.Fatal(err)
 		}
 	}
-	src := filepath.Join("..", "preset", "testdata", "phoenix")
+	src := filepath.Join("..", "preset", "testdata", fixture)
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func laptopUpFixture(t *testing.T) (root, wt string, getenv func(string) string)
 }
 
 func TestUpDryRunThroughDispatcher(t *testing.T) {
-	root, wt, getenv := laptopUpFixture(t)
+	root, wt, getenv := laptopUpFixture(t, "phoenix")
 	var out, errb bytes.Buffer
 	code := Main([]string{"--root", root, "--worktree", wt, "--name", "feature/x", "up", "--dry-run"}, &out, &errb, getenv)
 	if code != 0 {
@@ -64,7 +64,7 @@ func TestUpDryRunThroughDispatcher(t *testing.T) {
 }
 
 func TestUpErrorExitsOne(t *testing.T) {
-	root, wt, getenv := laptopUpFixture(t)
+	root, wt, getenv := laptopUpFixture(t, "phoenix")
 	var out, errb bytes.Buffer
 	code := Main([]string{"--root", root, "--worktree", wt, "--name", "???", "up", "--dry-run", "--skip-setup"}, &out, &errb, getenv)
 	if code != 1 || !strings.Contains(errb.String(), "hades: up: label for worktree name \"???\"") {
@@ -100,6 +100,15 @@ func TestCommandFlagsReachTheCommand(t *testing.T) {
 	// Globals after the command word, mixed with command flags, still apply.
 	errb.Reset()
 	if code := Main([]string{"version", "-v", "--json"}, &out, &errb, getenv); code != 0 {
+		t.Fatalf("code=%d err=%q", code, errb.String())
+	}
+}
+
+func TestUpNonWebReportsNoWebPort(t *testing.T) {
+	root, wt, getenv := laptopUpFixture(t, "go")
+	var out, errb bytes.Buffer
+	code := Main([]string{"--root", root, "--worktree", wt, "--name", "feature/x", "up", "--dry-run"}, &out, &errb, getenv)
+	if code != 0 || !strings.Contains(errb.String(), "hades: dry run: demo-feature-x would be up (no web port)") {
 		t.Fatalf("code=%d err=%q", code, errb.String())
 	}
 }

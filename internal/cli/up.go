@@ -51,16 +51,14 @@ func up(ctx *Context, args []string) int {
 	if out.Manifest == nil { // nothing to do; Up said so
 		return 0
 	}
-	url := out.Manifest.Host
-	for _, kv := range out.Env {
-		if kv.Key == "HADES_URL" {
-			url = kv.Value
-		}
+	where := "at " + out.URL
+	if out.URL == "" {
+		where = "(no web port)"
 	}
 	if opt.DryRun {
-		fmt.Fprintf(ctx.Stderr, "hades: dry run: %s would be up at %s\n", out.Manifest.Label, url)
+		fmt.Fprintf(ctx.Stderr, "hades: dry run: %s would be up %s\n", out.Manifest.Label, where)
 	} else {
-		fmt.Fprintf(ctx.Stderr, "hades: %s up at %s\n", out.Manifest.Label, url)
+		fmt.Fprintf(ctx.Stderr, "hades: %s up %s\n", out.Manifest.Label, where)
 	}
 	return 0
 }

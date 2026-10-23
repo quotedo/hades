@@ -74,6 +74,7 @@ func TestUpLabelTakenByOtherWorktree(t *testing.T) {
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	other := c
 	other.Worktree = t.TempDir()
+	copyDir(t, filepath.Join("..", "preset", "testdata", "phoenix"), other.Worktree)
 	_, err := Up(context.Background(), d, other, UpOptions{SkipSetup: true})
 	var lt *ErrLabelTaken
 	if !errors.As(err, &lt) || !strings.Contains(err.Error(), c.Worktree) {
@@ -308,7 +309,7 @@ func TestUpPresetErrorNamesWorktreeAndClaimsNothing(t *testing.T) {
 	d, c := newServerDeps(t, "none")
 	writeFile(t, filepath.Join(c.Worktree, "mix.exs"), "defmodule X do end\n")
 	_, err := Up(context.Background(), d, c, UpOptions{})
-	if err == nil || !strings.Contains(err.Error(), "up: "+c.Worktree+": ") {
+	if err == nil || !strings.HasPrefix(err.Error(), c.Worktree+": ") {
 		t.Fatal(err)
 	}
 	if entries, _ := os.ReadDir(d.Reg.PortsDir); len(entries) != 0 {
@@ -325,5 +326,62 @@ func TestUpSetupEnvComputedWinsOverProcessEnv(t *testing.T) {
 	setup := lastCallWithPrefix(d.Run.(*execx.Fake), "sh")
 	if envHas(setup.Env, "PORT=1") || !envHas(setup.Env, "PORT=4100") || !envHas(setup.Env, "PATH="+os.Getenv("PATH")) {
 		t.Fatalf("%v", setup.Env)
+	}
+}
+
+func TestUpNonWebPresetGetsNoPortOrURL(t *testing.T) {
+	d, c := newServerDeps(t, "go")
+	// Tidewave asked for, but it needs a port.
+	writeFile(t, filepath.Join(c.Root, "hades.toml"), "project = \"demo\"\n[mcp]\ntidewave = true\n")
+	for run := 1; run <= 2; run++ { // the re-run must not trip over Port 0
+		out, err := Up(context.Background(), d, c, UpOptions{})
+		if err != nil {
+			t.Fatalf("run %d: %v", run, err)
+		}
+		if out.URL != "" || out.Manifest.Port != 0 || out.Manifest.Host != "" {
+			t.Fatalf("run %d: url=%q %+v", run, out.URL, out.Manifest)
+		}
+	}
+	m, err := d.Reg.ByWorktree(c.Worktree)
+	if err != nil || m.Port != 0 || m.Label != "demo-feature-x" {
+		t.Fatalf("%+v %v", m, err)
+	}
+	if entries, _ := os.ReadDir(d.Reg.PortsDir); len(entries) != 0 {
+		t.Fatal("port claimed for a non-web preset")
+	}
+	if _, err := os.Stat(caddy.SitePath(d.Reg.SitesDir, m.Label)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("site written for a non-web preset")
+	}
+	calls := argvs(d.Run.(*execx.Fake))
+	if hasCallPrefix(calls, "sudo") || !hasCall(calls, "sh -c go mod download") {
+		t.Fatalf("%v", calls)
+	}
+	env, _ := envfile.ReadEnvWorktree(filepath.Join(c.Worktree, ".env.worktree"))
+	for _, k := range []string{"PORT", "PHX_HOST", "HADES_URL"} {
+		if _, ok := env[k]; ok {
+			t.Errorf(".env.worktree has %s", k)
+		}
+	}
+	if env["HADES_LABEL"] != "demo-feature-x" {
+		t.Fatal(env)
+	}
+	if setup := lastCallWithPrefix(d.Run.(*execx.Fake), "sh"); envHas(setup.Env, "HADES_URL=") {
+		t.Fatalf("%v", setup.Env)
+	}
+	if mcp, _ := os.ReadFile(filepath.Join(c.Worktree, ".mcp.json")); !strings.Contains(string(mcp), "localhost:4000") {
+		t.Fatalf("tidewave rewired without a port: %s", mcp)
+	}
+}
+
+func TestUpNonePresetTouchesNoRegistry(t *testing.T) {
+	d, c := newLaptopDeps(t, "none")
+	d.Host.PortsDir = filepath.Join(t.TempDir(), "absent", "ports")
+	d.Reg.PortsDir = d.Host.PortsDir
+	c.Name = "???" // no label is derived either
+	if out, err := Up(context.Background(), d, c, UpOptions{}); err != nil || out.Manifest != nil {
+		t.Fatal(out, err)
+	}
+	if _, err := os.Stat(d.Reg.PortsDir); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("registry created for none")
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ type UpOptions struct {
 type Outcome struct {
 	Manifest *registry.Manifest
 	Env      []envfile.KV
+	URL      string // empty for a preset without a web port
 	Steps    []string
 }
 
@@ -100,20 +102,18 @@ func Up(ctx context.Context, d Deps, c wtctx.Context, opt UpOptions) (*Outcome, 
 	if err := u.detect(); err != nil {
 		return nil, err
 	}
-	if err := u.prepareRegistry(); err != nil {
-		return nil, err
-	}
-	// The label is checked even for a worktree with nothing to set up, so a
-	// label held by another worktree is reported rather than ignored.
-	if err := u.identify(); err != nil {
-		return nil, err
-	}
 	if u.preset.Kind == preset.None {
 		fmt.Fprintln(d.Log, "up: nothing to do (no preset matched)")
 		return &Outcome{}, nil
 	}
+	if err := u.prepareRegistry(); err != nil {
+		return nil, err
+	}
+	if err := u.identify(); err != nil {
+		return nil, err
+	}
 	u.plan()
-	if u.existing != nil {
+	if u.existing != nil && u.existing.Port != 0 {
 		if err := u.checkPortOwned(u.existing.Port); err != nil {
 			return nil, err
 		}
@@ -139,7 +139,7 @@ func Up(ctx context.Context, d Deps, c wtctx.Context, opt UpOptions) (*Outcome, 
 		}
 	}
 
-	out := &Outcome{Manifest: u.m, Env: u.env}
+	out := &Outcome{Manifest: u.m, Env: u.env, URL: u.url()}
 	err := u.setup() // 10
 	out.Steps = u.steps
 	return out, err
@@ -180,10 +180,10 @@ func (u *upRun) detect() error {
 	}
 	p, err := preset.Detect(u.c.Worktree)
 	if err != nil {
-		return fmt.Errorf("up: %s: %w", u.c.Worktree, err)
+		return fmt.Errorf("%s: %w", u.c.Worktree, err)
 	}
 	if p, err = preset.Apply(p, cfg); err != nil {
-		return fmt.Errorf("up: %s: %w", u.c.Worktree, err)
+		return fmt.Errorf("%s: %w", u.c.Worktree, err)
 	}
 	u.cfg, u.preset = cfg, p
 	return nil
@@ -338,28 +338,40 @@ func sameDir(a, b string) bool {
 	return canon(a) == canon(b)
 }
 
-// setAddress fills the host name and URL once the port is known.
+// setAddress records the port and, for a web preset, the host name.
 func (u *upRun) setAddress(port int) {
 	u.m.Port = port
-	if u.d.Mode == config.Server {
+	switch {
+	case !u.preset.Web:
+		u.m.Host = ""
+	case u.d.Mode == config.Server:
 		u.m.Host = u.m.Label + "." + u.d.Host.Domain
-		return
+	default:
+		u.m.Host = "localhost"
 	}
-	u.m.Host = "localhost"
 }
 
+// url is the worktree's web address; empty without a web port.
 func (u *upRun) url() string {
-	if u.d.Mode == config.Server {
+	switch {
+	case !u.preset.Web:
+		return ""
+	case u.d.Mode == config.Server:
 		return "https://" + u.m.Host
 	}
 	return "http://localhost:" + strconv.Itoa(u.m.Port)
 }
 
-// claimPort is step 2.
+// claimPort is step 2. Only a web preset claims a port. A port an earlier
+// web run claimed stays in the manifest, so down still releases it.
 func (u *upRun) claimPort() (*undo, error) {
-	if u.existing != nil {
+	if u.existing != nil && u.existing.Port != 0 {
 		u.setAddress(u.existing.Port)
 		u.did("reused port %d", u.existing.Port)
+		return nil, nil
+	}
+	if !u.preset.Web {
+		u.setAddress(0)
 		return nil, nil
 	}
 	reg, wt := u.d.Reg, u.c.Worktree
@@ -444,6 +456,9 @@ func (u *upRun) computeEnv() (*undo, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("compute environment: %w", err)
+	}
+	if !u.preset.Web {
+		env = withoutKeys(env, "PORT", "PHX_HOST", "HADES_URL")
 	}
 	u.env = env
 	return nil, nil
@@ -559,7 +574,7 @@ func (u *upRun) publishSite() (*undo, error) {
 // rewireMCP is step 9.
 func (u *upRun) rewireMCP() (*undo, error) {
 	t := mcp.Targets{ChromePath: u.d.Host.ChromePath, Log: u.d.Log}
-	if u.preset.Tidewave {
+	if u.preset.Tidewave && u.preset.Web {
 		t.TidewaveURL = fmt.Sprintf("http://localhost:%d/tidewave/mcp", u.m.Port)
 	}
 	if t.TidewaveURL == "" && t.ChromePath == "" {
@@ -601,6 +616,17 @@ func (u *upRun) setup() error {
 		u.did("ran %s", command)
 	}
 	return nil
+}
+
+// withoutKeys returns kv minus the entries with the given keys.
+func withoutKeys(kv []envfile.KV, keys ...string) []envfile.KV {
+	out := make([]envfile.KV, 0, len(kv))
+	for _, e := range kv {
+		if !slices.Contains(keys, e.Key) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // mergeEnv returns base with every key of kv replaced by kv's value.
