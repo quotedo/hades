@@ -15,8 +15,8 @@
 - name: Provision dev servers
   hosts: dev_servers
   become: true
-  vars_files:
-    - ../roles/host/defaults/main.yml
+  # The host role's defaults are the shared defaults; listing the role here makes them visible
+  # to every role and task in the play, under any tag selection, below inventory precedence.
   roles:
     - { role: host, tags: [host] }
     - { role: postgres, tags: [postgres] }

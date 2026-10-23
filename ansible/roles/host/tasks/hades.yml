@@ -1,0 +1,127 @@
+---
+- name: Create group hades
+  ansible.builtin.group:
+    name: "{{ hades_group }}"
+    system: true
+
+- name: Create the registry root
+  ansible.builtin.file:
+    path: "{{ hades_registry_root }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# setgid so entries get the group, sticky so users cannot remove each other's entries.
+- name: Create the registry directories
+  ansible.builtin.file:
+    path: "{{ hades_registry_root }}/{{ item }}"
+    state: directory
+    owner: root
+    group: "{{ hades_group }}"
+    mode: "3775"
+  loop: [ports, sites, manifests]
+
+- name: Create the Caddy live directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ hades_live_dir | dirname }}"
+    - "{{ hades_live_dir }}"
+
+- name: Read the installed hades version
+  ansible.builtin.command: "{{ hades_bin_dir }}/hades version"
+  register: host_hades_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install hades from a local build (development)
+  ansible.builtin.copy:
+    src: "{{ hades_local_binary_dir }}/{{ item }}"
+    dest: "{{ hades_bin_dir }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop: [hades, hades-port]
+  when: hades_local_binary_dir is defined
+
+- name: Install hades from the release archive
+  when:
+    - hades_local_binary_dir is not defined
+    - host_hades_installed.rc != 0 or host_hades_installed.stdout != hades_version
+  vars:
+    host_hades_archive: "hades_{{ hades_version }}_{{ hades_release_platform }}.tar.gz"
+  block:
+    - name: Create the download directory
+      ansible.builtin.file:
+        path: "{{ hades_download_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Download the release archive, verified against checksums.txt
+      ansible.builtin.get_url:
+        url: "{{ hades_release_base_url }}/{{ host_hades_archive }}"
+        dest: "{{ hades_download_dir }}/{{ host_hades_archive }}"
+        checksum: "sha256:{{ hades_release_base_url }}/checksums.txt"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Unpack hades and hades-port
+      ansible.builtin.unarchive:
+        src: "{{ hades_download_dir }}/{{ host_hades_archive }}"
+        dest: "{{ hades_bin_dir }}"
+        remote_src: true
+        include: [hades, hades-port]
+        owner: root
+        group: root
+        mode: "0755"
+      # In check mode the archive was not downloaded.
+      when: not ansible_check_mode
+
+- name: Read the hades version after install
+  ansible.builtin.command: "{{ hades_bin_dir }}/hades version"
+  register: host_hades_after
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Assert hades is the pinned version
+  ansible.builtin.assert:
+    that:
+      - host_hades_after.stdout == hades_version
+    fail_msg: "{{ hades_bin_dir }}/hades reports {{ host_hades_after.stdout }}, expected {{ hades_version }}"
+    quiet: true
+  when: not ansible_check_mode
+
+- name: Create the host config directory
+  ansible.builtin.file:
+    path: "{{ hades_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# caddy-reload refuses a host config that is not root-owned or is group- or world-writable.
+- name: Write the host config
+  ansible.builtin.template:
+    src: host.toml.j2
+    dest: "{{ hades_config_dir }}/host.toml"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Allow group hades to run hades caddy-reload as root
+  ansible.builtin.template:
+    src: hades-sudoers.j2
+    dest: /etc/sudoers.d/hades
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s

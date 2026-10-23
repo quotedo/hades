@@ -1,0 +1,29 @@
+# {{ ansible_managed }}
+# Hades host config: what this machine offers. Hades reads it and never writes it.
+domain = {{ hades_domain | to_json }}
+label_template = {{ hades_label_template | to_json }}
+port_range = {{ hades_port_range | to_json }}
+ports_dir = {{ (hades_registry_root ~ '/ports') | to_json }}
+sites_dir = {{ (hades_registry_root ~ '/sites') | to_json }}
+manifests_dir = {{ (hades_registry_root ~ '/manifests') | to_json }}
+tool_paths = {{ hades_tool_paths | to_json }}
+chrome_path = {{ (chrome_root ~ '/chrome') | to_json }}
+
+[caddy]
+config = {{ caddy_config | to_json }}
+live_dir = {{ hades_live_dir | to_json }}
+reload = {{ caddy_reload_command | to_json }}
+
+[postgres]
+host = {{ dev_pg_host | to_json }}
+port = {{ dev_pg_port | int }}
+user = {{ dev_pg_user | to_json }}
+password = {{ dev_pg_password | to_json }}
+{% if 'rabbitmq' in dev_services %}
+
+[rabbitmq]
+management_url = {{ ('http://' ~ dev_services_host ~ ':' ~ rabbitmq_management_port) | to_json }}
+amqp_url = {{ ('amqp://' ~ rabbitmq_user ~ ':' ~ rabbitmq_password ~ '@' ~ dev_services_host ~ ':' ~ rabbitmq_amqp_port) | to_json }}
+user = {{ rabbitmq_user | to_json }}
+password = {{ rabbitmq_password | to_json }}
+{% endif %}

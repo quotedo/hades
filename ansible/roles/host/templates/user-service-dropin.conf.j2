@@ -1,0 +1,4 @@
+# {{ ansible_managed }}
+# Lets each user manager hand DefaultLimitNOFILE to its units.
+[Service]
+LimitNOFILE={{ default_limit_nofile }}

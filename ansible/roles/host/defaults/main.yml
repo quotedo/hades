@@ -1,5 +1,85 @@
 ---
-# Shared defaults for every role; site.yml loads this file for the whole play.
-# The hades_ prefix is deliberate (shared across roles), so the role-prefix rule is waived per line.
+# Shared defaults for every role. They are role defaults of `host`, which site.yml and verify.yml
+# list in `roles:`, so every role sees them under any tag selection and inventory still wins.
+# Names shared across roles keep their own prefix, so the role-prefix rule is waived per line.
+
+# hades CLI
 hades_version: "0.1.0" # noqa: var-naming[no-role-prefix]
+hades_release_base_url: "https://github.com/quotedo/hades/releases/download/v{{ hades_version }}" # noqa: var-naming[no-role-prefix]
+hades_release_platform: linux_amd64 # noqa: var-naming[no-role-prefix]
+hades_download_dir: /var/cache/hades # noqa: var-naming[no-role-prefix]
+hades_bin_dir: /usr/local/bin # noqa: var-naming[no-role-prefix]
+# hades_local_binary_dir: a controller directory holding `hades` and `hades-port`; when set,
+# both are copied from there instead of downloading the release (development only).
+
+# Host contract (/etc/hades/host.toml)
+hades_group: hades # noqa: var-naming[no-role-prefix]
+hades_config_dir: /etc/hades # noqa: var-naming[no-role-prefix]
+# A literal for hades to expand, not a Jinja expression.
+hades_label_template: !unsafe "{{project}}-{{name}}" # noqa: var-naming[no-role-prefix] jinja[spacing]
 hades_port_range: "4100-4999" # noqa: var-naming[no-role-prefix]
+hades_registry_root: /srv/hades # noqa: var-naming[no-role-prefix]
+hades_tool_paths: [] # noqa: var-naming[no-role-prefix]
+dev_services: [] # noqa: var-naming[no-role-prefix]
+
+# Caddy (installed by the ingress role)
+caddy_port: 8090 # noqa: var-naming[no-role-prefix]
+caddy_config: /etc/caddy/Caddyfile # noqa: var-naming[no-role-prefix]
+caddy_reload_command: [systemctl, reload, caddy] # noqa: var-naming[no-role-prefix]
+hades_live_dir: /etc/caddy/hades-sites # noqa: var-naming[no-role-prefix]
+
+# Dev Postgres (postgres role)
+dev_pg_host: 127.0.0.1 # noqa: var-naming[no-role-prefix]
+dev_pg_port: 5433 # noqa: var-naming[no-role-prefix]
+dev_pg_user: postgres # noqa: var-naming[no-role-prefix]
+dev_pg_password: postgres # noqa: var-naming[no-role-prefix]
+
+# Shared dev services (services role)
+dev_services_host: 127.0.0.1 # noqa: var-naming[no-role-prefix]
+rabbitmq_management_port: 15672 # noqa: var-naming[no-role-prefix]
+rabbitmq_amqp_port: 5672 # noqa: var-naming[no-role-prefix]
+rabbitmq_user: guest # noqa: var-naming[no-role-prefix]
+rabbitmq_password: guest # noqa: var-naming[no-role-prefix]
+
+# Chrome for Testing; the binary is <chrome_root>/chrome
+chrome_root: /opt/chrome-for-testing # noqa: var-naming[no-role-prefix]
+
+# Resource policy (design 6.2): starting values for a 128 GB box, override per host.
+dev_user_memory_high: 88G # noqa: var-naming[no-role-prefix]
+dev_user_memory_max: 96G # noqa: var-naming[no-role-prefix]
+dev_user_memory_swap_max: 2G # noqa: var-naming[no-role-prefix]
+dev_user_cpu_weight: 900 # noqa: var-naming[no-role-prefix]
+dev_user_tasks_max: infinity # noqa: var-naming[no-role-prefix]
+hades_slice_memory_max: 16G # noqa: var-naming[no-role-prefix]
+hades_slice_cpu_weight: 300 # noqa: var-naming[no-role-prefix]
+protected_system_memory_low: 10G # noqa: var-naming[no-role-prefix]
+protected_system_cpu_weight: 300 # noqa: var-naming[no-role-prefix]
+protected_user_slice_cpu_weight: 700 # noqa: var-naming[no-role-prefix]
+capped_cpu_weight: 100 # noqa: var-naming[no-role-prefix]
+capped_memory_max: 6G # noqa: var-naming[no-role-prefix]
+orca_terminal_memory_max: 28G # noqa: var-naming[no-role-prefix]
+orca_terminal_swap_max: 0 # noqa: var-naming[no-role-prefix]
+vm_swappiness: 10 # noqa: var-naming[no-role-prefix]
+inotify_max_user_instances: 4096 # noqa: var-naming[no-role-prefix]
+inotify_max_user_watches: 2097152 # noqa: var-naming[no-role-prefix]
+default_limit_nofile: 1048576 # noqa: var-naming[no-role-prefix]
+cpu_governor: performance # noqa: var-naming[no-role-prefix]
+erl_flags: "+sbwt none +sbwtdcpu none +sbwtdio none" # noqa: var-naming[no-role-prefix]
+
+# Build dependencies for the per-user toolchains, plus tools the roles use.
+host_packages:
+  - autoconf
+  - m4
+  - libssl-dev
+  - libncurses-dev
+  - libxml2-utils
+  - xsltproc
+  - inotify-tools
+  - build-essential
+  - git
+  - curl
+  - unzip
+  - jq
+  - direnv
+  - git-secret
+  - gnupg

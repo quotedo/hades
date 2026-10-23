@@ -6,7 +6,7 @@ dev_servers:
       ansible_host: <IP>
       ansible_user: <SUDO_USER>
       hades_domain: <DOMAIN>
-      hades_label_template: '{{project}}-{{name}}'
+      hades_label_template: !unsafe '{{project}}-{{name}}'
       cloudflare_team_domain: <TEAM>.cloudflareaccess.com
       dev_services: [rabbitmq, localstack]
       protected:

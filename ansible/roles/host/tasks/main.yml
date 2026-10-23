@@ -1,4 +1,13 @@
 ---
-- name: Placeholder until this role is implemented
-  ansible.builtin.debug:
-    msg: "host role placeholder"
+# Loopback isolation (isolation.yml) is included by site.yml at the end of the play.
+- name: Packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Kernel settings and CPU governor
+  ansible.builtin.import_tasks: sysctl.yml
+
+- name: Resource slices and user manager limits
+  ansible.builtin.import_tasks: slices.yml
+
+- name: Hades CLI, registry, host config and sudoers
+  ansible.builtin.import_tasks: hades.yml

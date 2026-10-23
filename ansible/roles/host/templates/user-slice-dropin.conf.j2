@@ -1,0 +1,8 @@
+# {{ ansible_managed }}
+# Defaults for every user-<uid>.slice; per-uid drop-ins sorting later override them.
+[Slice]
+MemoryHigh={{ dev_user_memory_high }}
+MemoryMax={{ dev_user_memory_max }}
+MemorySwapMax={{ dev_user_memory_swap_max }}
+CPUWeight={{ dev_user_cpu_weight }}
+TasksMax={{ dev_user_tasks_max }}
