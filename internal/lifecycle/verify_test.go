@@ -15,6 +15,9 @@ import (
 	"github.com/quotedo/hades/internal/registry"
 )
 
+// nobody is the uid a root-only test gives a second owner's files.
+const nobody = 65534
+
 // plant writes a manifest file by hand, as another developer of the host
 // could, bypassing WriteManifest's checks.
 func plant(t *testing.T, d Deps, file, content string) string {
@@ -198,8 +201,9 @@ func TestDownAsRootRefusesForgedManifest(t *testing.T) {
 	}
 }
 
-// The suffix is checked against the owner's login from the user database;
-// when the lookup fails, gc says so and falls back to the recorded user.
+// The suffix is checked against the owner's login from the user database,
+// and an owner uid without a login is refused, never checked against the
+// user field the file's author wrote.
 func TestGCChecksSuffixAgainstOwnerLogin(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	mustUp(t, d, c)
@@ -212,15 +216,177 @@ func TestGCChecksSuffixAgainstOwnerLogin(t *testing.T) {
 		t.Fatalf("%+v %v", rep, err)
 	}
 
-	var log bytes.Buffer
-	d.Log = &log
 	d.LoginOf = func(uid int) (string, error) { return "", fmt.Errorf("no such uid %d", uid) }
 	rep, err = GC(context.Background(), d, "", false)
-	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) {
+	if err != nil || len(rep.Released) != 0 || !hasError(rep.Errors, fmt.Sprintf("cannot resolve owner uid %d", os.Getuid())) {
 		t.Fatalf("%+v %v", rep, err)
 	}
-	if !strings.Contains(log.String(), "cannot look up the login of uid") || !strings.Contains(log.String(), `recorded user "roman"`) {
-		t.Fatal(log.String())
+	if _, err := d.Reg.ByLabel("demo-feature-x"); err != nil {
+		t.Fatal("refused manifest removed")
+	}
+}
+
+// The re-reviewer's planted file: user = "bob" and bob's suffix, owned by a
+// uid the user database does not know. Root gc refuses it.
+func TestGCRefusesUnresolvableOwner(t *testing.T) {
+	d, _ := newServerDeps(t, "phoenix")
+	d.PG.(*fakePG).names = []string{"demo_dev_bob_feature_x"}
+	// The real user database, asked about a uid it does not know, as if the
+	// file were owned by that uid (tests cannot chown).
+	const unknown = 4000000000
+	realLookup := (&Deps{}).loginOf
+	if _, err := realLookup(unknown); err == nil {
+		t.Skipf("uid %d resolves on this machine", unknown)
+	}
+	d.LoginOf = func(int) (string, error) { return realLookup(unknown) }
+	path := plant(t, d, "evil.toml", "user = \"bob\"\nlabel = \"evil\"\nname = \"feature/x\"\ndb_suffix = \"_bob_feature_x\"\ndb_bases = [\"demo_dev\"]\nworktree = \"/gone\"\n")
+	rep, err := GC(context.Background(), d, "", false)
+	if err != nil || len(rep.Released) != 0 || !hasError(rep.Errors, "refusing "+path+": cannot resolve owner uid") {
+		t.Fatalf("%+v %v", rep, err)
+	}
+	if len(d.PG.(*fakePG).dropped) != 0 {
+		t.Fatal(d.PG.(*fakePG).dropped)
+	}
+}
+
+// A manifest kept after a failed step no longer claims the port it released,
+// so the port's reuse by the next up does not stop gc from converging.
+func TestKeptManifestPortReuseConverges(t *testing.T) {
+	d, c := newServerDeps(t, "phoenix")
+	mustUp(t, d, c)
+	d.PG.(*fakePG).names = []string{"demo_dev_roman_feature_x"}
+	d.PG.(*fakePG).failDrop = true
+	if err := os.RemoveAll(c.Worktree); err != nil {
+		t.Fatal(err)
+	}
+	if rep, _ := GC(context.Background(), d, "", false); len(rep.Released) != 0 || len(rep.Errors) != 1 {
+		t.Fatalf("gc1: %+v", rep)
+	}
+	kept, err := d.Reg.ByLabel("demo-feature-x")
+	if err != nil || kept.Port != 0 || !reflect.DeepEqual(kept.DBBases, []string{"demo_dev", "demo_test"}) || kept.OwnerUID() != os.Getuid() {
+		t.Fatalf("kept manifest %+v %v", kept, err)
+	}
+	d2, c2 := newServerDepsSharing(t, d, "phoenix", "roman")
+	mustUp(t, d2, c2)
+	if owner, _ := d.Reg.PortOwner(4100); owner != c2.Worktree {
+		t.Fatalf("port 4100 -> %s", owner)
+	}
+	d.PG.(*fakePG).failDrop = false
+	rep, err := GC(context.Background(), d, "", false)
+	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 0 {
+		t.Fatalf("gc2: %+v %v", rep, err)
+	}
+	if owner, _ := d.Reg.PortOwner(4100); owner != c2.Worktree {
+		t.Fatal("gc released the reused port")
+	}
+}
+
+// An old manifest that still records a port someone else now holds (from a
+// hades before kept manifests were rewritten) is skipped, not refused.
+func TestGCStalePortOfAnotherWorktreeIsASkip(t *testing.T) {
+	d, c := newServerDeps(t, "phoenix")
+	mustUp(t, d, c)
+	if err := os.RemoveAll(c.Worktree); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(d.Reg.PortsDir, "4100")
+	other := t.TempDir()
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(other, link); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := GC(context.Background(), d, "", false)
+	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 0 {
+		t.Fatalf("%+v %v", rep, err)
+	}
+	if owner, _ := d.Reg.PortOwner(4100); owner != other {
+		t.Fatal("released another worktree's port")
+	}
+}
+
+// After a down that kept the manifest, the owner's next up in the same
+// worktree claims a fresh port instead of failing on the released one.
+func TestUpAfterKeptManifest(t *testing.T) {
+	d, c := newServerDeps(t, "phoenix")
+	mustUp(t, d, c)
+	d.PG.(*fakePG).names = []string{"demo_dev_roman_feature_x"}
+	d.PG.(*fakePG).failDrop = true
+	if _, err := Down(context.Background(), d, c, false); err != nil {
+		t.Fatal(err)
+	}
+	if m, err := d.Reg.ByLabel("demo-feature-x"); err != nil || m.Port != 0 {
+		t.Fatalf("%+v %v", m, err)
+	}
+	d.PG.(*fakePG).failDrop = false
+	out, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
+	if err != nil || out.Manifest.Port != 4100 {
+		t.Fatalf("%+v %v", out, err)
+	}
+	if owner, _ := d.Reg.PortOwner(4100); owner != c.Worktree {
+		t.Fatal(owner)
+	}
+}
+
+// A manifest written before kept manifests were rewritten may still record a
+// port whose link is gone or is someone else's; up claims a new one.
+func TestUpReclaimsPortWhenRecordedLinkIsGoneOrForeign(t *testing.T) {
+	d, c := newServerDeps(t, "phoenix")
+	mustUp(t, d, c)
+	link := filepath.Join(d.Reg.PortsDir, "4100")
+	other := t.TempDir()
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(other, link); err != nil {
+		t.Fatal(err)
+	}
+	var log bytes.Buffer
+	d.Log = &log
+	out, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
+	if err != nil || out.Manifest.Port != 4101 || !strings.Contains(log.String(), "is now claimed by "+other+"; claiming a new port") {
+		t.Fatalf("%+v %v\n%s", out, err, log.String())
+	}
+	if m, _ := d.Reg.ByLabel("demo-feature-x"); m.Port != 4101 {
+		t.Fatal(m.Port)
+	}
+	site, _ := os.ReadFile(sitePath(t, d, "demo-feature-x"))
+	if string(site) != "import worktree demo-feature-x.example.test 4101\n" {
+		t.Fatalf("%q", site)
+	}
+	if err := os.Remove(filepath.Join(d.Reg.PortsDir, "4101")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true}); err != nil || out.Manifest.Port != 4101 {
+		t.Fatalf("link gone: %+v %v", out, err)
+	}
+}
+
+// A down that finds no manifest of its own names the ignored file that is
+// probably the worktree's.
+func TestDownNamesIgnoredManifestOfThisWorktree(t *testing.T) {
+	d, c := newServerDeps(t, "phoenix")
+	path := plant(t, d, "demo-feature-x.toml", "not = [valid")
+	res, err := Down(context.Background(), d, c, true)
+	if err != nil || len(res) != 1 || !res[0].Skipped || !strings.Contains(res[0].Reason, "no manifest found") || !strings.Contains(res[0].Reason, "ignored manifest "+path+": ") {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	other := plant(t, d, "renamed.toml", fmt.Sprintf("label = \"something-else\"\nworktree = %q\n", c.Worktree))
+	res, _ = Down(context.Background(), d, c, true)
+	if !strings.Contains(res[0].Reason, "ignored manifest "+other+": ") {
+		t.Fatalf("%+v", res)
+	}
+	plant(t, d, "unrelated.toml", "not = [valid")
+	if err := os.Remove(other); err != nil {
+		t.Fatal(err)
+	}
+	res, _ = Down(context.Background(), d, c, true)
+	if strings.Contains(res[0].Reason, "ignored manifest") {
+		t.Fatalf("named an unrelated file: %+v", res)
 	}
 }
 
@@ -228,18 +394,18 @@ func TestGCChecksSuffixAgainstOwnerLogin(t *testing.T) {
 // link owned by someone else, so this runs as root only.
 func TestGCRefusesPortLinkOfAnotherOwner(t *testing.T) {
 	if os.Getuid() != 0 {
-		t.Skip("needs root to chown the port link")
+		t.Skip("needs root to chown the port link to another uid; CI runs it under sudo on Linux")
 	}
 	d, c := newServerDeps(t, "phoenix")
 	mustUp(t, d, c)
 	if err := os.RemoveAll(c.Worktree); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Lchown(filepath.Join(d.Reg.PortsDir, "4100"), 12345, -1); err != nil {
+	if err := os.Lchown(filepath.Join(d.Reg.PortsDir, "4100"), nobody, -1); err != nil {
 		t.Fatal(err)
 	}
 	rep, err := GC(context.Background(), d, "", false)
-	if err != nil || len(rep.Released) != 0 || !hasError(rep.Errors, "port link 4100 is owned by uid 12345") {
+	if err != nil || len(rep.Released) != 0 || !hasError(rep.Errors, fmt.Sprintf("port link 4100 is owned by uid %d", nobody)) {
 		t.Fatalf("%+v %v", rep, err)
 	}
 }

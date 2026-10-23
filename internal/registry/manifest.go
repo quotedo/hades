@@ -73,6 +73,8 @@ func (r *Registry) ManifestPath(label string) (string, error) {
 }
 
 // WriteManifest atomically writes m to ManifestsDir/<label>.toml (mode 0644).
+// Rewriting a manifest read from disk keeps its file owner, so a manifest
+// root rewrites (gc) stays its owner's.
 func (r *Registry) WriteManifest(m *Manifest) error {
 	path, err := r.ManifestPath(m.Label)
 	if err != nil {
@@ -93,6 +95,12 @@ func (r *Registry) WriteManifest(m *Manifest) error {
 	if err := tmp.Chmod(0o644); err != nil {
 		tmp.Close()
 		return err
+	}
+	if m.fromDisk && m.ownerUID != os.Geteuid() {
+		if err := tmp.Chown(m.ownerUID, -1); err != nil {
+			tmp.Close()
+			return fmt.Errorf("keep owner uid %d of %s: %w", m.ownerUID, path, err)
+		}
 	}
 	if err := tmp.Close(); err != nil {
 		return err

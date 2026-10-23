@@ -73,16 +73,17 @@ type upRun struct {
 	c   wtctx.Context
 	opt UpOptions
 
-	cfg        *config.Project
-	preset     preset.Preset
-	project    string
-	label      string
-	vhost      string             // the vhost this run asks for; the manifest may also record an earlier one
-	noRegistry bool               // dry run on a laptop whose registry does not exist yet
-	existing   *registry.Manifest // this worktree's manifest from an earlier up
-	m          *registry.Manifest
-	env        []envfile.KV
-	steps      []string
+	cfg         *config.Project
+	preset      preset.Preset
+	project     string
+	label       string
+	vhost       string             // the vhost this run asks for; the manifest may also record an earlier one
+	noRegistry  bool               // dry run on a laptop whose registry does not exist yet
+	reclaimPort bool               // the earlier run's port is no longer this worktree's
+	existing    *registry.Manifest // this worktree's manifest from an earlier up
+	m           *registry.Manifest
+	env         []envfile.KV
+	steps       []string
 }
 
 // Up brings the worktree's environment up (spec 6.4 steps 1 to 10). A failure
@@ -227,19 +228,11 @@ func (u *upRun) identify() error {
 		}
 	}
 
-	if p := u.cfg.Project; p != "" {
-		slug, err := naming.Slug(p)
-		if err != nil {
-			return fmt.Errorf("project %q in hades.toml: %w", p, err)
-		}
-		u.project = slug
-	} else {
-		slug, err := naming.Slug(filepath.Base(c.Root))
-		if err != nil {
-			return fmt.Errorf("project name from %s: %w", c.Root, err)
-		}
-		u.project = slug
+	project, err := projectSlug(u.cfg, c.Root)
+	if err != nil {
+		return err
 	}
+	u.project = project
 
 	if u.existing != nil {
 		u.label = u.existing.Label
@@ -264,6 +257,23 @@ func (u *upRun) identify() error {
 		return err
 	}
 	return nil
+}
+
+// projectSlug is the project's slug: cfg.Project when set, else the root
+// checkout's directory name.
+func projectSlug(cfg *config.Project, root string) (string, error) {
+	if p := cfg.Project; p != "" {
+		slug, err := naming.Slug(p)
+		if err != nil {
+			return "", fmt.Errorf("project %q in hades.toml: %w", p, err)
+		}
+		return slug, nil
+	}
+	slug, err := naming.Slug(filepath.Base(root))
+	if err != nil {
+		return "", fmt.Errorf("project name from %s: %w", root, err)
+	}
+	return slug, nil
 }
 
 // plan builds the manifest this run writes, except for the port and address.
@@ -335,14 +345,21 @@ func (u *upRun) checkOwned(m *registry.Manifest) error {
 	return nil
 }
 
-// checkPortOwned makes sure the port an earlier up claimed is still ours.
+// checkPortOwned decides whether the port an earlier up claimed is still
+// this worktree's. When its link is gone or points at another worktree (a
+// kept manifest whose port was released and then reused), this run claims a
+// fresh port instead of failing; any other error reading the link fails.
 func (u *upRun) checkPortOwned(port int) error {
 	owner, err := u.d.Reg.PortOwner(port)
-	if err != nil {
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		fmt.Fprintf(u.d.Log, "up: port %d recorded in manifest %s has no claim link any more; claiming a new port\n", port, u.label)
+		u.reclaimPort = true
+	case err != nil:
 		return fmt.Errorf("port %d recorded in manifest %s: %w", port, u.label, err)
-	}
-	if !sameDir(owner, u.c.Worktree) {
-		return fmt.Errorf("port %d recorded in manifest %s is claimed by %s", port, u.label, owner)
+	case !sameDir(owner, u.c.Worktree):
+		fmt.Fprintf(u.d.Log, "up: port %d recorded in manifest %s is now claimed by %s; claiming a new port\n", port, u.label, owner)
+		u.reclaimPort = true
 	}
 	return nil
 }
@@ -385,7 +402,7 @@ func (u *upRun) url() string {
 // claimPort is step 2. Only a web preset claims a port. A port an earlier
 // web run claimed stays in the manifest, so down still releases it.
 func (u *upRun) claimPort() (*undo, error) {
-	if u.existing != nil && u.existing.Port != 0 {
+	if u.existing != nil && u.existing.Port != 0 && !u.reclaimPort {
 		u.setAddress(u.existing.Port)
 		u.did("reused port %d", u.existing.Port)
 		return nil, nil

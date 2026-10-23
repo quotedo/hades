@@ -355,7 +355,9 @@ func TestDownWithoutDatabaseBasesIsSilent(t *testing.T) {
 	}
 }
 
-func TestDownPortClaimedByAnotherWorktreeIsAFailure(t *testing.T) {
+// A port link pointing at another worktree is nothing to release: a skip,
+// and the other worktree's claim stays.
+func TestDownPortClaimedByAnotherWorktreeIsASkip(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	mustUp(t, d, c)
 	link := filepath.Join(d.Reg.PortsDir, "4100")
@@ -367,11 +369,14 @@ func TestDownPortClaimedByAnotherWorktreeIsAFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := Down(context.Background(), d, c, true)
-	if r, _ := findStep(res, "port"); err == nil || r.Err == nil {
+	if r, _ := findStep(res, "port"); err != nil || r.Err != nil || !r.Skipped || !strings.Contains(r.Reason, "is now claimed by "+other) {
 		t.Fatalf("%+v %v", res, err)
 	}
 	if owner, _ := d.Reg.PortOwner(4100); owner != other {
 		t.Fatal("released another worktree's port")
+	}
+	if all, _, _ := d.Reg.All(); len(all) != 0 {
+		t.Fatal("manifest left")
 	}
 }
 

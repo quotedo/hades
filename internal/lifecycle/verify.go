@@ -16,10 +16,10 @@ import (
 // a manifest is believed only as far as its file owner vouches for it: the
 // label is its file name, the vhost is empty or the label, the database
 // suffix is the one hades computes for the owner's login and the recorded
-// name, and the port link belongs to the owner. It returns why m must be left
-// alone, or "" when its claims hold. prefix starts the line logged when the
-// owner's login cannot be looked up.
-func verifyClaims(d Deps, m *registry.Manifest, prefix string) string {
+// name, and a port link claiming this worktree belongs to the owner. An owner
+// uid without a login is refused. It returns why m must be left alone, or ""
+// when its claims hold.
+func verifyClaims(d Deps, m *registry.Manifest) string {
 	owner := m.OwnerUID()
 	if owner < 0 {
 		return "not read from the registry"
@@ -33,23 +33,32 @@ func verifyClaims(d Deps, m *registry.Manifest, prefix string) string {
 	if m.Vhost != "" && m.Vhost != m.Label {
 		return fmt.Sprintf("vhost %q is not its label %q", m.Vhost, m.Label)
 	}
+	// Never fall back to the recorded user field: the file's author wrote it.
 	login, err := d.loginOf(owner)
 	if err != nil {
-		fmt.Fprintf(d.Log, "%s: %s: cannot look up the login of uid %d (%v); checking db_suffix against the recorded user %q instead\n", prefix, m.Label, owner, err, m.User)
-		login = m.User
+		return fmt.Sprintf("cannot resolve owner uid %d: %v", owner, err)
 	}
 	if want := naming.Suffix(login, naming.Sanitize(m.Name)); m.DBSuffix != want {
 		return fmt.Sprintf("db_suffix %q is not %q, the suffix of owner %s for name %q", m.DBSuffix, want, login, m.Name)
 	}
 	if m.Port != 0 {
-		uid, err := d.Reg.PortLinkOwner(m.Port)
+		// A link that is gone or points at another worktree is nothing to
+		// release (the port step skips it); only a link claiming this
+		// worktree must belong to the manifest's owner.
+		target, err := d.Reg.PortOwner(m.Port)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
-			// Nothing to release; the port step reports it.
 		case err != nil:
 			return fmt.Sprintf("port %d: %v", m.Port, err)
-		case uid != owner:
-			return fmt.Sprintf("port link %d is owned by uid %d, the manifest by uid %d", m.Port, uid, owner)
+		case target == m.Worktree:
+			uid, err := d.Reg.PortLinkOwner(m.Port)
+			switch {
+			case errors.Is(err, fs.ErrNotExist):
+			case err != nil:
+				return fmt.Sprintf("port %d: %v", m.Port, err)
+			case uid != owner:
+				return fmt.Sprintf("port link %d is owned by uid %d, the manifest by uid %d", m.Port, uid, owner)
+			}
 		}
 	}
 	return ""

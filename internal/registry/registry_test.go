@@ -343,3 +343,31 @@ func TestSharedCheckRequiresModeAndGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Root rewriting another user's manifest (gc keeping a manifest after a
+// failed step) keeps the file's owner. Only root can chown, so this runs as
+// root only; CI runs it under sudo on Linux.
+func TestRootRewriteKeepsManifestOwner(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root to chown the manifest to another uid; CI runs it under sudo on Linux")
+	}
+	const nobody = 65534
+	r := newReg(t)
+	if err := r.WriteManifest(&Manifest{Label: "demo-x", Port: 4100}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(filepath.Join(r.ManifestsDir, "demo-x.toml"), nobody, -1); err != nil {
+		t.Fatal(err)
+	}
+	m, err := r.ByLabel("demo-x")
+	if err != nil || m.OwnerUID() != nobody {
+		t.Fatalf("%+v %v", m, err)
+	}
+	m.Port = 0
+	if err := r.WriteManifest(m); err != nil {
+		t.Fatal(err)
+	}
+	if uid, err := r.ManifestOwner("demo-x"); err != nil || uid != nobody {
+		t.Fatalf("owner %d %v", uid, err)
+	}
+}

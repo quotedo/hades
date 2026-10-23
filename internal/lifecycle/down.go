@@ -10,12 +10,15 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/quotedo/hades/internal/caddy"
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/envfile"
 	"github.com/quotedo/hades/internal/execx"
+	"github.com/quotedo/hades/internal/naming"
 	"github.com/quotedo/hades/internal/pg"
 	"github.com/quotedo/hades/internal/registry"
 	"github.com/quotedo/hades/internal/wtctx"
@@ -96,6 +99,9 @@ func ownManifest(d Deps, c wtctx.Context) (m *registry.Manifest, owner bool, r S
 	m, err := d.Reg.ByWorktree(c.Worktree, d.User.UID)
 	if errors.Is(err, registry.ErrNoManifest) {
 		r.Skipped, r.Reason = true, err.Error()
+		if p, ok := ignoredManifestFor(d, c); ok {
+			r.Reason += "; " + p.String()
+		}
 		return nil, false, r
 	}
 	if err != nil {
@@ -109,7 +115,7 @@ func ownManifest(d Deps, c wtctx.Context) (m *registry.Manifest, owner bool, r S
 	case !sameDir(m.Worktree, c.Worktree):
 		r.Skipped, r.Reason = true, fmt.Sprintf("manifest %s records worktree %s, not %s", m.Label, m.Worktree, c.Worktree)
 	case uid != d.User.UID:
-		if reason := verifyClaims(d, m, "down"); reason != "" {
+		if reason := verifyClaims(d, m); reason != "" {
 			r.Err = fmt.Errorf("refusing %s: %s", m.Path(), reason)
 			return nil, false, r
 		}
@@ -118,6 +124,48 @@ func ownManifest(d Deps, c wtctx.Context) (m *registry.Manifest, owner bool, r S
 		return m, true, r
 	}
 	return nil, false, r
+}
+
+// ignoredManifestFor finds a manifests directory entry the registry ignored
+// that is probably this worktree's: its file is named for the label up would
+// derive, or it mentions the worktree path. It only improves down's message.
+func ignoredManifestFor(d Deps, c wtctx.Context) (registry.Problem, bool) {
+	_, problems, err := d.Reg.All()
+	if err != nil || len(problems) == 0 {
+		return registry.Problem{}, false
+	}
+	label := ""
+	if cfg, _, err := config.LoadProject(c.Worktree, c.Root); err == nil {
+		if project, err := projectSlug(cfg, c.Root); err == nil {
+			label, _ = naming.Label(d.Host.LabelTemplate, naming.Vars{Project: project, User: d.User.Name, Name: c.Name})
+		}
+	}
+	quoted := strconv.Quote(c.Worktree)
+	for _, p := range problems {
+		if label != "" && filepath.Base(p.Path) == label+".toml" {
+			return p, true
+		}
+		if mentionsPath(p.Path, quoted) {
+			return p, true
+		}
+	}
+	return registry.Problem{}, false
+}
+
+// mentionsPath reports whether the regular file at path contains needle in
+// its first 64 KiB. Symlinks are not followed.
+func mentionsPath(path, needle string) bool {
+	fi, err := os.Lstat(path)
+	if err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, 64<<10))
+	return err == nil && strings.Contains(string(data), needle)
 }
 
 // teardown runs the project's teardown commands from the worktree, with the
@@ -171,21 +219,27 @@ func teardown(ctx context.Context, d Deps, c wtctx.Context) *StepResult {
 // release undoes what m records: databases, vhost, site, port, and then the
 // manifest, but only when none of these steps and none of the steps before
 // it (failed) failed. Otherwise the manifest stays as the record of what is
-// left, and kept names the failed steps. With reload set, removing a site
-// also reloads Caddy; GC passes false and reloads once at the end.
-// siteRemoved reports whether a site file went.
+// left, rewritten without the claims this run released (see keepManifest),
+// and kept names the failed steps. With reload set, removing a site also
+// reloads Caddy; GC passes false and reloads once at the end. siteRemoved
+// reports whether a site file went.
 func release(ctx context.Context, d Deps, m *registry.Manifest, reload bool, failed []string) (res []StepResult, siteRemoved bool, kept []string) {
 	add := func(r *StepResult) {
 		if r != nil {
 			res = append(res, *r)
 		}
 	}
-	add(dropDatabases(ctx, d, m))
-	add(deleteVhost(ctx, d, m))
+	dbs, vhost := dropDatabases(ctx, d, m), deleteVhost(ctx, d, m)
+	add(dbs)
+	add(vhost)
 	site, siteRemoved := removeSite(ctx, d, m, reload)
 	add(site)
-	add(releasePort(d, m))
+	port := releasePort(d, m)
+	add(port)
 	if kept = append(slices.Clone(failed), failedSteps(res)...); len(kept) > 0 {
+		if err := keepManifest(d, m, dbs, vhost, port); err != nil {
+			add(&StepResult{Step: "manifest", Err: err})
+		}
 		return res, siteRemoved, kept
 	}
 	r := StepResult{Step: "manifest"}
@@ -194,6 +248,34 @@ func release(ctx context.Context, d Deps, m *registry.Manifest, reload bool, fai
 	}
 	add(&r)
 	return res, siteRemoved, nil
+}
+
+// keepManifest rewrites a manifest that release keeps, without the claims
+// that are settled: the bases once the databases step succeeded, the vhost
+// once it was deleted, and the port once its link was removed or is no
+// longer this worktree's (ports are reused lowest-first, so a stale port
+// would make the next gc or up trip over someone else's claim). The failed
+// claims stay for the next down or gc. The file keeps its owner.
+func keepManifest(d Deps, m *registry.Manifest, dbs, vhost, port *StepResult) error {
+	settled := func(r *StepResult) bool { return r != nil && r.Err == nil && !r.Skipped }
+	c := *m
+	changed := false
+	if settled(dbs) {
+		c.DBBases, changed = nil, true
+	}
+	if settled(vhost) {
+		c.Vhost, changed = "", true
+	}
+	if port != nil && port.Err == nil { // released, or nothing of ours to release
+		c.Port, changed = 0, true
+	}
+	if !changed {
+		return nil
+	}
+	if err := d.Reg.WriteManifest(&c); err != nil {
+		return fmt.Errorf("rewrite kept manifest %s: %w", m.Label, err)
+	}
+	return nil
 }
 
 // dropDatabases drops the databases matching the bases and suffix the
@@ -265,18 +347,33 @@ func removeSite(ctx context.Context, d Deps, m *registry.Manifest, reload bool) 
 	return r, true
 }
 
-// releasePort releases the recorded port. A link claimed by another
-// worktree is a failure: the manifest says the port is ours. A missing link
-// is a skip, not a failure, so it cannot keep the manifest forever.
+// releasePort releases the recorded port. A link that is missing or points
+// at another worktree is nothing of ours to release: a skip with the reason,
+// never a failure (the port may have been reused since a kept manifest
+// released it).
 func releasePort(d Deps, m *registry.Manifest) *StepResult {
 	if m.Port == 0 {
 		return nil
 	}
 	r := &StepResult{Step: "port"}
-	err := d.Reg.ReleasePort(m.Port, m.Worktree)
+	target, err := d.Reg.PortOwner(m.Port)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		r.Skipped, r.Reason = true, fmt.Sprintf("port link %d is already gone", m.Port)
+		return r
+	case err != nil:
+		r.Err = fmt.Errorf("release port %d: %w", m.Port, err)
+		return r
+	case target != m.Worktree:
+		r.Skipped, r.Reason = true, fmt.Sprintf("port %d is now claimed by %s; nothing to release", m.Port, target)
+		return r
+	}
+	err = d.Reg.ReleasePort(m.Port, m.Worktree)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		r.Skipped, r.Reason = true, fmt.Sprintf("port link %d is already gone", m.Port)
+	case errors.Is(err, registry.ErrNotOwner):
+		r.Skipped, r.Reason = true, fmt.Sprintf("port %d was claimed by another worktree meanwhile; nothing to release", m.Port)
 	case err != nil:
 		r.Err = fmt.Errorf("release port %d: %w", m.Port, err)
 	}

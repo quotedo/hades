@@ -74,7 +74,7 @@ func GC(ctx context.Context, d Deps, owner string, dryRun bool) (GCReport, error
 		if !ok {
 			continue
 		}
-		if reason := verifyClaims(d, m, "gc"); reason != "" {
+		if reason := verifyClaims(d, m); reason != "" {
 			rep.Errors = append(rep.Errors, fmt.Errorf("refusing %s: %s", m.Path(), reason))
 			continue
 		}
