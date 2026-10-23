@@ -9,6 +9,7 @@ chrome_path = ""
 
 [caddy]
 config = "/etc/caddy/Caddyfile"
+live_dir = "/etc/caddy/hades-sites"
 reload = ["systemctl", "reload", "caddy"]
 
 [postgres]

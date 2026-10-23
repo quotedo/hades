@@ -2,9 +2,12 @@ package cli
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/version"
 )
 
@@ -47,5 +50,41 @@ func TestCaddyReloadRefusesLaptopMode(t *testing.T) {
 	code := Main([]string{"caddy-reload"}, &out, &errb, getenv)
 	if code != 1 || !strings.Contains(errb.String(), "caddy-reload: no host config; nothing to reload") {
 		t.Fatalf("code=%d err=%q", code, errb.String())
+	}
+}
+
+func TestCaddyReloadRejectsPositionalArgs(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := Main([]string{"caddy-reload", "extra"}, &out, &errb, func(string) string { return "" }); code != 2 || !strings.Contains(errb.String(), "usage") {
+		t.Fatalf("code=%d err=%q", code, errb.String())
+	}
+}
+
+func TestLoadReloadConfigRootIgnoresEnvAndChecksFile(t *testing.T) {
+	// Not root-owned (we are not root in tests), so the root branch must refuse
+	// even though HADES_HOST_CONFIG points at a usable file.
+	path := filepath.Join(t.TempDir(), "host.toml")
+	os.WriteFile(path, []byte("x"), 0o644)
+	getenv := func(k string) string {
+		if k == "HADES_HOST_CONFIG" {
+			return "laptop"
+		}
+		return ""
+	}
+	_, _, err := loadReloadConfig(0, getenv, path)
+	if os.Geteuid() != 0 && (err == nil || !strings.Contains(err.Error(), "not owned by root")) {
+		t.Fatalf("%v", err)
+	}
+	if _, _, err := loadReloadConfig(0, getenv, filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("missing root config accepted")
+	}
+	link := filepath.Join(t.TempDir(), "link")
+	os.Symlink(path, link)
+	if _, _, err := loadReloadConfig(0, getenv, link); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("%v", err)
+	}
+	// Non-root keeps config.Load behaviour: laptop override gives Laptop mode.
+	if _, mode, err := loadReloadConfig(501, getenv, path); err != nil || mode != config.Laptop {
+		t.Fatalf("%v %v", mode, err)
 	}
 }

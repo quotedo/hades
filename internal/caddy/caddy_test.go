@@ -42,7 +42,7 @@ func TestReloadRunsValidateThenReload(t *testing.T) {
 	dir := t.TempDir()
 	caddy.WriteSite(dir, "a", "a.example.test", 4100)
 	f := &execx.Fake{}
-	cfg := config.Caddy{Config: "/etc/caddy/Caddyfile", Reload: []string{"systemctl", "reload", "caddy"}}
+	cfg := config.Caddy{Config: "/etc/caddy/Caddyfile", LiveDir: t.TempDir(), Reload: []string{"systemctl", "reload", "caddy"}}
 	if err := caddy.Reload(context.Background(), cfg, dir, false, f); err != nil {
 		t.Fatal(err)
 	}
@@ -66,5 +66,85 @@ func TestSudoReloadArgv(t *testing.T) {
 	caddy.SudoReload(context.Background(), f, "/usr/local/bin/hades")
 	if !reflect.DeepEqual(f.Calls[0].Argv, []string{"sudo", "-n", "/usr/local/bin/hades", "caddy-reload"}) {
 		t.Fatal(f.Calls[0].Argv)
+	}
+}
+
+func readDir(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	es, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := map[string]string{}
+	for _, e := range es {
+		b, _ := os.ReadFile(filepath.Join(dir, e.Name()))
+		m[e.Name()] = string(b)
+	}
+	return m
+}
+
+func TestReloadMirrorsToLiveDir(t *testing.T) {
+	dir, live := t.TempDir(), t.TempDir()
+	caddy.WriteSite(dir, "a", "a.example.test", 4100)
+	caddy.WriteSite(dir, "b", "b.example.test", 4101)
+	os.WriteFile(filepath.Join(live, "stale.caddy"), []byte("import worktree s.example.test 1\n"), 0o644)
+	os.WriteFile(filepath.Join(live, "keep.txt"), []byte("x"), 0o644)
+	cfg := config.Caddy{Config: "c", LiveDir: live, Reload: []string{"r"}}
+	f := &execx.Fake{}
+	if err := caddy.Reload(context.Background(), cfg, dir, false, f); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"a.caddy":  "import worktree a.example.test 4100\n",
+		"b.caddy":  "import worktree b.example.test 4101\n",
+		"keep.txt": "x",
+	}
+	if got := readDir(t, live); !reflect.DeepEqual(got, want) {
+		t.Fatalf("%v", got)
+	}
+	env := []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"}
+	if len(f.Calls) != 2 || !reflect.DeepEqual(f.Calls[0].Env, env) || !reflect.DeepEqual(f.Calls[1].Env, env) {
+		t.Fatalf("%+v", f.Calls)
+	}
+}
+
+func TestReloadInvalidOrCheckLeavesLiveDirAlone(t *testing.T) {
+	dir, live := t.TempDir(), t.TempDir()
+	caddy.WriteSite(dir, "a", "a.example.test", 4100)
+	os.WriteFile(filepath.Join(live, "old.caddy"), []byte("import worktree o.example.test 1\n"), 0o644)
+	before := readDir(t, live)
+	cfg := config.Caddy{Config: "c", LiveDir: live, Reload: []string{"r"}}
+
+	f := &execx.Fake{}
+	if err := caddy.Reload(context.Background(), cfg, dir, true, f); err != nil || !reflect.DeepEqual(readDir(t, live), before) {
+		t.Fatal("check touched LiveDir", err)
+	}
+	os.WriteFile(filepath.Join(dir, "bad.caddy"), []byte("x\n"), 0o644)
+	f = &execx.Fake{}
+	if err := caddy.Reload(context.Background(), cfg, dir, false, f); err == nil || len(f.Calls) != 0 || !reflect.DeepEqual(readDir(t, live), before) {
+		t.Fatal("invalid sites affected LiveDir or ran commands")
+	}
+}
+
+func TestWriteSiteRejectsBadLabelAndPort(t *testing.T) {
+	dir := t.TempDir()
+	for _, l := range []string{"", "../x", "a/b", ".", ".."} {
+		if caddy.WriteSite(dir, l, "h.test", 1) == nil {
+			t.Errorf("label %q accepted", l)
+		}
+	}
+	for _, p := range []int{0, -1, 65536} {
+		if caddy.WriteSite(dir, "ok", "h.test", p) == nil {
+			t.Errorf("port %d accepted", p)
+		}
+	}
+}
+
+func TestValidateRejectsOversizedFile(t *testing.T) {
+	dir := t.TempDir()
+	big := "import worktree a.test " + strings.Repeat("1", 300) + "\n"
+	os.WriteFile(filepath.Join(dir, "big.caddy"), []byte(big), 0o644)
+	if caddy.ValidateSites(dir) == nil {
+		t.Fatal("oversized file accepted")
 	}
 }

@@ -29,8 +29,11 @@ var ErrNoHost = fmt.Errorf("no host config: %w", fs.ErrNotExist)
 const defaultHostPath = "/etc/hades/host.toml"
 
 type Caddy struct {
-	Config string   `toml:"config"`
-	Reload []string `toml:"reload"`
+	Config string `toml:"config"`
+	// LiveDir is the root-owned directory Caddy imports; caddy-reload mirrors
+	// the validated sites into it.
+	LiveDir string   `toml:"live_dir"`
+	Reload  []string `toml:"reload"`
 }
 
 type Postgres struct {
@@ -104,6 +107,7 @@ func LoadHost(path string) (*Host, error) {
 		{"sites_dir", h.SitesDir},
 		{"manifests_dir", h.ManifestsDir},
 		{"caddy.config", h.Caddy.Config},
+		{"caddy.live_dir", h.Caddy.LiveDir},
 		{"postgres.host", h.Postgres.Host},
 		{"postgres.user", h.Postgres.User},
 		{"postgres.password", h.Postgres.Password},

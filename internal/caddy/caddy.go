@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,17 +31,34 @@ func SitePath(sitesDir, label string) string {
 	return filepath.Join(sitesDir, label+".caddy")
 }
 
+// maxSiteFile bounds what is read from a site file; a valid one is far shorter.
+const maxSiteFile = 256
+
+// cmdEnv is the fixed environment of every command Reload runs as root.
+var cmdEnv = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"}
+
 // WriteSite atomically writes the site file for label.
 func WriteSite(sitesDir, label, host string, port int) error {
+	if label == "" || label != filepath.Base(label) || label == "." || label == ".." {
+		return fmt.Errorf("refusing label %q: must be a plain file name", label)
+	}
 	if !hostName.MatchString(host) {
 		return fmt.Errorf("refusing host %q: must match %s", host, hostName)
 	}
-	tmp, err := os.CreateTemp(sitesDir, "."+label+".*.tmp")
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("refusing port %d: must be 1..65535", port)
+	}
+	return writeAtomic(sitesDir, label, []byte(fmt.Sprintf("import worktree %s %d\n", host, port)))
+}
+
+// writeAtomic writes content to <dir>/<label>.caddy via a temp file and rename.
+func writeAtomic(dir, label string, content []byte) error {
+	tmp, err := os.CreateTemp(dir, "."+label+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("write site file: %w", err)
 	}
 	defer os.Remove(tmp.Name()) // no-op after a successful rename
-	_, werr := fmt.Fprintf(tmp, "import worktree %s %d\n", host, port)
+	_, werr := tmp.Write(content)
 	cerr := tmp.Close()
 	if err := errors.Join(werr, cerr); err != nil {
 		return fmt.Errorf("write site file: %w", err)
@@ -48,7 +66,7 @@ func WriteSite(sitesDir, label, host string, port int) error {
 	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
 		return fmt.Errorf("write site file: %w", err)
 	}
-	if err := os.Rename(tmp.Name(), SitePath(sitesDir, label)); err != nil {
+	if err := os.Rename(tmp.Name(), SitePath(dir, label)); err != nil {
 		return fmt.Errorf("write site file: %w", err)
 	}
 	return nil
@@ -62,13 +80,15 @@ func RemoveSite(sitesDir, label string) error {
 	return nil
 }
 
-// ValidateSites checks that every *.caddy file in sitesDir is a single valid
-// site line. Anything other than a regular file (such as a symlink) fails.
-func ValidateSites(sitesDir string) error {
+// readSites reads every *.caddy file in sitesDir exactly once, in name order,
+// and returns the validated contents keyed by label. Anything other than a
+// regular file (such as a symlink), or longer than maxSiteFile, is invalid.
+func readSites(sitesDir string) (map[string][]byte, error) {
 	entries, err := os.ReadDir(sitesDir) // sorted by name
 	if err != nil {
-		return fmt.Errorf("sites directory: %w", err)
+		return nil, fmt.Errorf("sites directory: %w", err)
 	}
+	sites := map[string][]byte{}
 	for _, e := range entries {
 		if !strings.HasSuffix(e.Name(), ".caddy") {
 			continue
@@ -76,24 +96,74 @@ func ValidateSites(sitesDir string) error {
 		path := filepath.Join(sitesDir, e.Name())
 		var content []byte
 		if e.Type().IsRegular() {
-			if content, err = os.ReadFile(path); err != nil {
-				return fmt.Errorf("read site file: %w", err)
+			f, err := os.Open(path)
+			if err != nil {
+				return nil, fmt.Errorf("read site file: %w", err)
+			}
+			content, err = io.ReadAll(io.LimitReader(f, maxSiteFile+1))
+			f.Close()
+			if err != nil {
+				return nil, fmt.Errorf("read site file: %w", err)
 			}
 		}
-		if !SiteLine.Match(content) {
-			return fmt.Errorf("site file %s does not match \"import worktree <host> <port>\"", path)
+		if len(content) > maxSiteFile || !SiteLine.Match(content) {
+			return nil, fmt.Errorf("site file %s does not match \"import worktree <host> <port>\"", path)
+		}
+		sites[strings.TrimSuffix(e.Name(), ".caddy")] = content
+	}
+	return sites, nil
+}
+
+// ValidateSites checks that every *.caddy file in sitesDir is a single valid
+// site line.
+func ValidateSites(sitesDir string) error {
+	_, err := readSites(sitesDir)
+	return err
+}
+
+// mirror makes liveDir hold exactly the given site files.
+func mirror(liveDir string, sites map[string][]byte) error {
+	for label, content := range sites {
+		if err := writeAtomic(liveDir, label, content); err != nil {
+			return fmt.Errorf("mirror to %s: %w", liveDir, err)
+		}
+	}
+	entries, err := os.ReadDir(liveDir)
+	if err != nil {
+		return fmt.Errorf("mirror to %s: %w", liveDir, err)
+	}
+	for _, e := range entries {
+		label, ok := strings.CutSuffix(e.Name(), ".caddy")
+		if !ok {
+			continue
+		}
+		if _, keep := sites[label]; !keep {
+			if err := os.Remove(filepath.Join(liveDir, e.Name())); err != nil {
+				return fmt.Errorf("mirror to %s: %w", liveDir, err)
+			}
 		}
 	}
 	return nil
 }
 
-// Reload validates the site files and the Caddy config, then, unless check is
-// set, reloads Caddy. Any site file failure stops before a command runs.
+// Reload validates the site files, mirrors the validated bytes into
+// cfg.LiveDir (the only directory Caddy imports), validates the Caddy config
+// and reloads Caddy. With check it validates only and touches nothing. A site
+// file failure stops before anything else happens.
 func Reload(ctx context.Context, cfg config.Caddy, sitesDir string, check bool, run execx.Runner) error {
-	if err := ValidateSites(sitesDir); err != nil {
+	sites, err := readSites(sitesDir)
+	if err != nil {
 		return err
 	}
-	if _, err := run.Run(ctx, execx.Cmd{Argv: []string{"caddy", "validate", "--config", cfg.Config}}); err != nil {
+	if !check {
+		if cfg.LiveDir == "" {
+			return errors.New("caddy reload: no live_dir configured")
+		}
+		if err := mirror(cfg.LiveDir, sites); err != nil {
+			return err
+		}
+	}
+	if _, err := run.Run(ctx, execx.Cmd{Argv: []string{"caddy", "validate", "--config", cfg.Config}, Env: cmdEnv}); err != nil {
 		return fmt.Errorf("caddy validate: %w", err)
 	}
 	if check {
@@ -102,7 +172,7 @@ func Reload(ctx context.Context, cfg config.Caddy, sitesDir string, check bool, 
 	if len(cfg.Reload) == 0 {
 		return errors.New("caddy reload: no reload command configured")
 	}
-	if _, err := run.Run(ctx, execx.Cmd{Argv: cfg.Reload}); err != nil {
+	if _, err := run.Run(ctx, execx.Cmd{Argv: cfg.Reload, Env: cmdEnv}); err != nil {
 		return fmt.Errorf("caddy reload: %w", err)
 	}
 	return nil
