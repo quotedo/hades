@@ -212,7 +212,10 @@ site file, vhost. The worktree's identity, used to find its manifest, is its pat
 ### 6.3 Configuration layers
 
 **Host config** `/etc/hades/host.toml` (override with `HADES_HOST_CONFIG`). Its presence means
-server mode; its absence means laptop mode. Written by the infra playbook, never by hades.
+server mode; its absence means laptop mode. An explicit `HADES_HOST_CONFIG` that names a missing
+file is an error, not laptop mode, so a typo cannot silently demote a server; the literal
+`HADES_HOST_CONFIG=laptop` forces laptop mode (tests, or a developer who wants laptop behaviour on
+a box that has a host config). Written by the server playbook, never by hades.
 
 ```toml
 domain = "example.test"             # public URLs are <label>.<domain>
