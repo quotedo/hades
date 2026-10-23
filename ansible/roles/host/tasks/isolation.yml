@@ -1,7 +1,6 @@
 ---
 # Loopback isolation (design 6.12), included by site.yml at the end of the play so that the
-# service accounts created by later roles are already present. Outside the role's context, so
-# template paths are relative to this file.
+# service accounts created by later roles are already present.
 #
 # The rules live in their own table, inet hades, applied by hades-nftables.service. Nothing here
 # enables nftables.service or edits /etc/nftables.conf: a stock /etc/nftables.conf starts with
@@ -78,7 +77,7 @@
 
 - name: Write the isolation rules
   ansible.builtin.template:
-    src: ../templates/hades-isolation.nft.j2 # noqa: no-relative-paths (no role context here)
+    src: hades-isolation.nft.j2
     dest: /etc/nftables.d/hades.nft
     owner: root
     group: root
@@ -88,7 +87,7 @@
 
 - name: Write the isolation unit
   ansible.builtin.template:
-    src: ../templates/hades-nftables.service.j2 # noqa: no-relative-paths (no role context here)
+    src: hades-nftables.service.j2
     dest: /etc/systemd/system/hades-nftables.service
     owner: root
     group: root

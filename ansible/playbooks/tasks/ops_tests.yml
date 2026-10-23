@@ -175,6 +175,62 @@
       {{ host_test_chrome_version.stderr | default('') }} {{ host_test_chrome_ldd.stdout | default('') }}
     quiet: true
 
+# Agents drive Chrome as their own non-root user, with the sandbox on (acceptance 3). Where
+# unprivileged user namespaces are restricted (Ubuntu 24.04+), that needs the AppArmor profile.
+- name: Run Chrome headless with its sandbox as an unprivileged account
+  become: true
+  block:
+    - name: Create a scratch directory for the unprivileged Chrome run
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: hades-chrome-test.
+      register: host_test_chrome_tmp
+
+    - name: Hand the scratch directory to nobody
+      ansible.builtin.file:
+        path: "{{ host_test_chrome_tmp.path }}"
+        owner: nobody
+        mode: "0700"
+
+    - name: Dump about:blank with Chrome as nobody, sandbox enabled
+      ansible.builtin.command:
+        argv:
+          - timeout
+          - "60"
+          - runuser
+          - -u
+          - nobody
+          - --
+          - env
+          - HOME={{ host_test_chrome_tmp.path }}
+          - "{{ chrome_root }}/chrome"
+          - --headless
+          - --no-first-run
+          - --disable-gpu
+          - --user-data-dir={{ host_test_chrome_tmp.path }}/profile
+          - --dump-dom
+          - about:blank
+      register: host_test_chrome_nobody
+      changed_when: false
+      failed_when: false
+
+    - name: Assert Chrome renders a page as nobody with its sandbox
+      ansible.builtin.assert:
+        that:
+          - host_test_chrome_nobody.rc == 0
+          - "'<html' in host_test_chrome_nobody.stdout"
+        fail_msg: >-
+          Chrome as nobody exited {{ host_test_chrome_nobody.rc }}:
+          {{ host_test_chrome_nobody.stderr_lines | default([]) | select('search', 'sandbox|namespace|FATAL') | list | join(' | ') }}
+        quiet: true
+
+  always:
+    - name: Remove the scratch directory
+      ansible.builtin.file:
+        path: "{{ host_test_chrome_tmp.path }}"
+        state: absent
+      when: host_test_chrome_tmp.path is defined
+
 - name: Read the system Node version
   ansible.builtin.command: node --version
   register: host_test_node

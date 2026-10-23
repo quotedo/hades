@@ -41,7 +41,8 @@ rabbitmq_amqp_port: 5672 # noqa: var-naming[no-role-prefix]
 rabbitmq_user: guest # noqa: var-naming[no-role-prefix]
 rabbitmq_password: guest # noqa: var-naming[no-role-prefix]
 rabbitmq_mqtt_port: 1883 # noqa: var-naming[no-role-prefix]
-localstack_port: 4566 # noqa: var-naming[no-role-prefix]
+# Outside hades_port_range, which hades hands to worktrees; the SDK endpoint reaches worktrees via the env file.
+localstack_port: 14566 # noqa: var-naming[no-role-prefix]
 redis_port: 6379 # noqa: var-naming[no-role-prefix]
 
 # Chrome for Testing; the binary is <chrome_root>/chrome

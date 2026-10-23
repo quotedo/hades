@@ -163,3 +163,34 @@
       {{ host_chrome_ldd.stdout_lines | map('trim') | join('; ') }}
     quiet: true
   when: not ansible_check_mode
+
+# Only on hosts that run AppArmor; nothing is installed for it. The handler loads this one
+# profile and touches no other.
+- name: Find apparmor_parser
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: [/usr/sbin/apparmor_parser, /sbin/apparmor_parser]
+  register: host_apparmor_parsers
+
+- name: Stat the AppArmor profile directory
+  ansible.builtin.stat:
+    path: /etc/apparmor.d
+  register: host_apparmor_dir
+
+- name: Pick the AppArmor parser
+  ansible.builtin.set_fact:
+    host_apparmor_parser: >-
+      {{ (host_apparmor_parsers.results | selectattr('stat.exists') | map(attribute='item') | list + [''])[0] }}
+
+- name: Write the Chrome for Testing AppArmor profile
+  ansible.builtin.template:
+    src: apparmor-chrome-for-testing.j2
+    dest: /etc/apparmor.d/chrome-for-testing
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "{{ host_apparmor_parser }} -Q -K %s"
+  notify: chrome apparmor load
+  when:
+    - host_apparmor_parser | length > 0
+    - host_apparmor_dir.stat.isdir | default(false)

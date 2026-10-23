@@ -29,8 +29,9 @@
   tasks:
     # Tags on an include select the include only; `apply` gives them to the included tasks.
     - name: Loopback isolation rules
-      ansible.builtin.include_tasks:
-        file: ../roles/host/tasks/isolation.yml
+      ansible.builtin.include_role:
+        name: host
+        tasks_from: isolation
         apply:
           tags: [host, isolation]
       tags: [host, isolation]
