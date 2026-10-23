@@ -193,3 +193,12 @@ func SudoReload(ctx context.Context, run execx.Runner, bin string) error {
 	}
 	return nil
 }
+
+// SudoCheck runs `sudo -n <bin> caddy-reload --check`: the same validation as
+// SudoReload, without mirroring or reloading anything.
+func SudoCheck(ctx context.Context, run execx.Runner, bin string) error {
+	if _, err := run.Run(ctx, execx.Cmd{Argv: []string{"sudo", "-n", bin, "caddy-reload", "--check"}}); err != nil {
+		return fmt.Errorf("sudo caddy-reload --check: %w", err)
+	}
+	return nil
+}

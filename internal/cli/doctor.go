@@ -1,0 +1,354 @@
+package cli
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"io/fs"
+	"net/http"
+	"os"
+	"os/user"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+
+	"github.com/quotedo/hades/internal/caddy"
+	"github.com/quotedo/hades/internal/config"
+	"github.com/quotedo/hades/internal/execx"
+	"github.com/quotedo/hades/internal/lifecycle"
+	"github.com/quotedo/hades/internal/preset"
+	"github.com/quotedo/hades/internal/version"
+)
+
+// check is one line of the doctor report. A failed check with Warn set is
+// advice and does not change the exit code.
+type check struct {
+	Name   string `json:"name"`
+	OK     bool   `json:"ok"`
+	Warn   bool   `json:"warn"`
+	Detail string `json:"detail"`
+}
+
+func pass(name, detail string) check { return check{Name: name, OK: true, Detail: detail} }
+func fail(name string, err error) check {
+	return check{Name: name, Detail: err.Error()}
+}
+func failf(name, format string, a ...any) check {
+	return check{Name: name, Detail: fmt.Sprintf(format, a...)}
+}
+
+// warnIf is a warn-only check: ok when problem is empty.
+func warnIf(name, problem, okDetail string) check {
+	if problem == "" {
+		return pass(name, okDetail)
+	}
+	return check{Name: name, Warn: true, Detail: problem}
+}
+
+// doctor verifies that this machine can run hades and reports every check.
+// It exits 1 when a check that is not warn-only fails.
+func doctor(ctx *Context, args []string) int {
+	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	if err := flags.Parse(args); err != nil || flags.NArg() > 0 {
+		if err == nil {
+			err = fmt.Errorf("unexpected arguments %q", flags.Args())
+		}
+		fmt.Fprintf(ctx.Stderr, "doctor: %v\nusage: hades doctor [--json]\n", err)
+		return 2
+	}
+	checks := runChecks(context.Background(), ctx)
+
+	code := 0
+	for _, c := range checks {
+		if !c.OK && !c.Warn {
+			code = 1
+		}
+	}
+	if ctx.Flags.JSON {
+		if err := writeJSON(ctx.Stdout, checks); err != nil {
+			fmt.Fprintf(ctx.Stderr, "hades: doctor: %v\n", err)
+			return 1
+		}
+		return code
+	}
+	for _, c := range checks {
+		label := "ok  "
+		switch {
+		case c.OK:
+		case c.Warn:
+			label = "WARN"
+		default:
+			label = "FAIL"
+		}
+		fmt.Fprintf(ctx.Stdout, "%s %s: %s\n", label, c.Name, c.Detail)
+	}
+	return code
+}
+
+func runChecks(bg context.Context, ctx *Context) []check {
+	d, err := newDeps(ctx)
+	if err != nil {
+		// Nothing else can run without the host config.
+		return []check{fail("host-config", err)}
+	}
+	checks := []check{pass("host-config", "loaded in "+modeName(d.Mode)+" mode")}
+
+	regCheck := checkRegistry(d)
+	checks = append(checks, regCheck)
+	switch {
+	case d.Mode != config.Server:
+	case !regCheck.OK:
+		checks = append(checks, failf("registry-perms", "not checked: registry directories are missing"))
+	default:
+		checks = append(checks, checkRegistryPerms(d))
+	}
+	if d.Mode == config.Server {
+		if err := caddy.SudoCheck(bg, d.Run, d.Bin); err != nil {
+			checks = append(checks, fail("caddy-reload", err))
+		} else {
+			checks = append(checks, pass("caddy-reload", "sudo -n "+d.Bin+" caddy-reload --check succeeded"))
+		}
+	}
+
+	pgCtx, cancel := context.WithTimeout(bg, probeTimeout)
+	defer cancel()
+	if dbs, err := d.PG.List(pgCtx); err != nil {
+		checks = append(checks, fail("postgres", err))
+	} else {
+		checks = append(checks, pass("postgres", fmt.Sprintf("reachable, %d databases", len(dbs))))
+	}
+
+	if r := d.Host.RabbitMQ; r != nil {
+		checks = append(checks, checkRabbit(bg, r))
+	}
+
+	lookup := toolLookup(d, ctx.Getenv("PATH"))
+	if p, err := lookup("git"); err != nil {
+		checks = append(checks, fail("git", err))
+	} else {
+		checks = append(checks, pass("git", p))
+	}
+
+	var wtDir string
+	if wt, err := resolveWorktree(bg, ctx); err == nil {
+		wtDir = wt.Worktree
+		checks = append(checks, checkTools(wtDir, lookup))
+	}
+
+	_, derr := lookup("direnv")
+	problem := ""
+	if derr != nil {
+		problem = derr.Error()
+	}
+	checks = append(checks, warnIf("direnv", problem, "found"))
+
+	if wtDir != "" {
+		checks = append(checks, checkADEHooks(wtDir))
+	}
+	checks = append(checks, checkVersions(d))
+	return checks
+}
+
+func modeName(m config.Mode) string {
+	if m == config.Server {
+		return "server"
+	}
+	return "laptop"
+}
+
+func registryDirs(d lifecycle.Deps) []string {
+	return []string{d.Reg.PortsDir, d.Reg.SitesDir, d.Reg.ManifestsDir}
+}
+
+func checkRegistry(d lifecycle.Deps) check {
+	if err := d.Reg.Check(); err != nil {
+		return fail("registry", err)
+	}
+	return pass("registry", strings.Join(registryDirs(d), ", "))
+}
+
+// checkRegistryPerms requires each registry directory to be setgid and group
+// writable, with the current user in its group, so every user of the host can
+// claim ports and write manifests.
+func checkRegistryPerms(d lifecycle.Deps) check {
+	const name = "registry-perms"
+	cur, err := user.Current()
+	if err != nil {
+		return fail(name, err)
+	}
+	groups, err := cur.GroupIds()
+	if err != nil {
+		return fail(name, fmt.Errorf("groups of %s: %w", cur.Username, err))
+	}
+	member := map[string]bool{cur.Gid: true}
+	for _, g := range groups {
+		member[g] = true
+	}
+	var problems []string
+	for _, dir := range registryDirs(d) {
+		fi, err := os.Stat(dir)
+		if err != nil {
+			return fail(name, err)
+		}
+		mode := fi.Mode()
+		if mode&os.ModeSetgid == 0 {
+			problems = append(problems, dir+" lacks the setgid bit")
+		}
+		if mode&0o020 == 0 {
+			problems = append(problems, dir+" is not group-writable")
+		}
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if !ok {
+			problems = append(problems, dir+": cannot read its group")
+			continue
+		}
+		gid := strconv.FormatUint(uint64(st.Gid), 10)
+		if !member[gid] {
+			group := gid
+			if g, err := user.LookupGroupId(gid); err == nil {
+				group = g.Name
+			}
+			problems = append(problems, fmt.Sprintf("%s: %s is not a member of group %s", dir, cur.Username, group))
+		}
+	}
+	if len(problems) > 0 {
+		return failf(name, "%s", strings.Join(problems, "; "))
+	}
+	return pass(name, "setgid, group-writable, current user in group")
+}
+
+func checkRabbit(bg context.Context, r *config.RabbitMQ) check {
+	const name = "rabbitmq"
+	ctx, cancel := context.WithTimeout(bg, probeTimeout)
+	defer cancel()
+	url := strings.TrimRight(r.ManagementURL, "/") + "/api/overview"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fail(name, err)
+	}
+	req.SetBasicAuth(r.User, r.Password)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fail(name, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return failf(name, "GET %s: %s", url, resp.Status)
+	}
+	return pass(name, "management API reachable at "+r.ManagementURL)
+}
+
+// toolLookup resolves a tool the way `up` runs commands: the version-manager
+// directories first, then PATH. A Deps.LookPath override wins (tests).
+func toolLookup(d lifecycle.Deps, path string) func(string) (string, error) {
+	if d.LookPath != nil {
+		return d.LookPath
+	}
+	var dirs []string
+	for _, p := range execx.ToolPrepend(d.User.Home, d.Host.ToolPaths) {
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+			dirs = append(dirs, p)
+		}
+	}
+	dirs = append(dirs, filepath.SplitList(path)...)
+	return func(name string) (string, error) {
+		for _, dir := range dirs {
+			if dir == "" {
+				dir = "."
+			}
+			p := filepath.Join(dir, name)
+			if fi, err := os.Stat(p); err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0 {
+				return p, nil
+			}
+		}
+		return "", fmt.Errorf("%s not found on PATH", name)
+	}
+}
+
+// checkTools verifies the toolchain of the worktree's preset is installed.
+func checkTools(wtDir string, lookup func(string) (string, error)) check {
+	const name = "tools"
+	p, err := preset.Detect(wtDir)
+	if err != nil {
+		return fail(name, err)
+	}
+	var tools []string
+	switch p.Kind {
+	case preset.Phoenix, preset.Elixir:
+		tools = []string{"mix"}
+	case preset.Go:
+		tools = []string{"go"}
+	case preset.Node:
+		tools = []string{nodeManager(wtDir)}
+	default:
+		return pass(name, "no preset tools needed")
+	}
+	var found []string
+	for _, t := range tools {
+		path, err := lookup(t)
+		if err != nil {
+			return failf(name, "%s preset needs %s: %v", p.Kind, t, err)
+		}
+		found = append(found, path)
+	}
+	return pass(name, strings.Join(found, ", "))
+}
+
+// nodeManager is the package manager of the lockfile, npm without one.
+func nodeManager(dir string) string {
+	for _, l := range []struct{ file, tool string }{{"pnpm-lock.yaml", "pnpm"}, {"yarn.lock", "yarn"}} {
+		if _, err := os.Stat(filepath.Join(dir, l.file)); err == nil {
+			return l.tool
+		}
+	}
+	return "npm"
+}
+
+// checkADEHooks warns when an ADE config exists but never runs `hades up`.
+func checkADEHooks(wtDir string) check {
+	const name = "ade-hooks"
+	var found, missing []string
+	for _, f := range []string{"paseo.json", "orca.yaml"} {
+		data, err := os.ReadFile(filepath.Join(wtDir, f))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return check{Name: name, Warn: true, Detail: err.Error()}
+		}
+		found = append(found, f)
+		if !strings.Contains(string(data), "hades up") {
+			missing = append(missing, f)
+		}
+	}
+	switch {
+	case len(found) == 0:
+		return pass(name, "no paseo.json or orca.yaml")
+	case len(missing) > 0:
+		return warnIf(name, strings.Join(missing, ", ")+" does not mention `hades up`", "")
+	}
+	return pass(name, strings.Join(found, ", ")+" run hades up")
+}
+
+// checkVersions warns about manifests written by another hades version.
+func checkVersions(d lifecycle.Deps) check {
+	const name = "versions"
+	all, err := allManifests(d)
+	if err != nil {
+		return check{Name: name, Warn: true, Detail: err.Error()}
+	}
+	var stale []string
+	for _, m := range all {
+		if m.HadesVersion != version.Version {
+			stale = append(stale, m.Label)
+		}
+	}
+	if len(stale) > 0 {
+		return warnIf(name, fmt.Sprintf("manifests not from hades %s: %s", version.Version, strings.Join(stale, ", ")), "")
+	}
+	return pass(name, "all manifests from hades "+version.Version)
+}

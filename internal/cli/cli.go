@@ -39,11 +39,11 @@ var commands = map[string]Command{
 	"up":           up,
 	"down":         down,
 	"gc":           gc,
-	// Placeholder until the real port command replaces it.
-	"port": func(ctx *Context, _ []string) int {
-		fmt.Fprintln(ctx.Stderr, "port: not implemented")
-		return 1
-	},
+	"ls":           ls,
+	"status":       status,
+	"doctor":       doctor,
+	"env":          envCmd,
+	"port":         port,
 }
 
 // Main parses global flags (before and after the command word), dispatches
