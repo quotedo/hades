@@ -40,9 +40,37 @@ rabbitmq_management_port: 15672 # noqa: var-naming[no-role-prefix]
 rabbitmq_amqp_port: 5672 # noqa: var-naming[no-role-prefix]
 rabbitmq_user: guest # noqa: var-naming[no-role-prefix]
 rabbitmq_password: guest # noqa: var-naming[no-role-prefix]
+rabbitmq_mqtt_port: 1883 # noqa: var-naming[no-role-prefix]
+localstack_port: 4566 # noqa: var-naming[no-role-prefix]
+redis_port: 6379 # noqa: var-naming[no-role-prefix]
 
 # Chrome for Testing; the binary is <chrome_root>/chrome
 chrome_root: /opt/chrome-for-testing # noqa: var-naming[no-role-prefix]
+chrome_channel: stable # noqa: var-naming[no-role-prefix]
+# System Node from NodeSource, used only to run @puppeteer/browsers for the Chrome install.
+node_major: 24 # noqa: var-naming[no-role-prefix]
+# Runtime libraries and fonts Chrome needs; on Ubuntu 24.04+ the first two are virtual
+# packages provided by their t64 builds.
+host_chrome_packages:
+  - libnss3
+  - libatk-bridge2.0-0
+  - libgtk-3-0
+  - libgbm1
+  - libasound2t64
+  - fonts-liberation
+
+# Ops (design 6.10)
+backup_dir: /var/backups/hades # noqa: var-naming[no-role-prefix]
+host_backup_keep: 7
+host_backup_on_calendar: "*-*-* 03:30:00"
+host_gc_on_calendar: weekly
+journald_system_max_use: 2G # noqa: var-naming[no-role-prefix]
+docker_log_max_size: 50m # noqa: var-naming[no-role-prefix]
+docker_log_max_file: 3 # noqa: var-naming[no-role-prefix]
+
+# Loopback isolation (design 6.12): service accounts allowed to reach the dev port set, when
+# they exist on the host. Their uids are resolved at run time.
+host_isolation_service_accounts: [caddy, cloudflared, hades-postgres]
 
 # Resource policy (design 6.2): starting values for a 128 GB box, override per host.
 # The per-user values (dev_user_*, default_limit_nofile) are applied by the user role.
@@ -88,3 +116,4 @@ host_packages:
   - direnv
   - git-secret
   - gnupg
+  - netcat-openbsd

@@ -1,0 +1,127 @@
+---
+- name: Read the hades nftables table
+  ansible.builtin.command: nft list table inet hades
+  become: true
+  register: host_test_nft
+  changed_when: false
+  failed_when: false
+
+- name: Assert the table holds the port range bounds and the dev Postgres port
+  ansible.builtin.assert:
+    that:
+      - host_test_nft.rc == 0
+      - host_test_nft.stdout is search('\\b' ~ host_test_range[0] ~ '\\b')
+      - host_test_nft.stdout is search('\\b' ~ host_test_range[-1] ~ '\\b')
+      - host_test_nft.stdout is search('\\b' ~ dev_pg_port ~ '\\b')
+    fail_msg: >-
+      table inet hades is missing or lacks {{ hades_port_range }} or {{ dev_pg_port }}:
+      {{ host_test_nft.stderr | default('') }}
+    quiet: true
+  vars:
+    host_test_range: "{{ hades_port_range | string | split('-') }}"
+
+- name: Read the state of the isolation unit
+  ansible.builtin.systemd_service:
+    name: hades-nftables.service
+  register: host_test_nft_unit
+
+- name: Assert the isolation unit is enabled and active, so the rules return on boot
+  ansible.builtin.assert:
+    that:
+      - host_test_nft_unit.status.UnitFileState == 'enabled'
+      - host_test_nft_unit.status.ActiveState == 'active'
+    fail_msg: >-
+      hades-nftables.service is {{ host_test_nft_unit.status.UnitFileState | default('missing') }}
+      and {{ host_test_nft_unit.status.ActiveState | default('missing') }}
+    quiet: true
+
+# Nothing in the dev port set may be listening yet, and `nc -z` cannot tell a reject from a
+# closed port, so the test listens on the first port of the range itself, as root.
+- name: Probe loopback isolation as a throwaway non-dev account
+  become: true
+  vars:
+    host_test_probe_user: hades-probe
+    host_test_probe_unit: hades-probe-listener.service
+    host_test_probe_port: "{{ (hades_port_range | string | split('-'))[0] }}"
+  block:
+    - name: Assert the probe account is not a dev user
+      ansible.builtin.assert:
+        that:
+          - host_test_probe_user not in (dev_users | default([]) | map(attribute='name'))
+        fail_msg: "{{ host_test_probe_user }} is a dev user; the probe needs an account outside the allowed set"
+        quiet: true
+
+    - name: Assert nothing listens on the probe port
+      ansible.builtin.command: ss -Hltn "sport = :{{ host_test_probe_port }}"
+      register: host_test_probe_busy
+      changed_when: false
+      failed_when: host_test_probe_busy.stdout | length > 0
+
+    - name: Create the probe account
+      ansible.builtin.user:
+        name: "{{ host_test_probe_user }}"
+        system: true
+        create_home: false
+        home: /nonexistent
+        shell: /usr/sbin/nologin
+
+    - name: Start a root listener on the probe port
+      ansible.builtin.command: >-
+        systemd-run --unit={{ host_test_probe_unit }} --collect
+        nc -dlk 127.0.0.1 {{ host_test_probe_port }}
+      changed_when: true
+
+    - name: Wait for the listener
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: "{{ host_test_probe_port | int }}"
+        timeout: 10
+
+    - name: Connect to the dev Postgres port as the probe account
+      ansible.builtin.command: runuser -u {{ host_test_probe_user }} -- nc -z -w 3 127.0.0.1 {{ dev_pg_port }}
+      register: host_test_probe_pg
+      changed_when: false
+      failed_when: false
+
+    - name: Connect to the listener as the probe account
+      ansible.builtin.command: runuser -u {{ host_test_probe_user }} -- nc -z -w 3 127.0.0.1 {{ host_test_probe_port }}
+      register: host_test_probe_dev
+      changed_when: false
+      failed_when: false
+
+    - name: Connect to the listener as root
+      ansible.builtin.command: nc -z -w 3 127.0.0.1 {{ host_test_probe_port }}
+      register: host_test_probe_root
+      changed_when: false
+      failed_when: false
+
+    - name: Connect to ssh as the probe account
+      ansible.builtin.command: runuser -u {{ host_test_probe_user }} -- nc -z -w 3 127.0.0.1 22
+      register: host_test_probe_ssh
+      changed_when: false
+      failed_when: false
+
+    - name: Assert the dev ports refuse the probe account and nothing else changed
+      ansible.builtin.assert:
+        that:
+          - host_test_probe_pg.rc != 0
+          - host_test_probe_dev.rc != 0
+          - host_test_probe_root.rc == 0
+          - host_test_probe_ssh.rc == 0
+        fail_msg: >-
+          probe results (0 = connected): dev Postgres {{ host_test_probe_pg.rc }} (expected refused),
+          port {{ host_test_probe_port }} on loopback {{ host_test_probe_dev.rc }} (expected refused),
+          as root {{ host_test_probe_root.rc }} (expected 0), ssh {{ host_test_probe_ssh.rc }} (expected 0)
+        quiet: true
+
+  always:
+    - name: Stop the listener
+      ansible.builtin.systemd_service:
+        name: "{{ host_test_probe_unit }}"
+        state: stopped
+      failed_when: false
+
+    - name: Remove the probe account
+      ansible.builtin.user:
+        name: "{{ host_test_probe_user }}"
+        state: absent

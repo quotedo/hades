@@ -27,6 +27,10 @@
     - { role: user, tags: [user] }
     - { role: protected, tags: [protected] }
   tasks:
+    # Tags on an include select the include only; `apply` gives them to the included tasks.
     - name: Loopback isolation rules
-      ansible.builtin.include_tasks: ../roles/host/tasks/isolation.yml
+      ansible.builtin.include_tasks:
+        file: ../roles/host/tasks/isolation.yml
+        apply:
+          tags: [host, isolation]
       tags: [host, isolation]

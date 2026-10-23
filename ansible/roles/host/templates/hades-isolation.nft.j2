@@ -1,0 +1,50 @@
+#!/usr/sbin/nft -f
+# {{ ansible_managed }}
+# Loopback isolation (hades design 6.12). This file manages table inet hades and nothing else;
+# hades-nftables.service applies it at boot and on reload. Do not include it from
+# /etc/nftables.conf. The first two lines make the reload atomic and idempotent.
+table inet hades {}
+delete table inet hades
+
+table inet hades {
+	# root, the present dev users and the service accounts that exist on this host
+	set allowed_uids {
+		type uid
+		elements = { {{ ([0] + host_isolation_dev_uids + host_isolation_service_uids) | unique | sort | join(', ') }} }
+	}
+
+	# the present dev users
+	set dev_uids {
+		type uid
+{% if host_isolation_dev_uids | length > 0 %}
+		elements = { {{ host_isolation_dev_uids | join(', ') }} }
+{% endif %}
+	}
+
+	# worktree ports, dev Postgres, shared services, Caddy and every ADE daemon port
+	set dev_ports {
+		type inet_service
+		flags interval
+		auto-merge
+		elements = { {{ host_isolation_dev_ports | join(', ') }} }
+	}
+
+	# protected workloads the dev users must not reach (protected.blocked_ports)
+	set blocked_ports {
+		type inet_service
+		flags interval
+		auto-merge
+{% if host_isolation_blocked_ports | length > 0 %}
+		elements = { {{ host_isolation_blocked_ports | join(', ') }} }
+{% endif %}
+	}
+
+	# Connection attempts only (SYN without ACK), and only to an address of this host
+	# (loopback, bridges and public addresses alike), so outbound traffic to other hosts and
+	# replies on established connections are never touched.
+	chain output {
+		type filter hook output priority filter; policy accept;
+		tcp flags & (fin | syn | rst | ack) == syn tcp dport @dev_ports meta skuid != @allowed_uids fib daddr type local counter reject with tcp reset
+		tcp flags & (fin | syn | rst | ack) == syn tcp dport @blocked_ports meta skuid @dev_uids fib daddr type local counter reject with tcp reset
+	}
+}

@@ -20,3 +20,11 @@
     - name: Host tests
       ansible.builtin.import_tasks: tasks/host_tests.yml
       tags: [host]
+
+    - name: Loopback isolation tests
+      ansible.builtin.import_tasks: tasks/isolation_tests.yml
+      tags: [isolation]
+
+    - name: Ops tests
+      ansible.builtin.import_tasks: tasks/ops_tests.yml
+      tags: [ops]

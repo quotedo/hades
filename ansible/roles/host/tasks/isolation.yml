@@ -1,4 +1,109 @@
 ---
-- name: Placeholder until loopback isolation is implemented
-  ansible.builtin.debug:
-    msg: "isolation placeholder"
+# Loopback isolation (design 6.12), included by site.yml at the end of the play so that the
+# service accounts created by later roles are already present. Outside the role's context, so
+# template paths are relative to this file.
+#
+# The rules live in their own table, inet hades, applied by hades-nftables.service. Nothing here
+# enables nftables.service or edits /etc/nftables.conf: a stock /etc/nftables.conf starts with
+# `flush ruleset` and would wipe ufw's, Docker's and other tools' rules at boot.
+#
+# nftables `meta skgid` sees only the socket creator's primary gid, and dev users keep a private
+# primary group (hades is supplementary), so "group hades" is matched as an explicit uid set.
+- name: Assert the variables loopback isolation consumes
+  ansible.builtin.assert:
+    that:
+      - dev_users is defined
+      - dev_users is sequence
+      - dev_users is not string
+      - dev_users is not mapping
+      - hades_port_range is string
+      - hades_port_range is match('^[0-9]+-[0-9]+$')
+      - (protected | default({})) is mapping
+      - (protected | default({})).blocked_ports | default([]) is sequence
+      - (protected | default({})).blocked_ports | default([]) is not string
+      - dev_services is sequence
+      - dev_services is not string
+    fail_msg: >-
+      dev_users and dev_services must be lists, hades_port_range a "<first>-<last>" string and
+      protected.blocked_ports, when set, a list of ports
+    quiet: true
+
+- name: Read the local accounts
+  ansible.builtin.getent:
+    database: passwd
+
+# Accounts that do not exist yet (caddy, cloudflared and hades-postgres before their roles have
+# run) are left out, so the rule set changes once when they appear.
+- name: Compute the uid and port sets
+  ansible.builtin.set_fact:
+    host_isolation_dev_uids: >-
+      {%- set out = [] -%}
+      {%- for u in dev_users if (u.state | default('present')) == 'present' -%}
+      {%- set _ = out.append(u.uid | int) -%}
+      {%- endfor -%}
+      {{ out | unique | sort }}
+    host_isolation_service_uids: >-
+      {%- set out = [] -%}
+      {%- for name in host_isolation_service_accounts if name in ansible_facts.getent_passwd -%}
+      {%- set _ = out.append(ansible_facts.getent_passwd[name][1] | int) -%}
+      {%- endfor -%}
+      {{ out | unique | sort }}
+    host_isolation_dev_ports: >-
+      {%- set out = [hades_port_range, dev_pg_port | int, caddy_port | int] -%}
+      {%- if 'rabbitmq' in dev_services -%}
+      {%- set _ = out.extend([rabbitmq_amqp_port | int, rabbitmq_management_port | int, rabbitmq_mqtt_port | int]) -%}
+      {%- endif -%}
+      {%- if 'localstack' in dev_services -%}
+      {%- set _ = out.append(localstack_port | int) -%}
+      {%- endif -%}
+      {%- if 'redis' in dev_services -%}
+      {%- set _ = out.append(redis_port | int) -%}
+      {%- endif -%}
+      {%- for u in dev_users if (u.state | default('present')) == 'present' -%}
+      {%- for key in ['paseo_port', 'orca_port'] if u[key] is defined -%}
+      {%- set _ = out.append(u[key] | int) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out | map('string') | unique | list }}
+    host_isolation_blocked_ports: >-
+      {{ (protected | default({})).blocked_ports | default([]) | map('int') | unique | sort }}
+
+- name: Create /etc/nftables.d
+  ansible.builtin.file:
+    path: /etc/nftables.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the isolation rules
+  ansible.builtin.template:
+    src: ../templates/hades-isolation.nft.j2 # noqa: no-relative-paths (no role context here)
+    dest: /etc/nftables.d/hades.nft
+    owner: root
+    group: root
+    mode: "0644"
+    validate: nft -c -f %s
+  notify: hades-nftables reload
+
+- name: Write the isolation unit
+  ansible.builtin.template:
+    src: ../templates/hades-nftables.service.j2 # noqa: no-relative-paths (no role context here)
+    dest: /etc/systemd/system/hades-nftables.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: host_isolation_unit
+  notify: daemon-reload
+
+# Reloads systemd and applies changed rules (the reload handler starts an inactive unit).
+- name: Apply the isolation rules
+  ansible.builtin.meta: flush_handlers
+
+# In check mode a unit file that is about to be written does not exist yet.
+- name: Enable and start the isolation unit
+  ansible.builtin.systemd_service:
+    name: hades-nftables.service
+    enabled: true
+    state: started
+  when: not (ansible_check_mode and host_isolation_unit is changed)

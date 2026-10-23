@@ -1,0 +1,165 @@
+---
+# Chrome for Testing (design 6.4) for the chrome-devtools MCP, installed with
+# @puppeteer/browsers. That needs Node on the host: a system Node from NodeSource, used for this
+# install only (dev users run their own Node from asdf).
+- name: Install the Chrome runtime libraries and fonts
+  ansible.builtin.apt:
+    name: "{{ host_chrome_packages }}"
+    state: present
+    install_recommends: false
+
+- name: Create the apt keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download the NodeSource signing key
+  ansible.builtin.get_url:
+    url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
+    dest: /etc/apt/keyrings/nodesource.asc
+    owner: root
+    group: root
+    mode: "0644"
+  register: host_nodesource_key
+
+- name: Add the NodeSource repository
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible (hades host role)
+      Types: deb
+      URIs: https://deb.nodesource.com/node_{{ node_major }}.x
+      Suites: nodistro
+      Components: main
+      Architectures: amd64
+      Signed-By: /etc/apt/keyrings/nodesource.asc
+    dest: /etc/apt/sources.list.d/nodesource.sources
+    owner: root
+    group: root
+    mode: "0644"
+  register: host_nodesource_repo
+
+# The distribution ships its own, older nodejs without npm; NodeSource's must win.
+- name: Prefer NodeSource for nodejs
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible (hades host role)
+      Package: nodejs
+      Pin: origin deb.nodesource.com
+      Pin-Priority: 600
+    dest: /etc/apt/preferences.d/nodesource
+    owner: root
+    group: root
+    mode: "0644"
+  register: host_nodesource_pin
+
+- name: Read the system Node version
+  ansible.builtin.command: node --version
+  register: host_node_before
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# The apt cache is refreshed whenever Node is not yet the pinned major, so a run that stopped
+# after adding the repository still picks NodeSource's package up next time.
+- name: Install Node from NodeSource
+  ansible.builtin.apt:
+    name: nodejs
+    state: present
+    update_cache: "{{ host_nodesource_key is changed or host_nodesource_repo is changed or host_nodesource_pin is changed or host_node_wrong }}"
+  vars:
+    host_node_wrong: "{{ host_node_before.rc != 0 or host_node_before.stdout is not match('v' ~ node_major ~ '\\.') }}"
+
+- name: Read the system Node version after install
+  ansible.builtin.command: node --version
+  register: host_node_after
+  changed_when: false
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: Assert the system Node is NodeSource's pinned major
+  ansible.builtin.assert:
+    that:
+      - host_node_after.rc == 0
+      - host_node_after.stdout is match('v' ~ node_major ~ '\\.')
+    fail_msg: >-
+      node --version reports {{ host_node_after.stdout | default('nothing') }}, expected
+      v{{ node_major }}.x from NodeSource; another nodejs package may already be installed
+    quiet: true
+  when: not ansible_check_mode
+
+- name: Create the Chrome for Testing directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ chrome_root }}"
+    - "{{ hades_download_dir }}"
+
+# @puppeteer/browsers keeps each browser under <path>/chrome/<platform>-<version>/, so it gets a
+# directory of its own and <chrome_root>/chrome becomes a link to the binary. Installed once;
+# remove <chrome_root>/browsers to move to a newer build of the channel.
+- name: Install Chrome for Testing
+  ansible.builtin.command:
+    argv:
+      - npx
+      - -y
+      - "@puppeteer/browsers"
+      - install
+      - chrome@{{ chrome_channel }}
+      - --path
+      - "{{ chrome_root }}/browsers"
+    creates: "{{ chrome_root }}/browsers/chrome"
+  environment:
+    npm_config_cache: "{{ hades_download_dir }}/npm"
+    npm_config_update_notifier: "false"
+    npm_config_fund: "false"
+
+- name: Find the Chrome binary
+  ansible.builtin.find:
+    paths: "{{ chrome_root }}/browsers/chrome"
+    patterns: chrome
+    file_type: file
+    recurse: true
+  register: host_chrome_found
+  when: not ansible_check_mode
+
+- name: Assert the Chrome binary was installed
+  ansible.builtin.assert:
+    that:
+      - host_chrome_found.files | length > 0
+    fail_msg: "no chrome binary under {{ chrome_root }}/browsers/chrome"
+    quiet: true
+  when: not ansible_check_mode
+
+- name: Link the Chrome binary to its fixed path
+  ansible.builtin.file:
+    src: "{{ (host_chrome_found.files | sort(attribute='mtime') | last).path }}"
+    dest: "{{ chrome_root }}/chrome"
+    state: link
+    owner: root
+    group: root
+  when: not ansible_check_mode
+
+- name: Find libraries Chrome cannot resolve
+  ansible.builtin.shell: set -o pipefail; ldd {{ chrome_root }}/chrome | { grep 'not found' || true; }
+  args:
+    executable: /bin/bash
+  register: host_chrome_ldd
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Assert Chrome resolves every library
+  ansible.builtin.assert:
+    that:
+      - host_chrome_ldd.stdout == ''
+    fail_msg: >-
+      {{ chrome_root }}/chrome lacks libraries; add their packages to host_chrome_packages:
+      {{ host_chrome_ldd.stdout_lines | map('trim') | join('; ') }}
+    quiet: true
+  when: not ansible_check_mode

@@ -15,9 +15,15 @@
       - dev_services is not mapping
       - hades_version is string
       - hades_version | length > 0
+      - backup_dir is string
+      - backup_dir is match('^/.+')
+      - chrome_channel is string
+      - chrome_channel | length > 0
+      - node_major | int > 0
     fail_msg: >-
-      hades_domain, hades_label_template and hades_version must be non-empty strings and
-      dev_services a list
+      hades_domain, hades_label_template, hades_version and chrome_channel must be non-empty
+      strings, backup_dir an absolute path, node_major a Node major version and dev_services
+      a list
     quiet: true
 
 - name: Packages
@@ -31,3 +37,9 @@
 
 - name: Hades CLI, registry, host config and sudoers
   ansible.builtin.import_tasks: hades.yml
+
+- name: Gc and backup timers, status, journal and Docker log caps, login environment
+  ansible.builtin.import_tasks: ops.yml
+
+- name: Chrome for Testing
+  ansible.builtin.import_tasks: chrome.yml

@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Weekly hades gc
+
+[Timer]
+OnCalendar={{ host_gc_on_calendar }}
+Persistent=true
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
