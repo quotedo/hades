@@ -3,6 +3,7 @@
 package preset
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -38,7 +39,7 @@ type Preset struct {
 
 var (
 	appRe        = regexp.MustCompile(`\bapp:\s*:([A-Za-z_][A-Za-z0-9_]*)`)
-	setupAliasRe = regexp.MustCompile(`\bsetup:\s*\[`)
+	setupAliasRe = regexp.MustCompile(`\bsetup:\s*\S`)
 )
 
 // MixApp returns the `app: :name` atom from a mix.exs.
@@ -56,26 +57,42 @@ func mixHasDep(mixExs []byte, dep string) bool {
 }
 
 // mixHasAlias reports whether an alias of the given name is defined. It
-// accepts `name: [` anywhere in the file rather than parsing aliases/0.
+// accepts `name:` followed by a value anywhere in the file rather than
+// parsing aliases/0.
 func mixHasAlias(mixExs []byte, name string) bool {
-	if name == "setup" {
-		return setupAliasRe.Match(mixExs)
-	}
-	return regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `:\s*\[`).Match(mixExs)
+	return regexp.MustCompile(`\b` + regexp.QuoteMeta(name) + `:\s*\S`).Match(mixExs)
 }
 
-func exists(path string) bool {
+// exists reports whether path exists; only not-exist counts as absent.
+func exists(path string) (bool, error) {
 	_, err := os.Stat(path)
-	return err == nil
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
 // Detect inspects dir: phoenix, elixir, go, node, else none.
 func Detect(dir string) (Preset, error) {
 	p := Preset{Kind: None, dir: dir}
-	mixPath := filepath.Join(dir, "mix.exs")
-	switch {
-	case exists(mixPath):
-		mix, err := os.ReadFile(mixPath)
+	for _, c := range []struct {
+		file string
+		kind Kind
+	}{{"mix.exs", Elixir}, {"go.mod", Go}, {"package.json", Node}} {
+		ok, err := exists(filepath.Join(dir, c.file))
+		if err != nil {
+			return Preset{}, err
+		}
+		if ok {
+			p.Kind = c.kind
+			break
+		}
+	}
+	if p.Kind == Elixir {
+		mix, err := os.ReadFile(filepath.Join(dir, "mix.exs"))
 		if err != nil {
 			return Preset{}, err
 		}
@@ -85,7 +102,6 @@ func Detect(dir string) (Preset, error) {
 		}
 		p.AppName = app
 		p.HasEcto = mixHasDep(mix, "ecto_sql")
-		p.Kind = Elixir
 		if mixHasDep(mix, "phoenix") {
 			p.Kind = Phoenix
 		}
@@ -93,24 +109,25 @@ func Detect(dir string) (Preset, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return Preset{}, err
 		}
-		p.Tidewave = regexp.MustCompile(`"tidewave"`).Match(lock)
-	case exists(filepath.Join(dir, "go.mod")):
-		p.Kind = Go
-	case exists(filepath.Join(dir, "package.json")):
-		p.Kind = Node
+		p.Tidewave = bytes.Contains(lock, []byte(`"tidewave"`))
 	}
-	p.derive()
+	if err := p.derive(); err != nil {
+		return Preset{}, err
+	}
 	return p, nil
 }
 
 // derive sets Web and Setup to the defaults of p.Kind.
-func (p *Preset) derive() {
+func (p *Preset) derive() error {
 	p.Web = p.Kind == Phoenix
 	p.Setup = nil
 	switch p.Kind {
 	case Phoenix, Elixir:
 		// A missing mix.exs (kind forced by hades.toml) means no setup alias.
-		mix, _ := os.ReadFile(filepath.Join(p.dir, "mix.exs"))
+		mix, err := os.ReadFile(filepath.Join(p.dir, "mix.exs"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 		if mixHasAlias(mix, "setup") {
 			p.Setup = []string{"mix setup"}
 		} else {
@@ -119,15 +136,22 @@ func (p *Preset) derive() {
 	case Go:
 		p.Setup = []string{"go mod download"}
 	case Node:
-		switch {
-		case exists(filepath.Join(p.dir, "pnpm-lock.yaml")):
-			p.Setup = []string{"pnpm install --frozen-lockfile"}
-		case exists(filepath.Join(p.dir, "yarn.lock")):
-			p.Setup = []string{"yarn install --frozen-lockfile"}
-		default:
-			p.Setup = []string{"npm ci"}
+		for _, l := range []struct{ file, cmd string }{
+			{"pnpm-lock.yaml", "pnpm install --frozen-lockfile"},
+			{"yarn.lock", "yarn install --frozen-lockfile"},
+		} {
+			ok, err := exists(filepath.Join(p.dir, l.file))
+			if err != nil {
+				return err
+			}
+			if ok {
+				p.Setup = []string{l.cmd}
+				return nil
+			}
 		}
+		p.Setup = []string{"npm ci"}
 	}
+	return nil
 }
 
 // Apply layers hades.toml overrides over a detected preset. An unknown
@@ -141,7 +165,9 @@ func Apply(p Preset, cfg *config.Project) (Preset, error) {
 			return Preset{}, fmt.Errorf("unknown preset %q", cfg.Preset)
 		}
 		p.Kind = k
-		p.derive()
+		if err := p.derive(); err != nil {
+			return Preset{}, err
+		}
 	}
 	if cfg.Web != nil {
 		p.Web = *cfg.Web
