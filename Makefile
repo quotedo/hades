@@ -11,3 +11,8 @@ lint:
 ci: build test lint
 
 .PHONY: build test lint ci
+
+release-snapshot:
+	go run github.com/goreleaser/goreleaser/v2@latest release --snapshot --clean
+
+.PHONY: release-snapshot
