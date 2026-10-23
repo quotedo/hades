@@ -9,11 +9,8 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
-	"os/user"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/quotedo/hades/internal/caddy"
 	"github.com/quotedo/hades/internal/config"
@@ -205,60 +202,25 @@ func registryDirs(d lifecycle.Deps) []string {
 }
 
 func checkRegistry(d lifecycle.Deps) check {
-	if err := d.Reg.Check(); err != nil {
+	if err := d.Reg.Exists(); err != nil {
 		return fail("registry", err)
 	}
 	return pass("registry", strings.Join(registryDirs(d), ", "))
 }
 
-// checkRegistryPerms requires each registry directory to be setgid and group
-// writable, with the current user in its group, so every user of the host can
-// claim ports and write manifests.
+// checkRegistryPerms reports what a shared registry directory lacks (setgid,
+// sticky, group write, no world write, this process in its group): the
+// conditions the server-mode registry check refuses to start without.
 func checkRegistryPerms(d lifecycle.Deps) check {
 	const name = "registry-perms"
-	cur, err := user.Current()
+	problems, err := d.Reg.PermProblems()
 	if err != nil {
 		return fail(name, err)
-	}
-	groups, err := cur.GroupIds()
-	if err != nil {
-		return fail(name, fmt.Errorf("groups of %s: %w", cur.Username, err))
-	}
-	member := map[string]bool{cur.Gid: true}
-	for _, g := range groups {
-		member[g] = true
-	}
-	var problems []string
-	for _, dir := range registryDirs(d) {
-		fi, err := os.Stat(dir)
-		if err != nil {
-			return fail(name, err)
-		}
-		mode := fi.Mode()
-		if mode&os.ModeSetgid == 0 {
-			problems = append(problems, dir+" lacks the setgid bit")
-		}
-		if mode&0o020 == 0 {
-			problems = append(problems, dir+" is not group-writable")
-		}
-		st, ok := fi.Sys().(*syscall.Stat_t)
-		if !ok {
-			problems = append(problems, dir+": cannot read its group")
-			continue
-		}
-		gid := strconv.FormatUint(uint64(st.Gid), 10)
-		if !member[gid] {
-			group := gid
-			if g, err := user.LookupGroupId(gid); err == nil {
-				group = g.Name
-			}
-			problems = append(problems, fmt.Sprintf("%s: %s is not a member of group %s", dir, cur.Username, group))
-		}
 	}
 	if len(problems) > 0 {
 		return failf(name, "%s", strings.Join(problems, "; "))
 	}
-	return pass(name, "setgid, group-writable, current user in group")
+	return pass(name, "setgid, sticky, group-writable, not world-writable, this process in the group")
 }
 
 func checkRabbit(bg context.Context, r *config.RabbitMQ) check {

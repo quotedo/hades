@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"syscall"
 
 	"github.com/quotedo/hades/internal/config"
 )
@@ -22,12 +25,18 @@ var (
 	ErrNotOwner = errors.New("port is not owned by this worktree")
 	// ErrNoManifest means no manifest matches the query.
 	ErrNoManifest = errors.New("no manifest found")
+	// ErrRegistryPerms means a shared registry directory lacks a property
+	// the ownership model rests on.
+	ErrRegistryPerms = errors.New("registry directory has the wrong mode or group")
 )
 
 // Registry is the set of directories hades keeps its state in.
 type Registry struct {
 	PortsDir, SitesDir, ManifestsDir string
 	Range                            config.PortRange
+	// Shared marks a server registry, provisioned for a group of developers:
+	// Check then also verifies the directory modes and group (PermProblems).
+	Shared bool
 }
 
 // New builds a Registry from the host configuration.
@@ -54,9 +63,78 @@ func (r *Registry) EnsureDirs(mode os.FileMode) error {
 	return nil
 }
 
-// Check verifies that the registry directories exist (server mode, where the
-// provisioning playbook owns them). It never creates anything.
+// Check verifies that the registry directories exist and, for a shared
+// registry, have every property PermProblems checks. It never creates or
+// changes anything.
 func (r *Registry) Check() error {
+	if err := r.Exists(); err != nil {
+		return err
+	}
+	if !r.Shared {
+		return nil
+	}
+	problems, err := r.PermProblems()
+	if err != nil {
+		return err
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("%w: %s", ErrRegistryPerms, strings.Join(problems, "; "))
+	}
+	return nil
+}
+
+// PermProblems lists, for each registry directory, every property of a
+// shared registry it lacks: the setgid bit (new entries get the directory's
+// group), the sticky bit (nobody removes or renames another user's entries),
+// group write, no world write, and this process being in the directory's
+// group. Root is exempt from the group membership check.
+func (r *Registry) PermProblems() ([]string, error) {
+	groups, err := os.Getgroups()
+	if err != nil {
+		return nil, fmt.Errorf("groups of this process: %w", err)
+	}
+	member := map[int]bool{os.Getegid(): true}
+	for _, g := range groups {
+		member[g] = true
+	}
+	var problems []string
+	for _, dir := range r.dirs() {
+		fi, err := os.Stat(dir)
+		if err != nil {
+			return nil, err
+		}
+		mode := fi.Mode()
+		if mode&os.ModeSetgid == 0 {
+			problems = append(problems, dir+": missing the setgid bit")
+		}
+		if mode&os.ModeSticky == 0 {
+			problems = append(problems, dir+": missing the sticky bit")
+		}
+		if mode&0o020 == 0 {
+			problems = append(problems, dir+": not group-writable")
+		}
+		if mode&0o002 != 0 {
+			problems = append(problems, dir+": world-writable")
+		}
+		st, ok := fi.Sys().(*syscall.Stat_t)
+		if !ok {
+			problems = append(problems, dir+": cannot read its group")
+			continue
+		}
+		if gid := int(st.Gid); os.Geteuid() != 0 && !member[gid] {
+			group := strconv.Itoa(gid)
+			if g, err := user.LookupGroupId(group); err == nil {
+				group = g.Name
+			}
+			problems = append(problems, fmt.Sprintf("%s: this process is not a member of group %s", dir, group))
+		}
+	}
+	return problems, nil
+}
+
+// Exists verifies that the registry directories exist. It never creates
+// anything.
+func (r *Registry) Exists() error {
 	for _, d := range r.dirs() {
 		fi, err := os.Stat(d)
 		if err != nil {

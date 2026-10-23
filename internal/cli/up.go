@@ -103,10 +103,12 @@ func newDeps(ctx *Context) (lifecycle.Deps, error) {
 	if err != nil {
 		return lifecycle.Deps{}, err
 	}
+	reg := registry.New(host)
+	reg.Shared = mode == config.Server
 	d := lifecycle.Deps{
 		Host: host,
 		Mode: mode,
-		Reg:  registry.New(host),
+		Reg:  reg,
 		Run:  &execx.Real{Prepend: execx.ToolPrepend(user.Home, host.ToolPaths)},
 		// The client connects only when a command lists or drops databases.
 		PG:      &pg.Client{DSN: pg.DSN(host.Postgres, "postgres")},

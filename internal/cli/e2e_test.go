@@ -66,6 +66,7 @@ func newE2E(t *testing.T) *e2e {
 		t.Fatalf("e2e needs git: %v", err)
 	}
 	reg, getenv, state := serverFixture(t, "")
+	sharedRegistry(t, state) // a server's up refuses anything else
 	root, wt := testutil.TempGitRepo(t, "demo", "feature/e2e")
 	copyTree(t, filepath.Join("testdata", "phoenix-project"), wt)
 	for _, args := range [][]string{
@@ -286,7 +287,6 @@ func TestEndToEndPaseoEnvAndDoctor(t *testing.T) {
 	}
 
 	stubProbe(t)
-	setgidRegistry(t, filepath.Dir(h.reg.PortsDir), os.Getenv)
 	code := h.run("doctor")
 	if code != 0 || strings.Contains(h.stdout, "FAIL") {
 		t.Fatalf("doctor: code=%d\n%s%s", code, h.stdout, h.stderr)

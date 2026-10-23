@@ -293,3 +293,53 @@ func TestManifestTOMLKeysAreSnakeCase(t *testing.T) {
 		t.Fatalf("keys %v\n%s", keys, data)
 	}
 }
+
+// chmodRegistry sets mode on every registry directory, skipping the test
+// where the filesystem does not keep the setgid bit (failing under CI).
+func chmodRegistry(t *testing.T, r *Registry, mode os.FileMode) {
+	t.Helper()
+	skip := t.Skipf
+	if os.Getenv("CI") != "" {
+		skip = t.Fatalf
+	}
+	for _, d := range r.dirs() {
+		if err := os.Chmod(d, mode); err != nil {
+			skip("cannot chmod %s here: %v", d, err)
+		}
+		if fi, err := os.Stat(d); err != nil || fi.Mode()&(os.ModeSetgid|os.ModeSticky) != mode&(os.ModeSetgid|os.ModeSticky) {
+			skip("filesystem does not keep the setgid and sticky bits")
+		}
+	}
+}
+
+func TestSharedCheckRequiresModeAndGroup(t *testing.T) {
+	r := newReg(t)
+	r.Shared = true
+	chmodRegistry(t, r, 0o775|os.ModeSetgid|os.ModeSticky)
+	if err := r.Check(); err != nil {
+		if strings.Contains(err.Error(), "not a member") && os.Getenv("CI") == "" {
+			t.Skipf("test user is not in the temp dir's group: %v", err)
+		}
+		t.Fatalf("3775: %v", err)
+	}
+	for _, c := range []struct {
+		mode os.FileMode
+		want string
+	}{
+		{0o775 | os.ModeSetgid, "missing the sticky bit"},             // 2775
+		{0o777 | os.ModeSetgid | os.ModeSticky, "world-writable"},     // 3777
+		{0o775 | os.ModeSticky, "missing the setgid bit"},             // 1775
+		{0o755 | os.ModeSetgid | os.ModeSticky, "not group-writable"}, // 3755
+	} {
+		chmodRegistry(t, r, c.mode)
+		err := r.Check()
+		if !errors.Is(err, ErrRegistryPerms) || !strings.Contains(err.Error(), r.PortsDir+": "+c.want) {
+			t.Errorf("%o: %v", c.mode, err)
+		}
+	}
+	// A registry that is not shared (laptop mode) is checked for existence only.
+	r.Shared = false
+	if err := r.Check(); err != nil {
+		t.Fatal(err)
+	}
+}

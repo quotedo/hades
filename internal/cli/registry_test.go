@@ -115,3 +115,17 @@ func TestGCOwnerByFileOwnerThroughDispatcher(t *testing.T) {
 		t.Fatalf("code=%d err=%q", code, errs)
 	}
 }
+
+// A server's up refuses a registry without the shared modes, naming the
+// directory and the property, before claiming anything.
+func TestServerUpRefusesRegistryWithoutSharedModes(t *testing.T) {
+	reg, getenv, _ := serverFixture(t, "")
+	root, wt, _ := laptopUpFixture(t, "phoenix")
+	code, _, errs := runMain(getenv, "--root", root, "--worktree", wt, "--name", "feature/x", "up", "--skip-setup")
+	if code != 1 || !strings.Contains(errs, reg.PortsDir+": missing the sticky bit") {
+		t.Fatalf("code=%d err=%q", code, errs)
+	}
+	if entries, _ := os.ReadDir(reg.PortsDir); len(entries) != 0 {
+		t.Fatal("claimed a port")
+	}
+}

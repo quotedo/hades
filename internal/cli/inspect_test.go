@@ -265,23 +265,28 @@ func TestDoctorRegistryPermsFailWithoutSetgid(t *testing.T) {
 	}
 }
 
-func TestDoctorRegistryPermsPassWithSetgid(t *testing.T) {
+func TestDoctorRegistryPermsPassWithSetgidAndSticky(t *testing.T) {
 	_, getenv, state := serverFixture(t, "")
-	for _, d := range []string{"ports", "sites", "manifests"} {
-		p := filepath.Join(state, d)
-		if err := os.Chmod(p, 0o775|os.ModeSetgid); err != nil {
-			t.Skipf("cannot set setgid here: %v", err)
-		}
-		if fi, err := os.Stat(p); err != nil || fi.Mode()&os.ModeSetgid == 0 {
-			t.Skip("filesystem does not keep the setgid bit")
-		}
+	sharedRegistry(t, state)
+	_, checks, _ := doctorChecks(t, getenv)
+	if c := checks["registry-perms"]; !c.OK {
+		t.Fatalf("registry-perms = %+v", c)
+	}
+}
+
+// doctor reports the sticky and world-write properties as well.
+func TestDoctorRegistryPermsReportStickyAndWorldWrite(t *testing.T) {
+	_, getenv, state := serverFixture(t, "")
+	sharedRegistry(t, state)
+	if err := os.Chmod(filepath.Join(state, "ports"), 0o775|os.ModeSetgid); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(state, "sites"), 0o777|os.ModeSetgid|os.ModeSticky); err != nil {
+		t.Fatal(err)
 	}
 	_, checks, _ := doctorChecks(t, getenv)
 	c := checks["registry-perms"]
-	if !c.OK && strings.Contains(c.Detail, "not a member") {
-		t.Skipf("test user is not in the temp dir's group: %s", c.Detail)
-	}
-	if !c.OK {
+	if c.OK || c.Warn || !strings.Contains(c.Detail, filepath.Join(state, "ports")+": missing the sticky bit") || !strings.Contains(c.Detail, filepath.Join(state, "sites")+": world-writable") {
 		t.Fatalf("registry-perms = %+v", c)
 	}
 }
@@ -389,9 +394,10 @@ func withEnv(getenv func(string) string, kv map[string]string) func(string) stri
 	}
 }
 
-// setgidRegistry gives the registry directories the bits doctor demands, or
-// skips the test where the filesystem or group membership does not allow it.
-func setgidRegistry(t *testing.T, state string, getenv func(string) string) {
+// sharedRegistry gives the registry directories under state the modes a
+// server registry needs (setgid, sticky, group write, mode 3775), or skips
+// the test where the filesystem or group membership does not allow it.
+func sharedRegistry(t *testing.T, state string) {
 	t.Helper()
 	// CI must run these tests, so an unusable environment fails there.
 	skip := t.Skipf
@@ -400,15 +406,16 @@ func setgidRegistry(t *testing.T, state string, getenv func(string) string) {
 	}
 	for _, d := range []string{"ports", "sites", "manifests"} {
 		p := filepath.Join(state, d)
-		if err := os.Chmod(p, 0o775|os.ModeSetgid); err != nil {
-			skip("cannot set setgid here: %v", err)
+		if err := os.Chmod(p, 0o775|os.ModeSetgid|os.ModeSticky); err != nil {
+			skip("cannot set setgid and sticky here: %v", err)
 		}
-		if fi, err := os.Stat(p); err != nil || fi.Mode()&os.ModeSetgid == 0 {
-			skip("filesystem does not keep the setgid bit")
+		if fi, err := os.Stat(p); err != nil || fi.Mode()&os.ModeSetgid == 0 || fi.Mode()&os.ModeSticky == 0 {
+			skip("filesystem does not keep the setgid and sticky bits")
 		}
 	}
-	if _, checks, _ := doctorChecks(t, getenv); !checks["registry-perms"].OK {
-		skip("registry-perms cannot pass here: %s", checks["registry-perms"].Detail)
+	reg := &registry.Registry{PortsDir: filepath.Join(state, "ports"), SitesDir: filepath.Join(state, "sites"), ManifestsDir: filepath.Join(state, "manifests"), Shared: true}
+	if err := reg.Check(); err != nil {
+		skip("a shared registry cannot pass here: %v", err)
 	}
 }
 
@@ -431,7 +438,7 @@ func phoenixDoctorFixture(t *testing.T, withMix bool) (getenv func(string) strin
 		testutil.StubTool(t, shims, "mix", "#!/bin/bash\nexit 0\n")
 	}
 	getenv = withEnv(getenv, map[string]string{"PATH": bin})
-	setgidRegistry(t, state, getenv)
+	sharedRegistry(t, state)
 	return getenv, reg, wt, shims
 }
 
