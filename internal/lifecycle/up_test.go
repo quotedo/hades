@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -23,7 +24,7 @@ func TestUpPhoenixServerHappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := out.Manifest
-	if m.Port != 4100 || m.Label != "demo-feature-x" || m.Host != "demo-feature-x.example.test" || m.DBPrefixes[0] != "demo" || m.DBSuffix != "_roman_feature_x" || m.Vhost != "" {
+	if m.Port != 4100 || m.Label != "demo-feature-x" || m.Host != "demo-feature-x.example.test" || !reflect.DeepEqual(m.DBBases, []string{"demo_dev", "demo_test"}) || m.DBSuffix != "_roman_feature_x" || m.Vhost != "" {
 		t.Fatalf("%+v", m)
 	}
 	if owner, _ := d.Reg.PortOwner(4100); owner != c.Worktree {

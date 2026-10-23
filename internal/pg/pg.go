@@ -82,19 +82,22 @@ func (c *Client) Drop(ctx context.Context, name string) error {
 	return nil
 }
 
-// Match returns, in input order, the names that start with any prefix and end
-// with suffix followed by optional digits. It is the only place that decides
-// what gets dropped: an empty suffix, an empty prefix list or an empty prefix matches nothing.
-func Match(names, prefixes []string, suffix string) []string {
-	if suffix == "" || len(prefixes) == 0 {
+// Match returns, in input order, the names that are <base><suffix> or
+// <base><suffix><digits> (a MIX_TEST_PARTITION copy) for some base. Base and
+// suffix must be adjacent, so another project, another user's worktree or a
+// worktree whose name extends this one never matches. It is the only place
+// that decides what gets dropped: an empty suffix, an empty base list or an
+// empty base matches nothing.
+func Match(names, bases []string, suffix string) []string {
+	if suffix == "" || len(bases) == 0 {
 		return nil
 	}
-	res := make([]*regexp.Regexp, 0, len(prefixes))
-	for _, p := range prefixes {
-		if p == "" {
-			continue // an empty prefix would match every database with the suffix
+	res := make([]*regexp.Regexp, 0, len(bases))
+	for _, b := range bases {
+		if b == "" {
+			continue // an empty base would match every database with the suffix
 		}
-		res = append(res, regexp.MustCompile("^"+regexp.QuoteMeta(p)+".*"+regexp.QuoteMeta(suffix)+"[0-9]*$"))
+		res = append(res, regexp.MustCompile("^"+regexp.QuoteMeta(b)+regexp.QuoteMeta(suffix)+"[0-9]*$"))
 	}
 	var out []string
 	for _, n := range names {

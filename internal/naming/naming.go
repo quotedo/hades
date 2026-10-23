@@ -19,7 +19,7 @@ const (
 	maxLabel  = 63
 	maxSuffix = 32
 	// suffixHead is how many bytes of a too-long suffix survive before the hash.
-	suffixHead = 23
+	suffixHead = 22
 	// suffixHash is how many hex characters of the SHA-256 digest are kept.
 	suffixHash = 8
 )
@@ -114,9 +114,12 @@ func render(tmpl string, v Vars) (string, error) {
 }
 
 // Suffix builds a database suffix "_<user>_<name>". Lower-case letters and
-// digits are kept, "-" becomes "_", and everything else is dropped. Results
-// longer than 32 bytes keep their first 23 bytes and append "_" plus the first
-// 8 hex characters of the SHA-256 of the full string.
+// digits are kept, "-" becomes "_", and everything else is dropped. A result
+// longer than 32 bytes (counting the "_" below) keeps its first 22 bytes and
+// appends "_" plus the first 8 hex characters of the SHA-256 of the full
+// string. A suffix never ends in a digit: "_" is appended when it would, so
+// the digits after <base><suffix> can only be this worktree's
+// MIX_TEST_PARTITION.
 func Suffix(user, name string) string {
 	full := strings.ToLower("_" + user + "_" + name)
 	var b strings.Builder
@@ -130,9 +133,17 @@ func Suffix(user, name string) string {
 		}
 	}
 	s := b.String()
-	if len(s) <= maxSuffix {
-		return s
+	if len(noTrailingDigit(s)) > maxSuffix {
+		sum := sha256.Sum256([]byte(s))
+		s = s[:suffixHead] + "_" + hex.EncodeToString(sum[:])[:suffixHash]
 	}
-	sum := sha256.Sum256([]byte(s))
-	return s[:suffixHead] + "_" + hex.EncodeToString(sum[:])[:suffixHash]
+	return noTrailingDigit(s)
+}
+
+// noTrailingDigit appends "_" to s when s ends in a digit.
+func noTrailingDigit(s string) string {
+	if n := len(s); n > 0 && s[n-1] >= '0' && s[n-1] <= '9' {
+		return s + "_"
+	}
+	return s
 }

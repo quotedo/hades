@@ -263,12 +263,12 @@ func (u *upRun) identify() error {
 // plan builds the manifest this run writes, except for the port and address.
 func (u *upRun) plan() {
 	d, c, label := u.d, u.c, u.label
-	var prefixes []string
+	var bases []string
 	switch {
 	case len(u.cfg.Databases) > 0:
-		prefixes = u.cfg.Databases
+		bases = u.cfg.Databases
 	case u.preset.AppName != "":
-		prefixes = []string{u.preset.AppName}
+		bases = []string{u.preset.AppName + "_dev", u.preset.AppName + "_test"}
 	}
 
 	vhost := ""
@@ -292,7 +292,7 @@ func (u *upRun) plan() {
 		Root:         c.Root,
 		Preset:       string(u.preset.Kind),
 		DBSuffix:     naming.Suffix(d.User.Name, naming.Sanitize(c.Name)),
-		DBPrefixes:   prefixes,
+		DBBases:      bases,
 		Vhost:        vhost,
 		ADE:          c.ADE,
 	}

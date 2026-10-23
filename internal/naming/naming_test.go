@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -51,18 +52,59 @@ func TestLabel(t *testing.T) {
 	}
 }
 
+// hashedSuffix is the expected hashed form of a too-long suffix full.
+func hashedSuffix(full string) string {
+	sum := sha256.Sum256([]byte(full))
+	s := full[:22] + "_" + hex.EncodeToString(sum[:])[:8]
+	if c := s[len(s)-1]; c >= '0' && c <= '9' {
+		s += "_"
+	}
+	return s
+}
+
 func TestSuffix(t *testing.T) {
 	if got := Suffix("roman", "fix-login"); got != "_roman_fix_login" {
 		t.Fatal(got)
 	}
-	long := Suffix("roman", strings.Repeat("x", 40))
-	full := "_roman_" + strings.Repeat("x", 40)
-	sum := sha256.Sum256([]byte(full))
-	want := full[:23] + "_" + hex.EncodeToString(sum[:])[:8]
-	if long != want || len(long) != 32 {
-		t.Fatalf("%q want %q", long, want)
+	if got := Suffix("roman", "feature-x1"); got != "_roman_feature_x1_" {
+		t.Fatal(got)
 	}
 	if got := Suffix("Roman", "Ünïcode!"); got != "_roman_ncode" {
 		t.Fatal(got)
+	}
+	// 31 bytes ending in a digit: the trailing "_" makes 32, no hash.
+	if got := Suffix("roman", strings.Repeat("a", 23)+"1"); got != "_roman_"+strings.Repeat("a", 23)+"1_" {
+		t.Fatal(got)
+	}
+	// 32 bytes ending in a digit would be 33 with the "_": hashed.
+	edge := "_roman_" + strings.Repeat("a", 24) + "1"
+	if got := Suffix("roman", strings.Repeat("a", 24)+"1"); got != hashedSuffix(edge) {
+		t.Fatalf("%q want %q", got, hashedSuffix(edge))
+	}
+
+	// Long names: one whose hash ends in a letter (31 bytes) and one whose
+	// hash ends in a digit (32 bytes, trailing "_").
+	var letter, digit bool
+	for i := 0; !(letter && digit) && i < 1000; i++ {
+		name := strings.Repeat("x", 40) + strconv.Itoa(i) + "y"
+		full := "_roman_" + name
+		got, want := Suffix("roman", name), hashedSuffix(full)
+		if got != want {
+			t.Fatalf("%q want %q", got, want)
+		}
+		switch len(got) {
+		case 31:
+			letter = true
+		case 32:
+			digit = true
+			if !strings.HasSuffix(got, "_") {
+				t.Fatal(got)
+			}
+		default:
+			t.Fatalf("%q: length %d", got, len(got))
+		}
+	}
+	if !letter || !digit {
+		t.Fatal("did not cover both hash endings")
 	}
 }

@@ -64,7 +64,7 @@ func TestDownRefusesOtherUsersManifest(t *testing.T) {
 	}
 }
 
-func TestDownUsesManifestPrefixesNotCurrentConfig(t *testing.T) {
+func TestDownUsesManifestBasesNotCurrentConfig(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	os.WriteFile(filepath.Join(c.Worktree, "hades.toml"), []byte("databases = [\"other\"]\n"), 0o644)
@@ -255,12 +255,58 @@ func TestDownDeletesVhostOrSkipsWithoutRabbit(t *testing.T) {
 	}
 }
 
-func TestDownAsRootActsOnAnyManifest(t *testing.T) {
+func TestDownAsRootActsOnAnyManifestButSkipsTeardown(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("the manifest would be root's own")
+	}
 	d, c := newServerDeps(t, "phoenix")
 	mustUp(t, d, c)
+	writeFile(t, filepath.Join(c.Worktree, "hades.toml"), "teardown = [\"mix ecto.drop\"]\n")
 	d.User.UID = 0
+	res, err := Down(context.Background(), d, c, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all, _ := d.Reg.All(); len(all) != 0 {
+		t.Fatal("manifest left")
+	}
+	if r, ok := findStep(res, "teardown"); !ok || !r.Skipped || r.Reason != "teardown runs only as the owner; use gc" {
+		t.Fatalf("%+v", res)
+	}
+	if hasCallPrefix(argvs(d.Run.(*execx.Fake)), "sh -c mix ecto.drop") {
+		t.Fatal("ran another user's teardown as root")
+	}
+}
+
+func TestDownNeverDropsOtherWorktreesDatabases(t *testing.T) {
+	d, c := newServerDeps(t, "phoenix")
+	mustUp(t, d, c)
+	d.PG.(*fakePG).names = []string{
+		"demo_dev_roman_feature_x",
+		"demo_test_roman_feature_x2",   // this worktree's MIX_TEST_PARTITION=2
+		"demo_dev_roman_feature_x1_",   // roman's worktree feature/x1
+		"demo_dev_bob_roman_feature_x", // bob's worktree roman-feature-x
+		"demoapp_dev_roman_feature_x",  // another project
+	}
 	if _, err := Down(context.Background(), d, c, true); err != nil {
 		t.Fatal(err)
+	}
+	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_roman_feature_x", "demo_test_roman_feature_x2"}) {
+		t.Fatal(got)
+	}
+}
+
+func TestDownWithoutDatabaseBasesIsSilent(t *testing.T) {
+	d, c := newServerDeps(t, "go")
+	mustUp(t, d, c)
+	var log bytes.Buffer
+	d.Log = &log
+	res, err := Down(context.Background(), d, c, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findStep(res, "databases"); ok || log.Len() != 0 {
+		t.Fatalf("%+v %q", res, log.String())
 	}
 	if all, _ := d.Reg.All(); len(all) != 0 {
 		t.Fatal("manifest left")

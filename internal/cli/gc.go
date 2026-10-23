@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 
 	"github.com/quotedo/hades/internal/config"
@@ -32,6 +33,12 @@ func gc(ctx *Context, args []string) int {
 	if fs.NArg() > 0 {
 		fmt.Fprintf(ctx.Stderr, "gc: unexpected arguments %q\n%s\n", fs.Args(), gcUsage)
 		return 2
+	}
+	// Checked before loading the host config, which a non-root user may not
+	// be allowed to read, and again after, in case the file appeared since.
+	if serverHost(ctx.Getenv) && geteuid() != 0 {
+		fmt.Fprintln(ctx.Stderr, "hades: gc: must run as root on a server")
+		return 1
 	}
 	d, err := newDeps(ctx)
 	if err != nil {
@@ -66,4 +73,15 @@ func gc(ctx *Context, args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// serverHost reports whether config.Load would use a server host config,
+// without reading it: the file exists (or cannot even be checked) and laptop
+// mode is not forced. A missing explicit path is left to config.Load to report.
+func serverHost(getenv func(string) string) bool {
+	if getenv("HADES_HOST_CONFIG") == config.LaptopOverride {
+		return false
+	}
+	_, err := os.Stat(config.HostPath(getenv))
+	return !errors.Is(err, fs.ErrNotExist)
 }

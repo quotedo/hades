@@ -54,7 +54,7 @@ func TestDownRemovesManifestThroughDispatcher(t *testing.T) {
 	}
 	var out, errb bytes.Buffer
 	code := Main([]string{"--root", root, "--worktree", wt, "--name", "feature/x", "down", "--strict"}, &out, &errb, getenv)
-	if code != 0 || !strings.Contains(errb.String(), "down: skipped databases: manifest demo-feature-x records no database prefixes") {
+	if code != 0 || errb.Len() != 0 {
 		t.Fatalf("code=%d err=%q", code, errb.String())
 	}
 	if _, err := reg.ByLabel("demo-feature-x"); !errors.Is(err, fs.ErrNotExist) {
@@ -102,6 +102,15 @@ password = "postgres"
 		return ""
 	}
 	var out, errb bytes.Buffer
+	if code := Main([]string{"gc"}, &out, &errb, getenv); code != 1 || errb.String() != "hades: gc: must run as root on a server\n" {
+		t.Fatalf("code=%d err=%q", code, errb.String())
+	}
+	// A host config the user cannot read still gets the root message, not a
+	// permission error.
+	if err := os.Chmod(hostFile, 0); err != nil {
+		t.Fatal(err)
+	}
+	errb.Reset()
 	if code := Main([]string{"gc"}, &out, &errb, getenv); code != 1 || errb.String() != "hades: gc: must run as root on a server\n" {
 		t.Fatalf("code=%d err=%q", code, errb.String())
 	}

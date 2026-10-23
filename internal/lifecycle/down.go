@@ -30,7 +30,8 @@ type StepResult struct {
 }
 
 // Down releases everything the worktree's manifest records: it runs the
-// project's teardown commands, drops the databases, deletes the vhost,
+// project's teardown commands (only as the manifest's owner, not as root),
+// drops the databases, deletes the vhost,
 // removes the site, releases the port and removes the manifest. The steps run
 // whether or not the earlier ones succeeded, and the manifest goes even when
 // some failed, so the next up starts clean. Every skip and failure is a
@@ -40,15 +41,19 @@ func Down(ctx context.Context, d Deps, c wtctx.Context, strict bool) ([]StepResu
 	if d.Log == nil {
 		d.Log = io.Discard
 	}
-	m, guard := ownManifest(d, c)
+	m, owner, guard := ownManifest(d, c)
 	if m == nil {
 		res := []StepResult{guard}
 		logResults(d.Log, "down", res)
 		return res, failure(res, strict)
 	}
 	var res []StepResult
-	if r := teardown(ctx, d, c); r != nil {
-		res = append(res, *r)
+	if owner {
+		if r := teardown(ctx, d, c); r != nil {
+			res = append(res, *r)
+		}
+	} else {
+		res = append(res, StepResult{Step: "teardown", Skipped: true, Reason: "teardown runs only as the owner; use gc"})
 	}
 	logResults(d.Log, "down", res)
 	rel, _ := release(ctx, d, m, true)
@@ -59,38 +64,39 @@ func Down(ctx context.Context, d Deps, c wtctx.Context, strict bool) ([]StepResu
 
 // ownManifest returns the worktree's manifest when this user may release it,
 // else nil and the result saying why not. Ownership is the manifest file's
-// uid; root may release any manifest.
-func ownManifest(d Deps, c wtctx.Context) (*registry.Manifest, StepResult) {
-	r := StepResult{Step: "manifest"}
+// uid; root may release any manifest, and owner reports whether this user
+// owns it rather than acting as root.
+func ownManifest(d Deps, c wtctx.Context) (m *registry.Manifest, owner bool, r StepResult) {
+	r = StepResult{Step: "manifest"}
 	if d.Mode == config.Laptop {
 		if err := d.Reg.Check(); errors.Is(err, registry.ErrRegistryMissing) {
 			r.Skipped, r.Reason = true, fmt.Sprintf("no manifest for worktree %s (%v)", c.Worktree, err)
-			return nil, r
+			return nil, false, r
 		}
 	}
 	m, err := d.Reg.ByWorktree(c.Worktree)
 	if errors.Is(err, registry.ErrNoManifest) {
 		r.Skipped, r.Reason = true, err.Error()
-		return nil, r
+		return nil, false, r
 	}
 	if err != nil {
 		r.Err = err
-		return nil, r
+		return nil, false, r
 	}
-	owner, err := d.Reg.ManifestOwner(m.Label)
+	uid, err := d.Reg.ManifestOwner(m.Label)
 	if err != nil {
 		r.Err = fmt.Errorf("manifest %s: %w", m.Label, err)
-		return nil, r
+		return nil, false, r
 	}
 	switch {
-	case d.User.UID != 0 && owner != d.User.UID:
-		r.Skipped, r.Reason = true, fmt.Sprintf("manifest %s is owned by uid %d, not uid %d", m.Label, owner, d.User.UID)
+	case d.User.UID != 0 && uid != d.User.UID:
+		r.Skipped, r.Reason = true, fmt.Sprintf("manifest %s is owned by uid %d, not uid %d", m.Label, uid, d.User.UID)
 	case !sameDir(m.Worktree, c.Worktree):
 		r.Skipped, r.Reason = true, fmt.Sprintf("manifest %s records worktree %s, not %s", m.Label, m.Worktree, c.Worktree)
 	default:
-		return m, r
+		return m, uid == d.User.UID, r
 	}
-	return nil, r
+	return nil, false, r
 }
 
 // teardown runs the project's teardown commands from the worktree, with the
@@ -163,15 +169,15 @@ func release(ctx context.Context, d Deps, m *registry.Manifest, reload bool) (re
 	return res, siteRemoved
 }
 
-// dropDatabases drops the databases matching the prefixes and suffix the
-// manifest recorded, not the current project config.
+// dropDatabases drops the databases matching the bases and suffix the
+// manifest recorded, not the current project config. No bases is nothing to
+// do, not a skip.
 func dropDatabases(ctx context.Context, d Deps, m *registry.Manifest) *StepResult {
+	if len(m.DBBases) == 0 {
+		return nil
+	}
 	r := &StepResult{Step: "databases"}
-	switch {
-	case len(m.DBPrefixes) == 0:
-		r.Skipped, r.Reason = true, fmt.Sprintf("manifest %s records no database prefixes", m.Label)
-		return r
-	case d.PG == nil:
+	if d.PG == nil {
 		r.Skipped, r.Reason = true, "this host has no postgres"
 		return r
 	}
@@ -181,7 +187,7 @@ func dropDatabases(ctx context.Context, d Deps, m *registry.Manifest) *StepResul
 		return r
 	}
 	var errs []error
-	for _, name := range pg.Match(names, m.DBPrefixes, m.DBSuffix) {
+	for _, name := range pg.Match(names, m.DBBases, m.DBSuffix) {
 		if err := d.PG.Drop(ctx, name); err != nil {
 			errs = append(errs, err)
 		}

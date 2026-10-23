@@ -68,12 +68,12 @@ func TestReleasePortOnlyByOwner(t *testing.T) {
 func TestManifestRoundTripAndLookupByWorktree(t *testing.T) {
 	r := newReg(t)
 	wt := t.TempDir()
-	m := &Manifest{HadesVersion: "test", CreatedAt: time.Now().UTC().Truncate(time.Second), User: "roman", UID: 501, Project: "jarl", Name: "x", Label: "jarl-x", Host: "jarl-x.example.test", Port: 4100, Worktree: wt, Root: "/r", Preset: "phoenix", DBSuffix: "_roman_x", DBPrefixes: []string{"gym_nation"}, ADE: "paseo"}
+	m := &Manifest{HadesVersion: "test", CreatedAt: time.Now().UTC().Truncate(time.Second), User: "roman", UID: 501, Project: "jarl", Name: "x", Label: "jarl-x", Host: "jarl-x.example.test", Port: 4100, Worktree: wt, Root: "/r", Preset: "phoenix", DBSuffix: "_roman_x", DBBases: []string{"gym_nation_dev"}, ADE: "paseo"}
 	if err := r.WriteManifest(m); err != nil {
 		t.Fatal(err)
 	}
 	got, err := r.ByWorktree(wt)
-	if err != nil || got.Label != "jarl-x" || got.DBPrefixes[0] != "gym_nation" || !got.CreatedAt.Equal(m.CreatedAt) {
+	if err != nil || got.Label != "jarl-x" || got.DBBases[0] != "gym_nation_dev" || !got.CreatedAt.Equal(m.CreatedAt) {
 		t.Fatalf("%+v %v", got, err)
 	}
 	if _, err := r.ByWorktree(t.TempDir()); !errors.Is(err, ErrNoManifest) {

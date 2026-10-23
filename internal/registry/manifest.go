@@ -29,7 +29,7 @@ type Manifest struct {
 	Root         string
 	Preset       string
 	DBSuffix     string   `toml:"db_suffix"`
-	DBPrefixes   []string `toml:"db_prefixes"`
+	DBBases      []string `toml:"db_bases"` // database names minus DBSuffix
 	Vhost        string
 	ADE          string
 }
