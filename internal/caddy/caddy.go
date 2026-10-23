@@ -1,6 +1,7 @@
 // Package caddy writes, validates and removes the one-line site files that
 // Caddy imports for each worktree, and reloads Caddy. Reload runs as root
-// through sudo, so it reads only the host config and the sites directory.
+// through sudo, so it reads only the host config, the sites directory and the
+// type and owner (never the contents) of the matching manifests.
 package caddy
 
 import (
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/execx"
@@ -94,44 +96,95 @@ func RemoveSite(sitesDir, label string) error {
 	return nil
 }
 
-// readSites reads every *.caddy file in sitesDir exactly once, in name order,
-// and returns the validated contents keyed by label. Anything other than a
-// regular file (such as a symlink), or longer than maxSiteFile, is invalid.
-func readSites(sitesDir string) (map[string][]byte, error) {
-	entries, err := os.ReadDir(sitesDir) // sorted by name
+// readSites reads every *.caddy file in h.SitesDir exactly once, in name
+// order, and returns the validated contents keyed by label. A site file is
+// valid when it is a regular file (not a symlink) of at most maxSiteFile
+// bytes matching SiteLine, its host is exactly <label>.<domain>, and
+// manifests/<label>.toml is a regular file owned by the same uid as the site
+// file, so a developer can publish only the hostnames of worktrees they hold.
+func readSites(h *config.Host) (map[string][]byte, error) {
+	if h.Domain == "" {
+		return nil, errors.New("site files: no domain configured")
+	}
+	entries, err := os.ReadDir(h.SitesDir) // sorted by name
 	if err != nil {
 		return nil, fmt.Errorf("sites directory: %w", err)
 	}
 	sites := map[string][]byte{}
 	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".caddy") {
+		label, ok := strings.CutSuffix(e.Name(), ".caddy")
+		if !ok {
 			continue
 		}
-		path := filepath.Join(sitesDir, e.Name())
+		path := filepath.Join(h.SitesDir, e.Name())
+		if err := naming.CheckPlain(label); err != nil {
+			return nil, fmt.Errorf("site file %s: %w", path, err)
+		}
 		var content []byte
+		uid := -1
 		if e.Type().IsRegular() {
-			f, err := os.Open(path)
-			if err != nil {
-				return nil, fmt.Errorf("read site file: %w", err)
-			}
-			content, err = io.ReadAll(io.LimitReader(f, maxSiteFile+1))
-			f.Close()
-			if err != nil {
-				return nil, fmt.Errorf("read site file: %w", err)
+			if content, uid, err = readSite(path); err != nil {
+				return nil, err
 			}
 		}
 		if len(content) > maxSiteFile || !SiteLine.Match(content) {
 			return nil, fmt.Errorf("site file %s does not match \"import worktree <host> <port>\"", path)
 		}
-		sites[strings.TrimSuffix(e.Name(), ".caddy")] = content
+		if host, want := strings.Fields(string(content))[2], label+"."+h.Domain; host != want {
+			return nil, fmt.Errorf("site file %s: host %s is not %s", path, host, want)
+		}
+		if err := checkSiteManifest(h.ManifestsDir, label, path, uid); err != nil {
+			return nil, err
+		}
+		sites[label] = content
 	}
 	return sites, nil
 }
 
-// ValidateSites checks that every *.caddy file in sitesDir is a single valid
-// site line.
-func ValidateSites(sitesDir string) error {
-	_, err := readSites(sitesDir)
+// readSite reads at most maxSiteFile+1 bytes of the site file at path and
+// returns them with the uid owning the file that was read.
+func readSite(path string) ([]byte, int, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read site file: %w", err)
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, 0, fmt.Errorf("read site file: %w", err)
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !fi.Mode().IsRegular() || !ok {
+		return nil, 0, fmt.Errorf("site file %s is not a regular file", path)
+	}
+	content, err := io.ReadAll(io.LimitReader(f, maxSiteFile+1))
+	if err != nil {
+		return nil, 0, fmt.Errorf("read site file: %w", err)
+	}
+	return content, int(st.Uid), nil
+}
+
+// checkSiteManifest requires manifests/<label>.toml to be a regular file
+// owned by uid, the owner of the site file at sitePath.
+func checkSiteManifest(manifestsDir, label, sitePath string, uid int) error {
+	mpath := filepath.Join(manifestsDir, label+".toml")
+	fi, err := os.Lstat(mpath)
+	if err != nil {
+		return fmt.Errorf("site file %s: manifest %s: %w", sitePath, mpath, err)
+	}
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !fi.Mode().IsRegular() || !ok {
+		return fmt.Errorf("site file %s: manifest %s is not a regular file", sitePath, mpath)
+	}
+	if int(st.Uid) != uid {
+		return fmt.Errorf("site file %s is owned by uid %d, but manifest %s by uid %d", sitePath, uid, mpath, st.Uid)
+	}
+	return nil
+}
+
+// ValidateSites checks every *.caddy file in h.SitesDir as Reload does.
+func ValidateSites(h *config.Host) error {
+	_, err := readSites(h)
 	return err
 }
 
@@ -160,15 +213,17 @@ func mirror(liveDir string, sites map[string][]byte) error {
 	return nil
 }
 
-// Reload validates the site files, mirrors the validated bytes into
-// cfg.LiveDir (the only directory Caddy imports), validates the Caddy config
-// and reloads Caddy. With check it validates only and touches nothing. A site
-// file failure stops before anything else happens.
-func Reload(ctx context.Context, cfg config.Caddy, sitesDir string, check bool, run execx.Runner) error {
-	sites, err := readSites(sitesDir)
+// Reload validates the site files of h.SitesDir against h.Domain and
+// h.ManifestsDir, mirrors the validated bytes into h.Caddy.LiveDir (the only
+// directory Caddy imports), validates the Caddy config and reloads Caddy.
+// With check it validates only and touches nothing. A site file failure stops
+// before anything else happens.
+func Reload(ctx context.Context, h *config.Host, check bool, run execx.Runner) error {
+	sites, err := readSites(h)
 	if err != nil {
 		return err
 	}
+	cfg := h.Caddy
 	if !check {
 		if cfg.LiveDir == "" {
 			return errors.New("caddy reload: no live_dir configured")

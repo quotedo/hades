@@ -40,7 +40,7 @@ password = "guest"
 - `port_range`, `ports_dir`, `sites_dir`, `manifests_dir`: the registry. Each port is a symlink in `ports_dir` to the worktree path; each worktree has a manifest and a one-line Caddy site file.
 - `tool_paths`: appended to the directories hades puts on `PATH` for project commands (see [ades](ades.md)).
 - `chrome_path`: when set, the chrome-devtools MCP entry is written.
-- `[caddy]`: `hades caddy-reload` validates every `*.caddy` in `sites_dir`, mirrors exactly the validated bytes into `live_dir`, runs `caddy validate --config <config>`, then runs `reload`. Caddy should import `live_dir`, never `sites_dir`. The command runs as root through sudo and, as root, reads only `/etc/hades/host.toml`, which must be a root-owned regular file without group or world write bits. `hades caddy-reload --check` validates and touches nothing.
+- `[caddy]`: `hades caddy-reload` validates every `*.caddy` in `sites_dir` (one `import worktree <host> <port>` line whose host is exactly `<label>.<domain>` for the file `<label>.caddy`, and a regular `manifests_dir/<label>.toml` owned by the site file's owner; any failure refuses the whole reload, naming the file), mirrors exactly the validated bytes into `live_dir`, runs `caddy validate --config <config>`, then runs `reload`. Caddy should import `live_dir`, never `sites_dir`. The command runs as root through sudo and, as root, reads only `/etc/hades/host.toml`, which must be a root-owned regular file without group or world write bits. `hades caddy-reload --check` validates and touches nothing.
 - `[postgres]`: exported to project commands as `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`.
 - `[rabbitmq]`: optional; needed when a project asks for a vhost.
 

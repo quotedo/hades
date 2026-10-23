@@ -75,7 +75,7 @@ func caddyReload(ctx *Context, args []string) int {
 	if os.Geteuid() != 0 {
 		run.Prepend = filepath.SplitList(ctx.Getenv("PATH"))
 	}
-	if err := caddy.Reload(context.Background(), host.Caddy, host.SitesDir, *check, run); err != nil {
+	if err := caddy.Reload(context.Background(), host, *check, run); err != nil {
 		fmt.Fprintf(ctx.Stderr, "caddy-reload: %v\n", err)
 		return 1
 	}

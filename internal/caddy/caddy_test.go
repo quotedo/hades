@@ -13,20 +13,50 @@ import (
 	"github.com/quotedo/hades/internal/execx"
 )
 
-func TestWriteValidateRemove(t *testing.T) {
-	dir := t.TempDir()
-	if err := caddy.WriteSite(dir, "jarl-x", "jarl-x.example.test", 4100); err != nil {
+// newHost is a host config whose sites, manifests and live directories are
+// fresh temp dirs, with domain example.test.
+func newHost(t *testing.T) *config.Host {
+	t.Helper()
+	base := t.TempDir()
+	h := &config.Host{
+		Domain:       "example.test",
+		SitesDir:     filepath.Join(base, "sites"),
+		ManifestsDir: filepath.Join(base, "manifests"),
+		Caddy:        config.Caddy{Config: "c", LiveDir: filepath.Join(base, "live"), Reload: []string{"r"}},
+	}
+	for _, d := range []string{h.SitesDir, h.ManifestsDir, h.Caddy.LiveDir} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return h
+}
+
+// addSite writes the site file of label, for <label>.example.test, and the
+// manifest file that authorises it.
+func addSite(t *testing.T, h *config.Host, label string, port int) {
+	t.Helper()
+	if err := caddy.WriteSite(h.SitesDir, label, label+"."+h.Domain, port); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(h.ManifestsDir, label+".toml"), []byte("label = \""+label+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWriteValidateRemove(t *testing.T) {
+	h := newHost(t)
+	dir := h.SitesDir
+	addSite(t, h, "jarl-x", 4100)
 	b, _ := os.ReadFile(filepath.Join(dir, "jarl-x.caddy"))
 	if string(b) != "import worktree jarl-x.example.test 4100\n" {
 		t.Fatalf("%q", b)
 	}
-	if err := caddy.ValidateSites(dir); err != nil {
+	if err := caddy.ValidateSites(h); err != nil {
 		t.Fatal(err)
 	}
 	os.WriteFile(filepath.Join(dir, "evil.caddy"), []byte("reverse_proxy 10.0.0.1:22\n"), 0o644)
-	err := caddy.ValidateSites(dir)
+	err := caddy.ValidateSites(h)
 	if err == nil || !strings.Contains(err.Error(), "evil.caddy") {
 		t.Fatal(err)
 	}
@@ -39,24 +69,25 @@ func TestWriteValidateRemove(t *testing.T) {
 }
 
 func TestReloadRunsValidateThenReload(t *testing.T) {
-	dir := t.TempDir()
-	caddy.WriteSite(dir, "a", "a.example.test", 4100)
+	h := newHost(t)
+	dir := h.SitesDir
+	addSite(t, h, "a", 4100)
 	f := &execx.Fake{}
-	cfg := config.Caddy{Config: "/etc/caddy/Caddyfile", LiveDir: t.TempDir(), Reload: []string{"systemctl", "reload", "caddy"}}
-	if err := caddy.Reload(context.Background(), cfg, dir, false, f); err != nil {
+	h.Caddy.Config, h.Caddy.Reload = "/etc/caddy/Caddyfile", []string{"systemctl", "reload", "caddy"}
+	if err := caddy.Reload(context.Background(), h, false, f); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.Calls) != 2 || f.Calls[0].Argv[0] != "caddy" || f.Calls[0].Argv[1] != "validate" || f.Calls[1].Argv[2] != "caddy" {
 		t.Fatalf("%+v", f.Calls)
 	}
 	f = &execx.Fake{}
-	caddy.Reload(context.Background(), cfg, dir, true, f)
+	caddy.Reload(context.Background(), h, true, f)
 	if len(f.Calls) != 1 {
 		t.Fatal("check must not reload")
 	}
 	os.WriteFile(filepath.Join(dir, "bad.caddy"), []byte("x\n"), 0o644)
 	f = &execx.Fake{}
-	if err := caddy.Reload(context.Background(), cfg, dir, false, f); err == nil || len(f.Calls) != 0 {
+	if err := caddy.Reload(context.Background(), h, false, f); err == nil || len(f.Calls) != 0 {
 		t.Fatal("ran caddy despite bad site file")
 	}
 }
@@ -84,14 +115,14 @@ func readDir(t *testing.T, dir string) map[string]string {
 }
 
 func TestReloadMirrorsToLiveDir(t *testing.T) {
-	dir, live := t.TempDir(), t.TempDir()
-	caddy.WriteSite(dir, "a", "a.example.test", 4100)
-	caddy.WriteSite(dir, "b", "b.example.test", 4101)
+	h := newHost(t)
+	live := h.Caddy.LiveDir
+	addSite(t, h, "a", 4100)
+	addSite(t, h, "b", 4101)
 	os.WriteFile(filepath.Join(live, "stale.caddy"), []byte("import worktree s.example.test 1\n"), 0o644)
 	os.WriteFile(filepath.Join(live, "keep.txt"), []byte("x"), 0o644)
-	cfg := config.Caddy{Config: "c", LiveDir: live, Reload: []string{"r"}}
 	f := &execx.Fake{}
-	if err := caddy.Reload(context.Background(), cfg, dir, false, f); err != nil {
+	if err := caddy.Reload(context.Background(), h, false, f); err != nil {
 		t.Fatal(err)
 	}
 	want := map[string]string{
@@ -109,19 +140,19 @@ func TestReloadMirrorsToLiveDir(t *testing.T) {
 }
 
 func TestReloadInvalidOrCheckLeavesLiveDirAlone(t *testing.T) {
-	dir, live := t.TempDir(), t.TempDir()
-	caddy.WriteSite(dir, "a", "a.example.test", 4100)
+	h := newHost(t)
+	dir, live := h.SitesDir, h.Caddy.LiveDir
+	addSite(t, h, "a", 4100)
 	os.WriteFile(filepath.Join(live, "old.caddy"), []byte("import worktree o.example.test 1\n"), 0o644)
 	before := readDir(t, live)
-	cfg := config.Caddy{Config: "c", LiveDir: live, Reload: []string{"r"}}
 
 	f := &execx.Fake{}
-	if err := caddy.Reload(context.Background(), cfg, dir, true, f); err != nil || !reflect.DeepEqual(readDir(t, live), before) {
+	if err := caddy.Reload(context.Background(), h, true, f); err != nil || !reflect.DeepEqual(readDir(t, live), before) {
 		t.Fatal("check touched LiveDir", err)
 	}
 	os.WriteFile(filepath.Join(dir, "bad.caddy"), []byte("x\n"), 0o644)
 	f = &execx.Fake{}
-	if err := caddy.Reload(context.Background(), cfg, dir, false, f); err == nil || len(f.Calls) != 0 || !reflect.DeepEqual(readDir(t, live), before) {
+	if err := caddy.Reload(context.Background(), h, false, f); err == nil || len(f.Calls) != 0 || !reflect.DeepEqual(readDir(t, live), before) {
 		t.Fatal("invalid sites affected LiveDir or ran commands")
 	}
 }
@@ -167,10 +198,87 @@ func TestSitePathAndRemoveSiteRejectBadLabel(t *testing.T) {
 }
 
 func TestValidateRejectsOversizedFile(t *testing.T) {
-	dir := t.TempDir()
-	big := "import worktree a.test " + strings.Repeat("1", 300) + "\n"
-	os.WriteFile(filepath.Join(dir, "big.caddy"), []byte(big), 0o644)
-	if caddy.ValidateSites(dir) == nil {
+	h := newHost(t)
+	big := "import worktree big.example.test " + strings.Repeat("1", 300) + "\n"
+	os.WriteFile(filepath.Join(h.SitesDir, "big.caddy"), []byte(big), 0o644)
+	os.WriteFile(filepath.Join(h.ManifestsDir, "big.toml"), nil, 0o644)
+	if caddy.ValidateSites(h) == nil {
 		t.Fatal("oversized file accepted")
+	}
+}
+
+// A site file may publish only <label>.<domain>, and only for a label whose
+// manifest its author owns; anything else refuses the whole reload, naming
+// the file, before a live change or a command.
+func TestReloadRefusesUnauthorisedSites(t *testing.T) {
+	for _, c := range []struct {
+		name, want string
+		plant      func(t *testing.T, h *config.Host)
+	}{
+		{"foreign host", "host admin.example.test is not x.example.test", func(t *testing.T, h *config.Host) {
+			os.WriteFile(filepath.Join(h.SitesDir, "x.caddy"), []byte("import worktree admin.example.test 4200\n"), 0o644)
+			os.WriteFile(filepath.Join(h.ManifestsDir, "x.toml"), nil, 0o644)
+		}},
+		{"another label's host", "host a.example.test is not x.example.test", func(t *testing.T, h *config.Host) {
+			os.WriteFile(filepath.Join(h.SitesDir, "x.caddy"), []byte("import worktree a.example.test 4200\n"), 0o644)
+			os.WriteFile(filepath.Join(h.ManifestsDir, "x.toml"), nil, 0o644)
+		}},
+		{"other domain", "host x.evil.test is not x.example.test", func(t *testing.T, h *config.Host) {
+			os.WriteFile(filepath.Join(h.SitesDir, "x.caddy"), []byte("import worktree x.evil.test 4200\n"), 0o644)
+			os.WriteFile(filepath.Join(h.ManifestsDir, "x.toml"), nil, 0o644)
+		}},
+		{"no manifest", "no such file or directory", func(t *testing.T, h *config.Host) {
+			caddy.WriteSite(h.SitesDir, "x", "x.example.test", 4200)
+		}},
+		{"symlinked manifest", "is not a regular file", func(t *testing.T, h *config.Host) {
+			caddy.WriteSite(h.SitesDir, "x", "x.example.test", 4200)
+			target := filepath.Join(t.TempDir(), "x.toml")
+			os.WriteFile(target, nil, 0o644)
+			os.Symlink(target, filepath.Join(h.ManifestsDir, "x.toml"))
+		}},
+		{"manifest directory", "is not a regular file", func(t *testing.T, h *config.Host) {
+			caddy.WriteSite(h.SitesDir, "x", "x.example.test", 4200)
+			os.Mkdir(filepath.Join(h.ManifestsDir, "x.toml"), 0o755)
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHost(t)
+			addSite(t, h, "a", 4100)
+			c.plant(t, h)
+			before := readDir(t, h.Caddy.LiveDir)
+			f := &execx.Fake{}
+			err := caddy.Reload(context.Background(), h, false, f)
+			if err == nil || !strings.Contains(err.Error(), filepath.Join(h.SitesDir, "x.caddy")) || !strings.Contains(err.Error(), c.want) {
+				t.Fatal(err)
+			}
+			if len(f.Calls) != 0 || !reflect.DeepEqual(readDir(t, h.Caddy.LiveDir), before) {
+				t.Fatal("refused reload ran a command or changed the live dir")
+			}
+		})
+	}
+}
+
+// The manifest must be owned by the site file's owner. Only root can make
+// them differ.
+func TestReloadRefusesSiteWhoseManifestHasAnotherOwner(t *testing.T) {
+	if os.Getuid() != 0 {
+		t.Skip("needs root to chown the manifest")
+	}
+	h := newHost(t)
+	addSite(t, h, "x", 4100)
+	if err := os.Chown(filepath.Join(h.ManifestsDir, "x.toml"), 12345, -1); err != nil {
+		t.Fatal(err)
+	}
+	if err := caddy.ValidateSites(h); err == nil || !strings.Contains(err.Error(), "by uid 12345") {
+		t.Fatal(err)
+	}
+}
+
+func TestReloadRequiresDomain(t *testing.T) {
+	h := newHost(t)
+	addSite(t, h, "a", 4100)
+	h.Domain = ""
+	if err := caddy.ValidateSites(h); err == nil || !strings.Contains(err.Error(), "no domain") {
+		t.Fatal(err)
 	}
 }

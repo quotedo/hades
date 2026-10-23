@@ -11,6 +11,7 @@ import (
 
 	"github.com/quotedo/hades/internal/naming"
 	"github.com/quotedo/hades/internal/registry"
+	"github.com/quotedo/hades/internal/testutil"
 )
 
 // plantBroken puts a garbage manifest and a symlinked one into reg.
@@ -127,5 +128,58 @@ func TestServerUpRefusesRegistryWithoutSharedModes(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(reg.PortsDir); len(entries) != 0 {
 		t.Fatal("claimed a port")
+	}
+}
+
+// caddy-reload publishes only <label>.<domain> for a label whose manifest
+// the site file's owner holds.
+func TestCaddyReloadAuthorisesSitesByLabelAndManifest(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("as root caddy-reload reads only /etc/hades/host.toml")
+	}
+	reg, getenv, state := serverFixture(t, "")
+	for _, tool := range []string{"caddy", "systemctl"} {
+		testutil.StubTool(t, filepath.Join(state, "bin"), tool, "#!/bin/bash\nexit 0\n")
+	}
+	if err := reg.WriteManifest(&registry.Manifest{Label: "demo-a"}); err != nil {
+		t.Fatal(err)
+	}
+	site := "import worktree demo-a.example.test 4100\n"
+	if err := os.WriteFile(filepath.Join(reg.SitesDir, "demo-a.caddy"), []byte(site), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	live := filepath.Join(state, "live", "demo-a.caddy")
+	if code, _, errs := runMain(getenv, "caddy-reload"); code != 0 {
+		t.Fatalf("code=%d err=%q", code, errs)
+	}
+	if got, _ := os.ReadFile(live); string(got) != site {
+		t.Fatalf("live = %q", got)
+	}
+
+	// A site for a hostname outside its label, or without a manifest, is
+	// refused, and the live directory keeps what it had.
+	for name, content := range map[string]string{
+		"demo-b.caddy": "import worktree admin.example.test 4101\n",
+		"demo-c.caddy": "import worktree demo-c.example.test 4102\n",
+	} {
+		path := filepath.Join(reg.SitesDir, name)
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if name == "demo-b.caddy" {
+			if err := reg.WriteManifest(&registry.Manifest{Label: "demo-b"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		code, _, errs := runMain(getenv, "caddy-reload")
+		if code != 1 || !strings.Contains(errs, "caddy-reload: site file "+path) {
+			t.Fatalf("%s: code=%d err=%q", name, code, errs)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if entries, _ := os.ReadDir(filepath.Join(state, "live")); len(entries) != 1 {
+		t.Fatalf("live dir changed: %v", entries)
 	}
 }
