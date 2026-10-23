@@ -8,8 +8,9 @@
   hosts: dev_servers
   gather_facts: false
   roles:
-    # Loads the shared defaults at role-default precedence, so inventory values still win.
-    # The `never` tag keeps the role's tasks from running here.
+    # Loads the shared defaults (roles/host/defaults/main.yml) at role-default precedence, so
+    # inventory values still win; the `never` tag keeps the role's tasks from running here.
+    # Do not use vars_files instead: play vars_files outrank inventory host vars.
     - { role: host, tags: [never] }
   tasks:
     - name: Preflight tests
