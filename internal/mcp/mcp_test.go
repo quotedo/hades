@@ -152,3 +152,22 @@ func TestRewireNoTargetsIsNoop(t *testing.T) {
 		t.Fatal(edited, f.Calls)
 	}
 }
+
+func TestRewireNonObjectTopLevelIsErrorAndFileUntouched(t *testing.T) {
+	for _, in := range []string{"null", "[]"} {
+		wt := t.TempDir()
+		p := filepath.Join(wt, ".cursor/mcp.json")
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(in), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := mcp.Rewire(context.Background(), wt, mcp.Targets{TidewaveURL: newURL}, &execx.Fake{}); err == nil {
+			t.Fatalf("%s: expected error", in)
+		}
+		if got, _ := os.ReadFile(p); string(got) != in {
+			t.Fatalf("%s: file changed to %q", in, got)
+		}
+	}
+}

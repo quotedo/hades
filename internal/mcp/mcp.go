@@ -141,6 +141,9 @@ func editJSON(fn func(map[string]any, Targets) error) func(string, Targets) erro
 		if err := json.Unmarshal(b, &m); err != nil {
 			return err
 		}
+		if m == nil {
+			return fmt.Errorf("top level is null, want object")
+		}
 		if err := fn(m, t); err != nil {
 			return err
 		}
