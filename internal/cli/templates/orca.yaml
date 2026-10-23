@@ -1,0 +1,4 @@
+scripts:
+  setup: hades up
+  archive: hades down
+setupAgentStartupPolicy: wait-for-setup

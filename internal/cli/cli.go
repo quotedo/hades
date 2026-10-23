@@ -44,6 +44,7 @@ var commands = map[string]Command{
 	"doctor":       doctor,
 	"env":          envCmd,
 	"port":         port,
+	"init":         initCmd,
 }
 
 // Main parses global flags (before and after the command word), dispatches
