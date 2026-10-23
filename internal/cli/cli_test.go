@@ -32,3 +32,20 @@ func TestGlobalFlagsBeforeAndAfterCommand(t *testing.T) {
 		}
 	}
 }
+
+func TestCaddyReloadRefusesLaptopMode(t *testing.T) {
+	var out, errb bytes.Buffer
+	getenv := func(k string) string {
+		switch k {
+		case "HADES_HOST_CONFIG":
+			return "laptop"
+		case "HOME":
+			return t.TempDir()
+		}
+		return ""
+	}
+	code := Main([]string{"caddy-reload"}, &out, &errb, getenv)
+	if code != 1 || !strings.Contains(errb.String(), "caddy-reload: no host config; nothing to reload") {
+		t.Fatalf("code=%d err=%q", code, errb.String())
+	}
+}

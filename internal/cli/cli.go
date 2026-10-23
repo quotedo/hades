@@ -35,6 +35,7 @@ var commands = map[string]Command{
 		fmt.Fprintln(ctx.Stdout, version.Version)
 		return 0
 	},
+	"caddy-reload": caddyReload,
 	// Placeholder until the real port command replaces it.
 	"port": func(ctx *Context, _ []string) int {
 		fmt.Fprintln(ctx.Stderr, "port: not implemented")
