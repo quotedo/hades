@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/quotedo/hades/internal/caddy"
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/execx"
 	"github.com/quotedo/hades/internal/registry"
@@ -35,7 +34,7 @@ func TestDownRemovesEverythingItOwns(t *testing.T) {
 	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_roman_feature_x", "demo_test_roman_feature_x1"}) {
 		t.Fatal(got)
 	}
-	if all, _ := d.Reg.All(); len(all) != 0 {
+	if all, _, _ := d.Reg.All(); len(all) != 0 {
 		t.Fatal("manifest left")
 	}
 	if _, err := d.Reg.PortOwner(4100); !errors.Is(err, fs.ErrNotExist) {
@@ -59,7 +58,7 @@ func TestDownRefusesOtherUsersManifest(t *testing.T) {
 	if !res[0].Skipped || !strings.Contains(res[0].Step, "manifest") {
 		t.Fatalf("%+v", res)
 	}
-	if all, _ := d.Reg.All(); len(all) != 1 {
+	if all, _, _ := d.Reg.All(); len(all) != 1 {
 		t.Fatal("touched another user's manifest")
 	}
 }
@@ -84,7 +83,7 @@ func TestDownBestEffortAndStrict(t *testing.T) {
 	if err != nil {
 		t.Fatal("best effort must not error")
 	}
-	if all, _ := d.Reg.All(); len(all) != 0 {
+	if all, _, _ := d.Reg.All(); len(all) != 0 {
 		t.Fatal("manifest should still be removed")
 	}
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
@@ -97,19 +96,43 @@ func TestDownBestEffortAndStrict(t *testing.T) {
 func TestGCReleasesVanishedWorktreesAndOwner(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
-	d2, c2 := newServerDepsSharing(t, d, "phoenix") // second worktree, same registry, user "other"
+	d2, c2 := newServerDepsSharing(t, d, "phoenix", "roman") // second worktree, same registry and user
 	Up(context.Background(), d2, c2, UpOptions{SkipSetup: true})
 	os.RemoveAll(c.Worktree)
 	rep, _ := GC(context.Background(), d, "", false)
 	if len(rep.Released) != 1 || rep.Released[0] != "demo-feature-x" {
 		t.Fatalf("%+v", rep)
 	}
-	rep, _ = GC(context.Background(), d, "other", false)
+	rep, _ = GC(context.Background(), d, "roman", false)
 	if len(rep.Released) != 1 {
 		t.Fatalf("%+v", rep)
 	}
-	if all, _ := d.Reg.All(); len(all) != 0 {
+	if all, _, _ := d.Reg.All(); len(all) != 0 {
 		t.Fatal(len(all))
+	}
+}
+
+// gc --owner selects by the manifest file's owner, never by its user field.
+func TestGCOwnerSelectsByFileOwner(t *testing.T) {
+	d, c := newServerDeps(t, "phoenix")
+	mustUp(t, d, c)
+	d2, c2 := newServerDepsSharing(t, d, "phoenix", "other") // user field "other", file owned by roman
+	mustUp(t, d2, c2)
+	rep, err := GC(context.Background(), d, "other", false)
+	if err != nil || len(rep.Released) != 0 || len(rep.Errors) != 0 {
+		t.Fatalf("released by the user field: %+v %v", rep, err)
+	}
+	if all, _, _ := d.Reg.All(); len(all) != 2 {
+		t.Fatal(len(all))
+	}
+	if _, err := GC(context.Background(), d, "nobody", false); err == nil || !strings.Contains(err.Error(), "nobody") {
+		t.Fatal(err)
+	}
+	// roman's run selects both files roman owns, and then verification
+	// refuses the one whose suffix was computed for "other".
+	rep, err = GC(context.Background(), d, "roman", false)
+	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 1 || !strings.Contains(rep.Errors[0].Error(), "refusing ") {
+		t.Fatalf("%+v %v", rep, err)
 	}
 }
 
@@ -186,7 +209,7 @@ func TestDownTeardownFailureIsReportedAndOthersStillRun(t *testing.T) {
 	if !strings.Contains(log.String(), "down: failed teardown: ") {
 		t.Fatal(log.String())
 	}
-	if all, _ := d.Reg.All(); len(all) != 0 {
+	if all, _, _ := d.Reg.All(); len(all) != 0 {
 		t.Fatal("manifest left")
 	}
 }
@@ -222,7 +245,7 @@ func TestDownRemovesSiteAndReloadsCaddy(t *testing.T) {
 	if _, err := Down(context.Background(), d, c, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(caddy.SitePath(d.Reg.SitesDir, "demo-feature-x")); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Stat(sitePath(t, d, "demo-feature-x")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("site left")
 	}
 	if countCalls(f, sudoReload) != 1 {
@@ -267,7 +290,7 @@ func TestDownAsRootActsOnAnyManifestButSkipsTeardown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if all, _ := d.Reg.All(); len(all) != 0 {
+	if all, _, _ := d.Reg.All(); len(all) != 0 {
 		t.Fatal("manifest left")
 	}
 	if r, ok := findStep(res, "teardown"); !ok || !r.Skipped || r.Reason != "teardown runs only as the owner; use gc" {
@@ -308,7 +331,7 @@ func TestDownWithoutDatabaseBasesIsSilent(t *testing.T) {
 	if _, ok := findStep(res, "databases"); ok || log.Len() != 0 {
 		t.Fatalf("%+v %q", res, log.String())
 	}
-	if all, _ := d.Reg.All(); len(all) != 0 {
+	if all, _, _ := d.Reg.All(); len(all) != 0 {
 		t.Fatal("manifest left")
 	}
 }
@@ -356,7 +379,7 @@ func TestGCDryRunChangesNothing(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 0 {
 		t.Fatalf("%+v %v", rep, err)
 	}
-	if all, _ := d.Reg.All(); len(all) != 1 {
+	if all, _, _ := d.Reg.All(); len(all) != 1 {
 		t.Fatal("dry run removed the manifest")
 	}
 	if _, err := d.Reg.PortOwner(4100); err != nil {
@@ -370,7 +393,7 @@ func TestGCDryRunChangesNothing(t *testing.T) {
 func TestGCReloadsCaddyOnceForSeveralSites(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	mustUp(t, d, c)
-	d2, c2 := newServerDepsSharing(t, d, "phoenix")
+	d2, c2 := newServerDepsSharing(t, d, "phoenix", "roman")
 	mustUp(t, d2, c2)
 	for _, wt := range []string{c.Worktree, c2.Worktree} {
 		if err := os.RemoveAll(wt); err != nil {
@@ -416,18 +439,21 @@ func TestGCRemovesStalePortLinks(t *testing.T) {
 func TestGCReportsStepErrorsAndCarriesOn(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	mustUp(t, d, c)
-	d2, c2 := newServerDepsSharing(t, d, "phoenix")
+	d2, c2 := newServerDepsSharing(t, d, "phoenix", "roman")
 	mustUp(t, d2, c2)
 	d.PG.(*fakePG).names = []string{"demo_dev_roman_feature_x"}
 	d.PG.(*fakePG).failDrop = true
-	rep, err := GC(context.Background(), d, "roman", false)
+	if err := os.RemoveAll(c.Worktree); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := GC(context.Background(), d, "", false)
 	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 1 {
 		t.Fatalf("%+v %v", rep, err)
 	}
 	if msg := rep.Errors[0].Error(); !strings.Contains(msg, "demo-feature-x") || !strings.Contains(msg, "databases") {
 		t.Fatal(msg)
 	}
-	if all, _ := d.Reg.All(); len(all) != 1 || all[0].Label != "demo-feature-y" {
+	if all, _, _ := d.Reg.All(); len(all) != 1 || all[0].Label != "demo-feature-y" {
 		t.Fatal("released the wrong manifests")
 	}
 }
@@ -435,7 +461,7 @@ func TestGCReportsStepErrorsAndCarriesOn(t *testing.T) {
 func TestGCOnLaptopLeavesOtherUsersManifests(t *testing.T) {
 	d, c := newLaptopDeps(t, "phoenix")
 	mustUp(t, d, c)
-	d2, c2 := newServerDepsSharing(t, d, "phoenix")
+	d2, c2 := newServerDepsSharing(t, d, "phoenix", "other")
 	mustUp(t, d2, c2)
 	for _, wt := range []string{c.Worktree, c2.Worktree} {
 		if err := os.RemoveAll(wt); err != nil {
@@ -446,7 +472,7 @@ func TestGCOnLaptopLeavesOtherUsersManifests(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) {
 		t.Fatalf("%+v %v", rep, err)
 	}
-	all, _ := d.Reg.All()
+	all, _, _ := d.Reg.All()
 	if !slices.ContainsFunc(all, func(m *registry.Manifest) bool { return m.User == "other" }) {
 		t.Fatal("released another user's manifest")
 	}

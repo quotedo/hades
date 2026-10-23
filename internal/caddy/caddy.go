@@ -15,6 +15,7 @@ import (
 
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/execx"
+	"github.com/quotedo/hades/internal/naming"
 )
 
 // SiteLine is the only content a site file may have.
@@ -26,9 +27,13 @@ var hostName = regexp.MustCompile(`^[a-z0-9.-]+$`)
 // exactly `<DefaultBinary> caddy-reload`.
 const DefaultBinary = "/usr/local/bin/hades"
 
-// SitePath returns the site file for a worktree label.
-func SitePath(sitesDir, label string) string {
-	return filepath.Join(sitesDir, label+".caddy")
+// SitePath returns the site file for a worktree label, refusing a label that
+// is not a plain file name.
+func SitePath(sitesDir, label string) (string, error) {
+	if err := naming.CheckPlain(label); err != nil {
+		return "", err
+	}
+	return filepath.Join(sitesDir, label+".caddy"), nil
 }
 
 // maxSiteFile bounds what is read from a site file; a valid one is far shorter.
@@ -39,8 +44,8 @@ var cmdEnv = []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/s
 
 // WriteSite atomically writes the site file for label.
 func WriteSite(sitesDir, label, host string, port int) error {
-	if label == "" || label != filepath.Base(label) || label == "." || label == ".." {
-		return fmt.Errorf("refusing label %q: must be a plain file name", label)
+	if err := naming.CheckPlain(label); err != nil {
+		return err
 	}
 	if !hostName.MatchString(host) {
 		return fmt.Errorf("refusing host %q: must match %s", host, hostName)
@@ -53,6 +58,10 @@ func WriteSite(sitesDir, label, host string, port int) error {
 
 // writeAtomic writes content to <dir>/<label>.caddy via a temp file and rename.
 func writeAtomic(dir, label string, content []byte) error {
+	path, err := SitePath(dir, label)
+	if err != nil {
+		return err
+	}
 	tmp, err := os.CreateTemp(dir, "."+label+".*.tmp")
 	if err != nil {
 		return fmt.Errorf("write site file: %w", err)
@@ -66,15 +75,20 @@ func writeAtomic(dir, label string, content []byte) error {
 	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
 		return fmt.Errorf("write site file: %w", err)
 	}
-	if err := os.Rename(tmp.Name(), SitePath(dir, label)); err != nil {
+	if err := os.Rename(tmp.Name(), path); err != nil {
 		return fmt.Errorf("write site file: %w", err)
 	}
 	return nil
 }
 
-// RemoveSite deletes the site file for label; an absent file is success.
+// RemoveSite deletes the site file for label; an absent file is success. A
+// label that is not a plain file name is an error.
 func RemoveSite(sitesDir, label string) error {
-	if err := os.Remove(SitePath(sitesDir, label)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	path, err := SitePath(sitesDir, label)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove site file: %w", err)
 	}
 	return nil

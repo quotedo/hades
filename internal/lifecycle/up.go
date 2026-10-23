@@ -214,7 +214,7 @@ func (u *upRun) prepareRegistry() error {
 func (u *upRun) identify() error {
 	d, c := u.d, u.c
 	if !u.noRegistry {
-		m, err := d.Reg.ByWorktree(c.Worktree)
+		m, err := d.Reg.ByWorktree(c.Worktree, d.User.UID)
 		switch {
 		case err == nil:
 			if err := u.checkOwned(m); err != nil {
@@ -305,11 +305,7 @@ func (u *upRun) plan() {
 // checkOwned fails unless m's file is owned by this user and m records this
 // worktree. Ownership is the file's uid, not the UID recorded inside.
 func (u *upRun) checkOwned(m *registry.Manifest) error {
-	owner, err := u.d.Reg.ManifestOwner(m.Label)
-	if err != nil {
-		return fmt.Errorf("manifest %s: %w", m.Label, err)
-	}
-	if owner != u.d.User.UID || !sameDir(m.Worktree, u.c.Worktree) {
+	if m.OwnerUID() != u.d.User.UID || !sameDir(m.Worktree, u.c.Worktree) {
 		return &ErrLabelTaken{Label: m.Label, User: m.User, Worktree: m.Worktree}
 	}
 	return nil
@@ -539,12 +535,15 @@ func (u *upRun) publishSite() (*undo, error) {
 		return nil, nil
 	}
 	sites, label := u.d.Reg.SitesDir, u.m.Label
-	path := caddy.SitePath(sites, label)
+	path, err := caddy.SitePath(sites, label)
+	if err != nil {
+		return nil, err
+	}
 	if u.opt.DryRun {
 		u.would("write site %s", path)
 		return nil, caddy.SudoReload(u.ctx, u.d.Run, u.d.Bin)
 	}
-	_, statErr := os.Stat(path)
+	_, statErr := os.Lstat(path)
 	if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
 		return nil, statErr
 	}

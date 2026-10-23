@@ -25,7 +25,7 @@ func gc(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	dryRun := fs.Bool("dry-run", false, "print what would be released; change nothing")
-	owner := fs.String("owner", "", "release every manifest of this user")
+	owner := fs.String("owner", "", "release every manifest whose file this user owns")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(ctx.Stderr, "gc: %v\n%s\n", err, gcUsage)
 		return 2
@@ -58,6 +58,9 @@ func gc(ctx *Context, args []string) int {
 	if err != nil {
 		fmt.Fprintf(ctx.Stderr, "hades: gc: %v\n", err)
 		return 1
+	}
+	for _, p := range rep.Ignored {
+		fmt.Fprintf(ctx.Stderr, "hades: gc: %s\n", p)
 	}
 	verb := "released"
 	if *dryRun {

@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/quotedo/hades/internal/caddy"
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/envfile"
 	"github.com/quotedo/hades/internal/execx"
@@ -97,20 +99,38 @@ func newServerDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 		Log:      io.Discard,
 		Bin:      "/usr/local/bin/hades",
 		LookPath: func(string) (string, error) { return "", exec.ErrNotFound },
+		// The test process is "roman"; "other" is a user owning no files.
+		LoginOf: func(uid int) (string, error) {
+			if uid == os.Getuid() {
+				return "roman", nil
+			}
+			return "", fmt.Errorf("unknown uid %d", uid)
+		},
+		UIDOf: func(login string) (int, error) {
+			switch login {
+			case "roman":
+				return os.Getuid(), nil
+			case "other":
+				return os.Getuid() + 1, nil
+			}
+			return 0, fmt.Errorf("unknown user %s", login)
+		},
 	}
 	return d, wtctx.Context{Root: root, Worktree: wt, Name: "feature/x", ADE: "shell"}
 }
 
 // newServerDepsSharing returns Deps and Context for a second worktree,
 // feature/y of another demo checkout, sharing d's host, registry and fakes.
-// The user is "other" with the same UID, because tests cannot chown.
-func newServerDepsSharing(t *testing.T, d Deps, fixture string) (Deps, wtctx.Context) {
+// The user is named userName with the same UID, because tests cannot chown:
+// "roman" is the same user, "other" a manifest whose user field differs from
+// its file owner.
+func newServerDepsSharing(t *testing.T, d Deps, fixture, userName string) (Deps, wtctx.Context) {
 	t.Helper()
 	root, wt := testutil.TempGitRepoWithWorktree(t)
 	root, wt = resolved(t, root), resolved(t, wt)
 	copyDir(t, filepath.Join("..", "preset", "testdata", fixture), wt)
 	writeFile(t, filepath.Join(root, "hades.toml"), "project = \"demo\"\n")
-	d.User.Name = "other"
+	d.User.Name = userName
 	return d, wtctx.Context{Root: root, Worktree: wt, Name: "feature/y", ADE: "shell"}
 }
 
@@ -122,6 +142,16 @@ func newLaptopDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 	d.Host.Domain = ""
 	d.Host.Caddy = config.Caddy{}
 	return d, c
+}
+
+// sitePath is the site file of label in d's sites directory.
+func sitePath(t *testing.T, d Deps, label string) string {
+	t.Helper()
+	p, err := caddy.SitePath(d.Reg.SitesDir, label)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 func resolved(t *testing.T, p string) string {

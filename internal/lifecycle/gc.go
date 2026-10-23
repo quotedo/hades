@@ -16,28 +16,42 @@ import (
 )
 
 // GCReport is what GC released (or, in a dry run, would release): manifest
-// labels and "port <n>" for stale port links, and every error on the way.
+// labels and "port <n>" for stale port links; the manifests directory entries
+// it could not read; and every error on the way, including the manifests it
+// refused to release because their claims failed verification.
 type GCReport struct {
 	Released []string
+	Ignored  []registry.Problem
 	Errors   []error
 }
 
-// GC releases the manifests of user owner, or, with owner empty, those whose
-// worktree no longer exists, and removes port links no manifest references
-// whose worktree is gone. It does not check ownership: on a server the
-// caller is root, and on a laptop only d.User's manifests are considered.
-// Caddy is reloaded once at the end when a site file went. dryRun reports
-// without acting. GC returns an error only when it cannot list the manifests
-// or the port links; everything else is in the report.
+// GC releases the manifests whose file is owned by user owner, or, with
+// owner empty, those whose worktree no longer exists, and removes port links
+// no manifest references whose worktree is gone. On a server the caller is
+// root, so every manifest's claims are verified against its file owner
+// before anything is released; on a laptop only d.User's manifests are
+// considered. Caddy is reloaded once at the end when a site file went. dryRun
+// reports without acting. GC returns an error only when it cannot list the
+// manifests or the port links, or cannot resolve owner; everything else is
+// in the report.
 func GC(ctx context.Context, d Deps, owner string, dryRun bool) (GCReport, error) {
 	if d.Log == nil {
 		d.Log = io.Discard
 	}
 	var rep GCReport
-	all, err := d.Reg.All()
+	ownerUID := -1
+	if owner != "" {
+		uid, err := d.uidOf(owner)
+		if err != nil {
+			return rep, fmt.Errorf("owner %s: %w", owner, err)
+		}
+		ownerUID = uid
+	}
+	all, problems, err := d.Reg.All()
 	if err != nil {
 		return rep, fmt.Errorf("list manifests: %w", err)
 	}
+	rep.Ignored = problems
 	links, err := os.ReadDir(d.Reg.PortsDir)
 	if err != nil {
 		return rep, fmt.Errorf("list ports: %w", err)
@@ -52,11 +66,15 @@ func GC(ctx context.Context, d Deps, owner string, dryRun bool) (GCReport, error
 		if d.Mode == config.Laptop && m.User != d.User.Name {
 			continue
 		}
-		ok, err := releasable(m, owner)
+		ok, err := releasable(m, ownerUID)
 		if err != nil {
 			rep.Errors = append(rep.Errors, err)
 		}
 		if !ok {
+			continue
+		}
+		if reason := verifyClaims(d, m, "gc"); reason != "" {
+			rep.Errors = append(rep.Errors, fmt.Errorf("refusing %s: %s", m.Path(), reason))
 			continue
 		}
 		if dryRun {
@@ -103,11 +121,11 @@ func GC(ctx context.Context, d Deps, owner string, dryRun bool) (GCReport, error
 	return rep, nil
 }
 
-// releasable reports whether GC releases m: it belongs to owner, or, with
-// owner empty, its worktree is gone.
-func releasable(m *registry.Manifest, owner string) (bool, error) {
-	if owner != "" {
-		return m.User == owner, nil
+// releasable reports whether GC releases m: its file is owned by ownerUID,
+// or, with ownerUID negative, its worktree is gone.
+func releasable(m *registry.Manifest, ownerUID int) (bool, error) {
+	if ownerUID >= 0 {
+		return m.OwnerUID() == ownerUID, nil
 	}
 	_, err := os.Stat(m.Worktree)
 	switch {

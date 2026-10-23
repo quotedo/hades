@@ -159,7 +159,7 @@ func runChecks(bg context.Context, ctx *Context) []check {
 	default:
 		checks = append(checks, check{Name: "ade-hooks", Warn: true, Detail: wtErr.Error()})
 	}
-	checks = append(checks, checkVersions(d))
+	checks = append(checks, checkManifests(d), checkVersions(d))
 	return checks
 }
 
@@ -357,10 +357,28 @@ func checkADEHooks(wtDir string) check {
 	return pass(name, strings.Join(found, ", ")+" run hades up")
 }
 
+// checkManifests fails when the registry holds entries hades ignores: files
+// that are not regular, misnamed, or unparsable.
+func checkManifests(d lifecycle.Deps) check {
+	const name = "manifests"
+	all, problems, err := allManifests(d)
+	if err != nil {
+		return fail(name, err)
+	}
+	if len(problems) > 0 {
+		lines := make([]string, len(problems))
+		for i, p := range problems {
+			lines[i] = p.String()
+		}
+		return failf(name, "%s", strings.Join(lines, "; "))
+	}
+	return pass(name, fmt.Sprintf("%d manifests readable", len(all)))
+}
+
 // checkVersions warns about manifests written by another hades version.
 func checkVersions(d lifecycle.Deps) check {
 	const name = "versions"
-	all, err := allManifests(d)
+	all, _, err := allManifests(d)
 	if err != nil {
 		return check{Name: name, Warn: true, Detail: err.Error()}
 	}

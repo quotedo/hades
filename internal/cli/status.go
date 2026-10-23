@@ -91,7 +91,7 @@ func buildStatus(bg context.Context, ctx *Context, d lifecycle.Deps) (statusRepo
 	rng := d.Host.Range()
 	r.Ports = statusPorts{Range: d.Host.PortRange, Used: used, Free: max(rng.Hi-rng.Lo+1-used, 0)}
 
-	all, err := allManifests(d)
+	all, _, err := allManifests(d)
 	if err != nil {
 		return r, err
 	}

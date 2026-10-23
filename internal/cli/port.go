@@ -27,7 +27,7 @@ func port(ctx *Context, args []string) int {
 		fmt.Fprintf(ctx.Stderr, "hades: port: %v\n", err)
 		return 1
 	}
-	m, err := d.Reg.ByWorktree(wt.Worktree)
+	m, err := d.Reg.ByWorktree(wt.Worktree, d.User.UID)
 	if errors.Is(err, registry.ErrNoManifest) || errors.Is(err, fs.ErrNotExist) {
 		fmt.Fprintf(ctx.Stderr, "hades: port: no hades manifest for %s; run hades up\n", wt.Worktree)
 		return 1

@@ -72,6 +72,16 @@ func TestSuffix(t *testing.T) {
 	if got := Suffix("Roman", "Ünïcode!"); got != "_roman_ncode" {
 		t.Fatal(got)
 	}
+	// The user part keeps only [a-z0-9], so the first segment is the login.
+	if got := Suffix("ro.man-c_x", "a"); got != "_romancx_a" {
+		t.Fatal(got)
+	}
+	if a, b := Suffix("roman-feature", "x"), Suffix("roman", "feature/x"); a == b {
+		t.Fatalf("both %q", a)
+	}
+	if a, b := Suffix("roman_feature", "x"), Suffix("roman", "feature_x"); a == b {
+		t.Fatalf("both %q", a)
+	}
 	// 31 bytes ending in a digit: the trailing "_" makes 32, no hash.
 	if got := Suffix("roman", strings.Repeat("a", 23)+"1"); got != "_roman_"+strings.Repeat("a", 23)+"1_" {
 		t.Fatal(got)
@@ -106,5 +116,18 @@ func TestSuffix(t *testing.T) {
 	}
 	if !letter || !digit {
 		t.Fatal("did not cover both hash endings")
+	}
+}
+
+func TestCheckPlain(t *testing.T) {
+	for _, l := range []string{"", ".", "..", "../x", "a/b", "/abs", "x/", "../../../../escape"} {
+		if err := CheckPlain(l); !errors.Is(err, ErrNotPlain) {
+			t.Errorf("%q: %v", l, err)
+		}
+	}
+	for _, l := range []string{"demo-feature-x", "a", "..a", "a.b"} {
+		if err := CheckPlain(l); err != nil {
+			t.Errorf("%q: %v", l, err)
+		}
 	}
 }

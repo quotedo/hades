@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/quotedo/hades/internal/config"
+	"github.com/quotedo/hades/internal/naming"
 	"github.com/quotedo/hades/internal/registry"
 )
 
@@ -121,7 +122,7 @@ func TestGCOnLaptopReleasesOnlyTheCurrentUsersVanishedWorktrees(t *testing.T) {
 	reg := laptopRegistry(t, getenv)
 	gone := filepath.Join(t.TempDir(), "gone")
 	for _, m := range []*registry.Manifest{
-		{User: currentUserName(t), Label: "demo-gone", Worktree: gone},
+		{User: currentUserName(t), Label: "demo-gone", Name: "gone", DBSuffix: naming.Suffix(currentUserName(t), "gone"), Worktree: gone},
 		{User: "someone-else", Label: "demo-theirs", Worktree: gone},
 	} {
 		if err := reg.WriteManifest(m); err != nil {

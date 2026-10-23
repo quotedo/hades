@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/quotedo/hades/internal/caddy"
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/envfile"
 	"github.com/quotedo/hades/internal/execx"
@@ -30,7 +29,7 @@ func TestUpPhoenixServerHappyPath(t *testing.T) {
 	if owner, _ := d.Reg.PortOwner(4100); owner != c.Worktree {
 		t.Fatal(owner)
 	}
-	if _, err := os.Stat(caddy.SitePath(d.Reg.SitesDir, m.Label)); err != nil {
+	if _, err := os.Stat(sitePath(t, d, m.Label)); err != nil {
 		t.Fatal(err)
 	}
 	env, _ := envfile.ReadEnvWorktree(filepath.Join(c.Worktree, ".env.worktree"))
@@ -54,7 +53,7 @@ func TestUpIsIdempotentAndKeepsSecret(t *testing.T) {
 	if err != nil || second.Manifest.Port != first.Manifest.Port || toMap(second.Env)["SECRET_KEY_BASE"] != toMap(first.Env)["SECRET_KEY_BASE"] {
 		t.Fatal(err)
 	}
-	all, _ := d.Reg.All()
+	all, _, _ := d.Reg.All()
 	if len(all) != 1 {
 		t.Fatal(len(all))
 	}
@@ -93,10 +92,10 @@ func TestUpRollsBackWhenCaddyReloadFails(t *testing.T) {
 	if _, err := d.Reg.PortOwner(4100); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("port not released")
 	}
-	if all, _ := d.Reg.All(); len(all) != 0 {
+	if all, _, _ := d.Reg.All(); len(all) != 0 {
 		t.Fatal("manifest kept")
 	}
-	if _, err := os.Stat(caddy.SitePath(d.Reg.SitesDir, "demo-feature-x")); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Stat(sitePath(t, d, "demo-feature-x")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("site kept")
 	}
 }
@@ -109,7 +108,7 @@ func TestUpKeepsStateWhenSetupFails(t *testing.T) {
 	if !errors.As(err, &se) {
 		t.Fatal(err)
 	}
-	if all, _ := d.Reg.All(); len(all) != 1 {
+	if all, _, _ := d.Reg.All(); len(all) != 1 {
 		t.Fatal("manifest removed")
 	}
 	if _, err := d.Reg.PortOwner(4100); err != nil {
@@ -123,7 +122,7 @@ func TestUpNonePresetDoesNothing(t *testing.T) {
 	if err != nil || out.Manifest != nil {
 		t.Fatal(out, err)
 	}
-	if all, _ := d.Reg.All(); len(all) != 0 {
+	if all, _, _ := d.Reg.All(); len(all) != 0 {
 		t.Fatal("manifest for none")
 	}
 }
@@ -144,7 +143,7 @@ func TestUpDryRunWritesNothing(t *testing.T) {
 	var log bytes.Buffer
 	d.Log = &log
 	Up(context.Background(), d, c, UpOptions{DryRun: true})
-	if all, _ := d.Reg.All(); len(all) != 0 {
+	if all, _, _ := d.Reg.All(); len(all) != 0 {
 		t.Fatal("wrote manifest in dry run")
 	}
 	if !strings.Contains(log.String(), "would") {
@@ -159,7 +158,7 @@ func TestUpInvalidNameFailsWithoutPanic(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "???") {
 		t.Fatal(err)
 	}
-	if all, _ := d.Reg.All(); len(all) != 0 {
+	if all, _, _ := d.Reg.All(); len(all) != 0 {
 		t.Fatal("manifest written for invalid name")
 	}
 }
@@ -188,7 +187,7 @@ func TestUpDryRunTouchesNoFiles(t *testing.T) {
 	for _, p := range []string{
 		filepath.Join(c.Worktree, ".env.worktree"),
 		filepath.Join(c.Worktree, ".envrc"),
-		caddy.SitePath(d.Reg.SitesDir, "demo-feature-x"),
+		sitePath(t, d, "demo-feature-x"),
 		filepath.Join(d.Reg.PortsDir, "4100"),
 	} {
 		if _, err := os.Lstat(p); !errors.Is(err, fs.ErrNotExist) {
@@ -217,13 +216,13 @@ func TestUpRerunFailureKeepsEarlierState(t *testing.T) {
 	if _, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true}); err == nil {
 		t.Fatal("expected failure")
 	}
-	if all, _ := d.Reg.All(); len(all) != 1 {
+	if all, _, _ := d.Reg.All(); len(all) != 1 {
 		t.Fatal("earlier manifest removed")
 	}
 	if owner, _ := d.Reg.PortOwner(4100); owner != c.Worktree {
 		t.Fatal("earlier port released")
 	}
-	if _, err := os.Stat(caddy.SitePath(d.Reg.SitesDir, "demo-feature-x")); err != nil {
+	if _, err := os.Stat(sitePath(t, d, "demo-feature-x")); err != nil {
 		t.Fatal("earlier site removed")
 	}
 }
@@ -343,14 +342,14 @@ func TestUpNonWebPresetGetsNoPortOrURL(t *testing.T) {
 			t.Fatalf("run %d: url=%q %+v", run, out.URL, out.Manifest)
 		}
 	}
-	m, err := d.Reg.ByWorktree(c.Worktree)
+	m, err := d.Reg.ByWorktree(c.Worktree, d.User.UID)
 	if err != nil || m.Port != 0 || m.Label != "demo-feature-x" {
 		t.Fatalf("%+v %v", m, err)
 	}
 	if entries, _ := os.ReadDir(d.Reg.PortsDir); len(entries) != 0 {
 		t.Fatal("port claimed for a non-web preset")
 	}
-	if _, err := os.Stat(caddy.SitePath(d.Reg.SitesDir, m.Label)); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Stat(sitePath(t, d, m.Label)); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("site written for a non-web preset")
 	}
 	calls := argvs(d.Run.(*execx.Fake))

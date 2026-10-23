@@ -64,8 +64,10 @@ func Down(ctx context.Context, d Deps, c wtctx.Context, strict bool) ([]StepResu
 
 // ownManifest returns the worktree's manifest when this user may release it,
 // else nil and the result saying why not. Ownership is the manifest file's
-// uid; root may release any manifest, and owner reports whether this user
-// owns it rather than acting as root.
+// uid and only this user's manifests are looked up; root sees every
+// manifest, and one it does not own is released only after its claims are
+// verified against its file owner. owner reports whether this user owns the
+// manifest rather than acting as root.
 func ownManifest(d Deps, c wtctx.Context) (m *registry.Manifest, owner bool, r StepResult) {
 	r = StepResult{Step: "manifest"}
 	if d.Mode == config.Laptop {
@@ -74,7 +76,7 @@ func ownManifest(d Deps, c wtctx.Context) (m *registry.Manifest, owner bool, r S
 			return nil, false, r
 		}
 	}
-	m, err := d.Reg.ByWorktree(c.Worktree)
+	m, err := d.Reg.ByWorktree(c.Worktree, d.User.UID)
 	if errors.Is(err, registry.ErrNoManifest) {
 		r.Skipped, r.Reason = true, err.Error()
 		return nil, false, r
@@ -83,18 +85,20 @@ func ownManifest(d Deps, c wtctx.Context) (m *registry.Manifest, owner bool, r S
 		r.Err = err
 		return nil, false, r
 	}
-	uid, err := d.Reg.ManifestOwner(m.Label)
-	if err != nil {
-		r.Err = fmt.Errorf("manifest %s: %w", m.Label, err)
-		return nil, false, r
-	}
+	uid := m.OwnerUID()
 	switch {
 	case d.User.UID != 0 && uid != d.User.UID:
 		r.Skipped, r.Reason = true, fmt.Sprintf("manifest %s is owned by uid %d, not uid %d", m.Label, uid, d.User.UID)
 	case !sameDir(m.Worktree, c.Worktree):
 		r.Skipped, r.Reason = true, fmt.Sprintf("manifest %s records worktree %s, not %s", m.Label, m.Worktree, c.Worktree)
+	case uid != d.User.UID:
+		if reason := verifyClaims(d, m, "down"); reason != "" {
+			r.Err = fmt.Errorf("refusing %s: %s", m.Path(), reason)
+			return nil, false, r
+		}
+		return m, false, r
 	default:
-		return m, uid == d.User.UID, r
+		return m, true, r
 	}
 	return nil, false, r
 }
@@ -217,7 +221,12 @@ func removeSite(ctx context.Context, d Deps, m *registry.Manifest, reload bool) 
 		return nil, false
 	}
 	r := &StepResult{Step: "site"}
-	if _, err := os.Stat(caddy.SitePath(d.Reg.SitesDir, m.Label)); errors.Is(err, fs.ErrNotExist) {
+	path, err := caddy.SitePath(d.Reg.SitesDir, m.Label)
+	if err != nil {
+		r.Err = err
+		return r, false
+	}
+	if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
 		return nil, false
 	} else if err != nil {
 		r.Err = err

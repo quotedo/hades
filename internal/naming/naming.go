@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -30,6 +31,21 @@ var (
 	// ErrSlugTooLong means the sanitised slug exceeds maxSlug characters.
 	ErrSlugTooLong = errors.New("naming: slug is longer than 30 characters")
 )
+
+// ErrNotPlain means a label cannot be used as a file name in a registry
+// directory.
+var ErrNotPlain = errors.New("must be a plain file name")
+
+// CheckPlain returns an error unless label can name a file inside a registry
+// directory: non-empty, a single path element, and not "." or "..". Labels
+// read from the registry are untrusted, so every path built from one goes
+// through this check first.
+func CheckPlain(label string) error {
+	if label == "" || label != filepath.Base(label) || label == "." || label == ".." {
+		return fmt.Errorf("refusing label %q: %w", label, ErrNotPlain)
+	}
+	return nil
+}
 
 var placeholder = regexp.MustCompile(`\{\{([^{}]*)\}\}`)
 
@@ -113,18 +129,26 @@ func render(tmpl string, v Vars) (string, error) {
 	return out, bad
 }
 
-// Suffix builds a database suffix "_<user>_<name>". Lower-case letters and
-// digits are kept, "-" becomes "_", and everything else is dropped. A result
+// Suffix builds a database suffix "_<user>_<name>". The user part keeps only
+// lower-case letters and digits, so the first "_"-delimited segment of a
+// suffix is always the owner's login: "roman-feature" with "x" and "roman"
+// with "feature/x" cannot collide. In the name, lower-case letters, digits
+// and "_" are kept, "-" becomes "_", and everything else is dropped. A result
 // longer than 32 bytes (counting the "_" below) keeps its first 22 bytes and
 // appends "_" plus the first 8 hex characters of the SHA-256 of the full
 // string. A suffix never ends in a digit: "_" is appended when it would, so
 // the digits after <base><suffix> can only be this worktree's
 // MIX_TEST_PARTITION.
 func Suffix(user, name string) string {
-	full := strings.ToLower("_" + user + "_" + name)
 	var b strings.Builder
-	for i := 0; i < len(full); i++ {
-		c := full[i]
+	b.WriteByte('_')
+	for _, c := range []byte(strings.ToLower(user)) {
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			b.WriteByte(c)
+		}
+	}
+	b.WriteByte('_')
+	for _, c := range []byte(strings.ToLower(name)) {
 		switch {
 		case c == '-':
 			b.WriteByte('_')

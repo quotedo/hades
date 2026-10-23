@@ -36,10 +36,13 @@ func ls(ctx *Context, args []string) int {
 		fmt.Fprintf(ctx.Stderr, "hades: ls: %v\n", err)
 		return 1
 	}
-	all, err := allManifests(d)
+	all, problems, err := allManifests(d)
 	if err != nil {
 		fmt.Fprintf(ctx.Stderr, "hades: ls: %v\n", err)
 		return 1
+	}
+	for _, p := range problems {
+		fmt.Fprintf(ctx.Stderr, "hades: ls: %s\n", p)
 	}
 	list := []registry.Manifest{} // never nil: JSON prints [] for an empty registry
 	for _, m := range all {
@@ -68,14 +71,15 @@ func ls(ctx *Context, args []string) int {
 	return 0
 }
 
-// allManifests returns every manifest. On a laptop a registry that was never
-// created is empty; on a server a missing directory is an error.
-func allManifests(d lifecycle.Deps) ([]*registry.Manifest, error) {
-	all, err := d.Reg.All()
+// allManifests returns every readable manifest and the entries the registry
+// skipped. On a laptop a registry that was never created is empty; on a
+// server a missing directory is an error.
+func allManifests(d lifecycle.Deps) ([]*registry.Manifest, []registry.Problem, error) {
+	all, problems, err := d.Reg.All()
 	if err != nil && d.Mode == config.Laptop && errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return all, err
+	return all, problems, err
 }
 
 func writeJSON(w io.Writer, v any) error {

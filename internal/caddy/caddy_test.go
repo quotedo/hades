@@ -18,7 +18,7 @@ func TestWriteValidateRemove(t *testing.T) {
 	if err := caddy.WriteSite(dir, "jarl-x", "jarl-x.example.test", 4100); err != nil {
 		t.Fatal(err)
 	}
-	b, _ := os.ReadFile(caddy.SitePath(dir, "jarl-x"))
+	b, _ := os.ReadFile(filepath.Join(dir, "jarl-x.caddy"))
 	if string(b) != "import worktree jarl-x.example.test 4100\n" {
 		t.Fatalf("%q", b)
 	}
@@ -137,6 +137,32 @@ func TestWriteSiteRejectsBadLabelAndPort(t *testing.T) {
 		if caddy.WriteSite(dir, "ok", "h.test", p) == nil {
 			t.Errorf("port %d accepted", p)
 		}
+	}
+}
+
+func TestSitePathAndRemoveSiteRejectBadLabel(t *testing.T) {
+	base := t.TempDir()
+	dir := filepath.Join(base, "sites")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	victim := filepath.Join(base, "victim.caddy")
+	if err := os.WriteFile(victim, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range []string{"", "../victim", "a/b", ".", ".."} {
+		if p, err := caddy.SitePath(dir, l); err == nil {
+			t.Errorf("SitePath(%q) = %q", l, p)
+		}
+		if caddy.RemoveSite(dir, l) == nil {
+			t.Errorf("RemoveSite(%q) accepted", l)
+		}
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Fatal("RemoveSite removed a file outside the sites directory")
+	}
+	if p, err := caddy.SitePath(dir, "ok"); err != nil || p != filepath.Join(dir, "ok.caddy") {
+		t.Fatal(p, err)
 	}
 }
 

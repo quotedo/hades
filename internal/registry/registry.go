@@ -90,6 +90,17 @@ func (r *Registry) ClaimPort(worktree string) (int, error) {
 	return 0, ErrNoFreePort
 }
 
+// PortLinkOwner returns the uid owning the claim link for port (the link
+// itself, not its target).
+func (r *Registry) PortLinkOwner(port int) (int, error) {
+	path := r.portPath(port)
+	fi, err := os.Lstat(path)
+	if err != nil {
+		return 0, err
+	}
+	return ownerOf(fi, path)
+}
+
 // PortOwner returns the worktree that claimed port.
 func (r *Registry) PortOwner(port int) (string, error) {
 	return os.Readlink(r.portPath(port))
