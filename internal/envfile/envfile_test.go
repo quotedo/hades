@@ -81,3 +81,42 @@ func TestComputeGeneratesSecretAndRejectsUnknownPlaceholder(t *testing.T) {
 		t.Fatal("accepted")
 	}
 }
+
+func TestUpdateEnvrcCreatesPrivateFileAndKeepsExistingMode(t *testing.T) {
+	dir := t.TempDir()
+	created := filepath.Join(dir, "new", ".envrc")
+	os.Mkdir(filepath.Dir(created), 0o755)
+	if err := UpdateEnvrc(created, []KV{{"DB_PASSWORD", "secret"}}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(created); st.Mode().Perm() != 0o600 {
+		t.Fatalf("created %v", st.Mode())
+	}
+	existing := filepath.Join(dir, ".envrc")
+	if err := os.WriteFile(existing, []byte("use asdf\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	os.Chmod(existing, 0o640) // whatever the umask did
+	if err := UpdateEnvrc(existing, []KV{{"DB_PASSWORD", "secret"}}); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(existing); st.Mode().Perm() != 0o640 {
+		t.Fatalf("existing %v", st.Mode())
+	}
+}
+
+func TestComputeAMQPURLErrorDoesNotEchoTheURL(t *testing.T) {
+	h := config.Host{RabbitMQ: &config.RabbitMQ{AMQPURL: "amqp://u:sup3rsecret@mq.test:bad port/"}}
+	_, err := Compute(Inputs{Port: 4100, Label: "jarl-x", HostCfg: h, Vhost: "jarl-x"})
+	if err == nil || strings.Contains(err.Error(), "sup3rsecret") || !strings.Contains(err.Error(), "amqp_url") {
+		t.Fatal(err)
+	}
+}
+
+func TestComputeAMQPURLEscapesTheVhost(t *testing.T) {
+	h := config.Host{RabbitMQ: &config.RabbitMQ{AMQPURL: "amqp://u:p@mq.test:5672"}}
+	kv, err := Compute(Inputs{Port: 4100, Label: "a/b", HostCfg: h, Vhost: "a/b"})
+	if err != nil || toMap(kv)["AMQP_URL"] != "amqp://u:p@mq.test:5672/a%2Fb" {
+		t.Fatal(toMap(kv)["AMQP_URL"], err)
+	}
+}

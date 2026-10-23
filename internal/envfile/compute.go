@@ -12,6 +12,7 @@ import (
 
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/preset"
+	"github.com/quotedo/hades/internal/rabbit"
 )
 
 // Inputs is everything Compute needs to derive a worktree's environment.
@@ -77,13 +78,11 @@ func Compute(in Inputs) ([]KV, error) {
 		if rmq == nil {
 			return nil, fmt.Errorf("vhost %q requested but host config has no RabbitMQ", in.Vhost)
 		}
-		u, err := url.Parse(rmq.AMQPURL)
+		amqp, err := rabbit.AMQPURL(rmq.AMQPURL, in.Vhost)
 		if err != nil {
-			return nil, fmt.Errorf("parse RabbitMQ amqp_url: %w", err)
+			return nil, fmt.Errorf("RabbitMQ amqp_url: %w", err)
 		}
-		u.Path = "/" + in.Vhost
-		u.RawPath = ""
-		kv = append(kv, KV{"RABBITMQ_VHOST", in.Vhost}, KV{"AMQP_URL", u.String()})
+		kv = append(kv, KV{"RABBITMQ_VHOST", in.Vhost}, KV{"AMQP_URL", amqp})
 	}
 
 	vars := map[string]string{

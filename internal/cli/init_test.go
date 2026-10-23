@@ -125,7 +125,7 @@ func TestInitADEWorktrunkOnly(t *testing.T) {
 	if code != 0 {
 		t.Fatal(code, out.stderr)
 	}
-	if !strings.Contains(out.stderr, `pre-start = "hades up --name {{ branch }}"`) || !strings.Contains(out.stderr, ".config/wt.toml") {
+	if !strings.Contains(out.stderr, `pre-start = "hades up --name {{ branch }}"`) || !strings.Contains(out.stderr, "two top-level keys to .config/wt.toml") || strings.Contains(out.stderr, "hooks table") {
 		t.Fatal(out.stderr)
 	}
 	for _, f := range []string{"paseo.json", "orca.yaml"} {

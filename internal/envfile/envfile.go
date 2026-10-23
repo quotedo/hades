@@ -127,7 +127,9 @@ func UpdateEnvrc(path string, kv []KV) error {
 	if !missing && next == content {
 		return nil
 	}
-	return os.WriteFile(path, []byte(next), 0o644)
+	// The block holds DB_PASSWORD and SECRET_KEY_BASE, so a new file is
+	// private like .env.worktree; an existing file keeps its mode.
+	return os.WriteFile(path, []byte(next), 0o600)
 }
 
 // findBlock returns the byte range of the managed block, from the start of the

@@ -166,16 +166,18 @@ func (h *e2e) read(path string) string {
 func (h *e2e) stubLog() string { return h.read(h.log) }
 
 // stubLogExcerpt is the stub log without the inherited environment, which
-// may hold the developer's or CI's secrets: the argv and cwd lines and the
-// variables hades computes.
+// may hold the developer's or CI's secrets (HADES_TEST_PG, a developer's
+// HADES_* variables): the argv and cwd lines and an allow-list of the exact
+// variables hades sets that carry no secret.
 func (h *e2e) stubLogExcerpt() string {
 	var keep []string
 	for _, l := range strings.Split(h.stubLog(), "\n") {
-		for _, p := range []string{"mix ", "cwd=", "PORT=", "PHX_HOST=", "DATABASE_URL=", "DEMO_ENDPOINT=", "HADES_"} {
-			if strings.HasPrefix(l, p) {
-				keep = append(keep, l)
-				break
-			}
+		key, _, isVar := strings.Cut(l, "=")
+		switch {
+		case strings.HasPrefix(l, "mix "), strings.HasPrefix(l, "cwd="):
+			keep = append(keep, l)
+		case isVar && slices.Contains([]string{"PORT", "PHX_HOST", "HADES_URL", "HADES_LABEL", "DB_HOST", "DB_PORT", "DB_SUFFIX", "DEMO_ENDPOINT"}, key):
+			keep = append(keep, l)
 		}
 	}
 	return strings.Join(keep, "\n")

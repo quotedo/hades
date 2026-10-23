@@ -96,7 +96,7 @@ func initCmd(ctx *Context, args []string) int {
 	}
 
 	if want["wt"] {
-		fmt.Fprintf(ctx.Stderr, "hades: init: add to .config/wt.toml, inside the hooks table:\n%s", wtSnippet)
+		fmt.Fprintf(ctx.Stderr, "hades: init: add these two top-level keys to .config/wt.toml:\n%s", wtSnippet)
 	}
 	if p.Kind == preset.Phoenix || p.Kind == preset.Elixir {
 		fmt.Fprintf(ctx.Stderr, "hades: init: set these in config/dev.exs and config/test.exs so each worktree gets its own port and databases:\n%s", renderPhoenixSnippet(p.AppName))

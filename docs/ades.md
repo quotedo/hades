@@ -43,7 +43,7 @@ Orca aborts archiving when the archive hook fails unless you pass `--allow-faile
 
 ## worktrunk
 
-`.config/wt.toml` hooks:
+Two top-level keys in `.config/wt.toml` (not inside a table):
 
 ```toml
 pre-start = "hades up --name {{ branch }}"
