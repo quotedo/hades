@@ -1,12 +1,18 @@
-# Hades: hooks for ADEs
+# Hades CLI: the worktree hook every ADE calls
 
 Status: revised after the builder check (2026-10-23), awaiting Roman's approval. Written from the
 brainstorm in Roman's dev-server session; decisions marked "(builder's call)" are mine and open to
-correction.
+correction. Companion: `2026-10-23-hades-server-design.md` covers the second deliverable of the
+project, the playbook that provisions a server.
 
 ## 1. Intent
 
-Hades is a single-binary CLI that turns a fresh git worktree of any project into a running
+Hades (a pun on ADEs; the H is for Host) is one project with two deliverables: this CLI, and the
+server playbook described in the companion document. Together they turn a Linux box into a shared
+development server for agentic development environments and make every project on it work with
+every ADE.
+
+The CLI is a single binary that turns a fresh git worktree of any project into a running
 development environment, and tears it down again. It is the program every agentic development
 environment (ADE) calls from its worktree hooks: Orca, Paseo, worktrunk, or a plain shell.
 
@@ -21,8 +27,6 @@ of the same hook logic in the ADE's own dialect (jarl already carries two: a wor
 server hook), the copies drift, and simple projects get no support at all. One binary with stack
 presets gives zero-config to the common case and a few lines of config to the rest, and leaves the
 ADE to do what it is for: creating, visualising, and archiving worktrees and running agents in them.
-
-Name: "hades" is a pun on ADEs; the H stands for Hooks.
 
 ## 2. Goals
 
@@ -43,8 +47,8 @@ Name: "hades" is a pun on ADEs; the H stands for Hooks.
 - Not a worktree manager. Hades never creates, lists, switches, or removes worktrees; the ADE or
   worktrunk does. It operates on a worktree that already exists.
 - Not an installer. Caddy, the tunnel, Postgres, RabbitMQ, the ADEs, language toolchains, and the
-  host configuration are installed by the infra playbook (or by hand on a laptop). Hades checks
-  for them (`doctor`) and uses them.
+  host configuration are installed by the Hades server playbook (companion document) or by hand
+  on a laptop. The CLI checks for them (`doctor`) and uses them.
 - No resource policy, no process supervision, no daemon, no network listener. It is a short-lived
   CLI.
 - Not a build tool. Presets call the project's own setup (`mix setup`, `go mod download`,
@@ -450,10 +454,10 @@ when a hook file exists without hades in it, it prints the lines to add.
   `paseo.json` one-liners; `bin/dev-worktree` and its tests are removed from the hooks branch, the
   `.env.worktree` loader and the `DB_PORT`/`SECRET_KEY_BASE`/`JARL_ENDPOINT` config commits stay;
   `.config/wt.toml` hooks shrink to the two hades lines when laptops adopt it.
-- infra: the dev-server design and plan consume hades instead of defining the registry, gc, and
-  status themselves: install the pinned binary, write `host.toml`, install the reload wrapper,
-  create group `hades` and the registry directories, run `hades gc` from a timer, and use
-  `hades doctor` and `hades status` in verification.
+- Hades server playbook (companion document): installs the pinned binary, writes `host.toml`,
+  installs the sudoers line, creates group `hades` and the registry directories, runs `hades gc`
+  from a timer, and uses `hades doctor` and `hades status` in verification. GymNation's infra
+  repository keeps only its inventory and site extras.
 - Phoenix projects with generator-default config (pops, tokyo, PawsAndCo if it did not inherit
   jarl's config): `config/dev.exs` and `config/test.exs` read `PORT`, `DB_HOST`, `DB_PORT`,
   `DB_USER`, `DB_PASSWORD` and `DB_SUFFIX` with the generator's values as defaults (or
