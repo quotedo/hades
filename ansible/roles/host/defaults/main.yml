@@ -45,6 +45,11 @@ rabbitmq_password: guest # noqa: var-naming[no-role-prefix]
 chrome_root: /opt/chrome-for-testing # noqa: var-naming[no-role-prefix]
 
 # Resource policy (design 6.2): starting values for a 128 GB box, override per host.
+# The per-user values (dev_user_*, default_limit_nofile) are applied by the user role.
+# Its per-uid slice drop-in is named 20-*.conf so that it sorts before the 50-<Property>.conf
+# files `systemctl set-property` writes; drop-ins apply in filename order across directories,
+# so an operator's set-property value still overrides it.
+hades_user_slice_dropin_name: 20-hades.conf # noqa: var-naming[no-role-prefix]
 dev_user_memory_high: 88G # noqa: var-naming[no-role-prefix]
 dev_user_memory_max: 96G # noqa: var-naming[no-role-prefix]
 dev_user_memory_swap_max: 2G # noqa: var-naming[no-role-prefix]
