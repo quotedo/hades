@@ -38,27 +38,48 @@ func TestLoadHostRequiresKeys(t *testing.T) {
 }
 
 func TestLaptopDefaults(t *testing.T) {
-	h := LaptopHost("/home/u", func(k string) string {
+	h, err := LaptopHost("/home/u", func(k string) string {
 		if k == "HADES_DB_PORT" {
 			return "5444"
 		}
 		return ""
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if h.PortsDir != "/home/u/.local/state/hades/ports" || h.Postgres.Port != 5444 || h.Postgres.User != "postgres" || h.Domain != "" {
 		t.Fatalf("%+v", h)
 	}
 }
 
-func TestLoadFallsBackToLaptop(t *testing.T) {
-	getenv := func(k string) string {
-		if k == "HADES_HOST_CONFIG" {
-			return filepath.Join(t.TempDir(), "nope.toml")
-		}
-		return ""
+func env(m map[string]string) func(string) string {
+	return func(k string) string { return m[k] }
+}
+
+func TestLaptopRejectsBadValues(t *testing.T) {
+	if _, err := LaptopHost("/h", env(map[string]string{"HADES_DB_PORT": "abc"})); err == nil {
+		t.Fatal("bad HADES_DB_PORT accepted")
 	}
-	_, mode, err := Load(getenv, "/home/u")
+	if _, err := LaptopHost("/h", env(map[string]string{"HADES_PORT_RANGE": "5000-4000"})); err == nil {
+		t.Fatal("bad HADES_PORT_RANGE accepted")
+	}
+	if _, _, err := Load(env(map[string]string{"HADES_HOST_CONFIG": "laptop", "HADES_PORT_RANGE": "x"}), "/h"); err == nil {
+		t.Fatal("Load accepted bad HADES_PORT_RANGE")
+	}
+}
+
+func TestLoadLaptopOverride(t *testing.T) {
+	_, mode, err := Load(env(map[string]string{"HADES_HOST_CONFIG": "laptop"}), "/home/u")
 	if err != nil || mode != Laptop {
 		t.Fatal(mode, err)
+	}
+}
+
+func TestLoadExplicitMissingPathIsError(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "nope.toml")
+	_, _, err := Load(env(map[string]string{"HADES_HOST_CONFIG": p}), "/home/u")
+	if !errors.Is(err, ErrNoHost) || !strings.Contains(err.Error(), p) {
+		t.Fatal(err)
 	}
 }
 

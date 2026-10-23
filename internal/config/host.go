@@ -86,7 +86,7 @@ func LoadHost(path string) (*Host, error) {
 	var h Host
 	if _, err := toml.DecodeFile(path, &h); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, ErrNoHost
+			return nil, fmt.Errorf("%w: %s", ErrNoHost, path)
 		}
 		return nil, err
 	}
@@ -127,8 +127,9 @@ func LoadHost(path string) (*Host, error) {
 	return &h, nil
 }
 
-// LaptopHost returns the defaults used when no host config exists.
-func LaptopHost(home string, getenv func(string) string) *Host {
+// LaptopHost returns the defaults used when no host config exists. It fails
+// on an unparseable HADES_DB_PORT or an invalid HADES_PORT_RANGE.
+func LaptopHost(home string, getenv func(string) string) (*Host, error) {
 	or := func(key, def string) string {
 		if v := getenv(key); v != "" {
 			return v
@@ -137,14 +138,20 @@ func LaptopHost(home string, getenv func(string) string) *Host {
 	}
 	port := 5432
 	if v := getenv("HADES_DB_PORT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			port = n
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 65535 {
+			return nil, fmt.Errorf("HADES_DB_PORT: invalid port %q", v)
 		}
+		port = n
+	}
+	portRange := or("HADES_PORT_RANGE", "4100-4999")
+	if _, err := ParsePortRange(portRange); err != nil {
+		return nil, fmt.Errorf("HADES_PORT_RANGE: %w", err)
 	}
 	state := filepath.Join(home, ".local", "state", "hades")
 	return &Host{
 		LabelTemplate: naming.DefaultLabelTemplate,
-		PortRange:     or("HADES_PORT_RANGE", "4100-4999"),
+		PortRange:     portRange,
 		PortsDir:      filepath.Join(state, "ports"),
 		SitesDir:      filepath.Join(state, "sites"),
 		ManifestsDir:  filepath.Join(state, "manifests"),
@@ -154,18 +161,29 @@ func LaptopHost(home string, getenv func(string) string) *Host {
 			User:     or("HADES_DB_USER", "postgres"),
 			Password: or("HADES_DB_PASSWORD", "postgres"),
 		},
-	}
+	}, nil
 }
 
-// Load reads the host config, falling back to laptop defaults only when the
-// file is absent.
+// LaptopOverride is the HADES_HOST_CONFIG value that forces laptop mode.
+const LaptopOverride = "laptop"
+
+// Load reads the host config. Laptop defaults apply when
+// HADES_HOST_CONFIG=laptop, or when HADES_HOST_CONFIG is unset and the default
+// host config is absent. An explicit path that does not exist is an error.
 func Load(getenv func(string) string, home string) (*Host, Mode, error) {
-	h, err := LoadHost(HostPath(getenv))
-	if err == nil {
-		return h, Server, nil
+	explicit := getenv("HADES_HOST_CONFIG")
+	if explicit != LaptopOverride {
+		h, err := LoadHost(HostPath(getenv))
+		if err == nil {
+			return h, Server, nil
+		}
+		if explicit != "" || !errors.Is(err, ErrNoHost) {
+			return nil, Server, err
+		}
 	}
-	if errors.Is(err, ErrNoHost) {
-		return LaptopHost(home, getenv), Laptop, nil
+	h, err := LaptopHost(home, getenv)
+	if err != nil {
+		return nil, Laptop, err
 	}
-	return nil, Server, err
+	return h, Laptop, nil
 }
