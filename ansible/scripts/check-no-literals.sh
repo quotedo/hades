@@ -18,6 +18,9 @@ import json, sys
 SKIP = {"present", "absent", "true", "false", "local"}
 # Role vocabulary (ADE and service names) is part of the collection interface.
 VOCAB = {"paseo", "orca", "rabbitmq", "localstack"}
+# The documented default label template; a role must write it as a default, so the
+# inventory may legitimately repeat it.
+VOCAB.add("{{project}}-{{name}}")
 out = set()
 
 def walk(v):

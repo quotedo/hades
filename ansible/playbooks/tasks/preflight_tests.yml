@@ -35,8 +35,8 @@
 - name: Assert the failure messages are the expected ones
   ansible.builtin.assert:
     that:
-      - "'hades_domain' in preflight_missing_domain.stdout"
-      - "'j-smith' in preflight_colliding.stdout"
-      - "'jsmith' in preflight_colliding.stdout"
+      - "'hades_domain must be defined' in preflight_missing_domain.stdout"
+      - "'Logins collide' in preflight_colliding.stdout"
+      - "'[j-smith, jsmith]' in preflight_colliding.stdout"
     quiet: true
   run_once: true
