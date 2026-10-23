@@ -293,9 +293,13 @@ Detection runs in the worktree, in this order, first match wins; `preset = "..."
 | `node` | `package.json` | false | `npm ci`, or `pnpm install --frozen-lockfile` / `yarn install --frozen-lockfile` by lockfile | none |
 | `none` | anything else | false | nothing | none |
 
-`none` does nothing and exits 0 with one line saying so; it writes no manifest. Any preset with
-`web = true` gets a port and, in server mode, a URL. A non-web preset still gets a manifest and a
-port only when `web = true` is set in config (Expo's Metro server is the expected case).
+`none` does nothing and exits 0 with one line saying so; it touches no registry and writes no
+manifest. Every other preset gets a manifest (so `down`, `ls` and `gc` know about its databases
+and vhost), env files, secrets, and its setup steps. `web` decides only the port and the URL: a
+preset with `web = true` claims a port and, in server mode, publishes a site; a non-web preset
+claims no port, publishes nothing, exports no `PORT`, `PHX_HOST` or `HADES_URL`, and skips the
+Tidewave MCP rewiring (it needs a port). A Go or Expo project that wants a URL sets `web = true`
+in `hades.toml` (Expo's Metro server is the expected case).
 
 What `up` does, in order, for a web preset in server mode. Each step is idempotent. A failure in
 steps 1 to 9 releases everything claimed in this run and exits 1: nothing outside hades' own
