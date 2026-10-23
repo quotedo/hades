@@ -44,7 +44,7 @@ password = "guest"
 - `[postgres]`: exported to project commands as `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`.
 - `[rabbitmq]`: optional; needed when a project asks for a vhost.
 
-In server mode hades refuses to start when a required key is missing, and `hades up` refuses to run when a registry directory is missing or has the wrong group or mode: each must be setgid and sticky (mode `3775` is typical), group-writable, not world-writable, and owned by a group the user belongs to. `hades doctor` says which directory lacks what.
+In server mode hades refuses to start when a required key is missing, and `hades up` refuses to run when a registry directory is missing or has the wrong group or mode: each must be owned by root (the owner of a sticky directory can remove anyone's entries), setgid and sticky (`root:hades`, mode `3775` is typical), group-writable, not world-writable, and owned by a group the user belongs to. `hades doctor` says which directory lacks what.
 
 ### Laptop mode
 

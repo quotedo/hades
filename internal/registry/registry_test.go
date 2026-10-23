@@ -312,10 +312,27 @@ func chmodRegistry(t *testing.T, r *Registry, mode os.FileMode) {
 	}
 }
 
+// ownSharedDirs makes this test's own uid the one shared registry
+// directories must be owned by, since a test cannot create root-owned ones.
+func ownSharedDirs(t *testing.T) {
+	t.Helper()
+	prev := SharedDirOwner
+	SharedDirOwner = os.Geteuid()
+	t.Cleanup(func() { SharedDirOwner = prev })
+}
+
 func TestSharedCheckRequiresModeAndGroup(t *testing.T) {
 	r := newReg(t)
 	r.Shared = true
 	chmodRegistry(t, r, 0o775|os.ModeSetgid|os.ModeSticky)
+	// A developer-owned 3775 directory is refused: its owner could remove
+	// anyone's entries.
+	if os.Geteuid() != 0 {
+		if err := r.Check(); !errors.Is(err, ErrRegistryPerms) || !strings.Contains(err.Error(), fmt.Sprintf("%s: owned by uid %d, not root", r.PortsDir, os.Geteuid())) {
+			t.Fatalf("developer-owned: %v", err)
+		}
+	}
+	ownSharedDirs(t)
 	if err := r.Check(); err != nil {
 		if strings.Contains(err.Error(), "not a member") && os.Getenv("CI") == "" {
 			t.Skipf("test user is not in the temp dir's group: %v", err)

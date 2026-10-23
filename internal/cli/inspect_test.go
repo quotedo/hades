@@ -289,6 +289,15 @@ func TestDoctorRegistryPermsReportStickyAndWorldWrite(t *testing.T) {
 	if c.OK || c.Warn || !strings.Contains(c.Detail, filepath.Join(state, "ports")+": missing the sticky bit") || !strings.Contains(c.Detail, filepath.Join(state, "sites")+": world-writable") {
 		t.Fatalf("registry-perms = %+v", c)
 	}
+	// With root as the required owner again, the developer-owned
+	// directories are reported too.
+	if os.Geteuid() != 0 {
+		registry.SharedDirOwner = 0
+		_, checks, _ = doctorChecks(t, getenv)
+		if c := checks["registry-perms"]; c.OK || !strings.Contains(c.Detail, filepath.Join(state, "manifests")+": owned by uid "+strconv.Itoa(os.Geteuid())+", not root") {
+			t.Fatalf("registry-perms = %+v", c)
+		}
+	}
 }
 
 func TestDoctorRabbitMQ(t *testing.T) {
@@ -395,10 +404,16 @@ func withEnv(getenv func(string) string, kv map[string]string) func(string) stri
 }
 
 // sharedRegistry gives the registry directories under state the modes a
-// server registry needs (setgid, sticky, group write, mode 3775), or skips
+// server registry needs (setgid, sticky, group write, mode 3775, owned by
+// the required owner, which this helper points at the test's uid), or skips
 // the test where the filesystem or group membership does not allow it.
 func sharedRegistry(t *testing.T, state string) {
 	t.Helper()
+	// A test cannot create root-owned directories, so the test's own uid
+	// stands in for root as the required owner.
+	prev := registry.SharedDirOwner
+	registry.SharedDirOwner = os.Geteuid()
+	t.Cleanup(func() { registry.SharedDirOwner = prev })
 	// CI must run these tests, so an unusable environment fails there.
 	skip := t.Skipf
 	if os.Getenv("CI") != "" {

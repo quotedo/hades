@@ -83,11 +83,17 @@ func (r *Registry) Check() error {
 	return nil
 }
 
+// SharedDirOwner is the uid that must own every shared registry directory:
+// root, because the owner of a sticky directory can remove or rename anyone's
+// entries in it. Tests that cannot chown point it at their own uid.
+var SharedDirOwner = 0
+
 // PermProblems lists, for each registry directory, every property of a
-// shared registry it lacks: the setgid bit (new entries get the directory's
-// group), the sticky bit (nobody removes or renames another user's entries),
-// group write, no world write, and this process being in the directory's
-// group. Root is exempt from the group membership check.
+// shared registry it lacks: owned by root (SharedDirOwner), the setgid bit
+// (new entries get the directory's group), the sticky bit (nobody removes or
+// renames another user's entries), group write, no world write, and this
+// process being in the directory's group. Root is exempt from the group
+// membership check.
 func (r *Registry) PermProblems() ([]string, error) {
 	groups, err := os.Getgroups()
 	if err != nil {
@@ -118,8 +124,11 @@ func (r *Registry) PermProblems() ([]string, error) {
 		}
 		st, ok := fi.Sys().(*syscall.Stat_t)
 		if !ok {
-			problems = append(problems, dir+": cannot read its group")
+			problems = append(problems, dir+": cannot read its owner and group")
 			continue
+		}
+		if uid := int(st.Uid); uid != SharedDirOwner {
+			problems = append(problems, fmt.Sprintf("%s: owned by uid %d, not root (the owner of a sticky directory can remove anyone's entries)", dir, uid))
 		}
 		if gid := int(st.Gid); os.Geteuid() != 0 && !member[gid] {
 			group := strconv.Itoa(gid)

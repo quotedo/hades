@@ -262,14 +262,15 @@ func TestReloadRefusesUnauthorisedSites(t *testing.T) {
 // them differ.
 func TestReloadRefusesSiteWhoseManifestHasAnotherOwner(t *testing.T) {
 	if os.Getuid() != 0 {
-		t.Skip("needs root to chown the manifest")
+		t.Skip("needs root to chown the manifest to another uid; CI runs it under sudo on Linux")
 	}
+	const nobody = 65534
 	h := newHost(t)
 	addSite(t, h, "x", 4100)
-	if err := os.Chown(filepath.Join(h.ManifestsDir, "x.toml"), 12345, -1); err != nil {
+	if err := os.Chown(filepath.Join(h.ManifestsDir, "x.toml"), nobody, -1); err != nil {
 		t.Fatal(err)
 	}
-	if err := caddy.ValidateSites(h); err == nil || !strings.Contains(err.Error(), "by uid 12345") {
+	if err := caddy.ValidateSites(h); err == nil || !strings.Contains(err.Error(), "by uid 65534") {
 		t.Fatal(err)
 	}
 }
