@@ -1,7 +1,8 @@
 # Hades: hooks for ADEs
 
-Status: draft for review (2026-10-23). Written from the brainstorm in Roman's dev-server session;
-decisions marked "(builder's call)" are mine and open to correction.
+Status: revised after the builder check (2026-10-23), awaiting Roman's approval. Written from the
+brainstorm in Roman's dev-server session; decisions marked "(builder's call)" are mine and open to
+correction.
 
 ## 1. Intent
 
@@ -50,6 +51,10 @@ Name: "hades" is a pun on ADEs; the H stands for Hooks.
   `npm ci`); hades does not know how to build anything.
 - Other platforms. Windows is unsupported. linux/arm64 and darwin/amd64 are built only because the
   Go toolchain makes that free; they are untested and get no fixes of their own.
+- No import of worktrees made before hades. Nothing was ever deployed to a server with the earlier
+  jarl hook, so there is nothing to import there; laptop worktrees made by worktrunk keep working
+  through `.config/wt.toml` until they are recreated. Hades does not read values an older hook left
+  in `.envrc`.
 
 ## 4. Anti-goals
 
@@ -61,7 +66,11 @@ Even if everything technically works, it has failed if:
   unless the manifest of the worktree being operated on claims it;
 - the project config speaks one ADE's vocabulary (Orca's or Paseo's names leak into `hades.toml`);
 - a worktree that was fine last week stops working because a new hades version changed behaviour
-  silently (behaviour changes are versioned and printed by `doctor`).
+  silently. The protection is light, not a compatibility layer: every manifest records the hades
+  version and the concrete rules in effect (which databases, which vhost, which site), `down` and
+  `gc` follow what the manifest recorded rather than the current defaults, and `doctor` lists
+  manifests written by an older version together with the changelog lines that affect them. There
+  is no behaviour pin in `hades.toml`.
 
 ## 5. Constraints and facts
 
@@ -82,9 +91,10 @@ Even if everything technically works, it has failed if:
 
 - Caddy on loopback with a `(worktree)` snippet and an include of `<sites_dir>/*.caddy`; each site
   file is exactly one line `import worktree <host> <port>`.
-- A root-owned reload wrapper runnable by group `hades` via `sudo -n` with no password; it
-  validates every site file against that one-line grammar, runs `caddy validate`, then reloads.
-  It accepts `--check` to validate without reloading (used by `doctor`).
+- A sudoers rule letting group `hades` run exactly `/usr/local/bin/hades caddy-reload` (and its
+  `--check` form) as root without a password. The reload step is a hades subcommand (section 6.8),
+  so the grammar that validates site files is the same code that writes them, tested in this
+  repository; infra only installs the root-owned binary and the sudoers line.
 - Registry directories `ports/`, `sites/`, `manifests/` owned `root:hades`, mode `3775` (setgid so
   files get the group, sticky so users cannot delete each other's files). Every developer is in
   group `hades`.
@@ -110,12 +120,32 @@ aborts unless the user passes `--allow-failed-archive-hook`. Both read the hook 
 so the hook must be a one-liner invoking a binary on `PATH`, not a script that an older branch may
 lack.
 
+Paseo specifics that matter here: `worktree.setup` runs once, right after the worktree is created;
+a `servicePorts.portScript` is run later, only when a declared service script is started, without
+a shell, with four positional arguments (script name, workspace id, branch, worktree path) and the
+`PASEO_*` variables above in its environment; Paseo does not set `PORT` in any hook's environment
+(a legacy `PASEO_WORKTREE_PORT` is present and ignored). So `hades port` is read-only: it reports
+the port `up` claimed and fails if there is no manifest yet.
+
+Because each caller derives the name differently (Orca: workspace name, which is the directory
+basename; Paseo: branch; worktrunk and a shell: current branch), a worktree is identified by its
+path, not by its name. The name, and therefore the label and hostname, is fixed at the first `up`
+and recorded in the manifest; `down` and later `up` runs find the manifest by worktree path and
+reuse it even when the branch was renamed or a different caller computes a different name. To get
+a new label, `down` and then `up`.
+
 ### Naming limits
 
 - A public hostname is one DNS label under the host's domain (Cloudflare Universal SSL covers one
   level only): `[a-z0-9-]`, at most 63 characters, so `<project>-<name>` must fit in 63.
 - Postgres identifiers are at most 63 bytes. jarl additionally hashes a `DB_SUFFIX` longer than
   32 bytes in its own config; other Phoenix projects usually name databases `<app>_dev`.
+- A generator-default Phoenix `config/dev.exs` reads `PORT` from the environment but hard-codes
+  the database host, port, credentials and name (`<app>_dev`), and `config/test.exs` hard-codes
+  `<app>_test` plus `MIX_TEST_PARTITION`. Such a project cannot reach the server's Postgres (not on
+  5432) and every worktree would share one database. Hades cannot fix that from outside; the
+  project's config must read a few environment variables (section 7). "Zero config" therefore means
+  zero hades configuration, not zero changes to a project that hard-codes its dev database.
 
 ### The projects this must serve on day one
 
@@ -138,6 +168,7 @@ hades gc        [--dry-run]                       clean up worktrees that vanish
 hades init      [--ade paseo,orca,wt] [--force]   write hades.toml and ADE hook files into a repo
 hades env       [--shell|--json]                  print the worktree's hades environment
 hades port                                         print the worktree's port (for ADE port scripts)
+hades caddy-reload [--check]                       root only, via sudo: validate site files, reload
 hades version
 ```
 
@@ -160,9 +191,18 @@ a value wins, per value:
 The name is sanitised to a hostname fragment: lower-cased, every run outside `[a-z0-9]` becomes one
 `-`, leading and trailing `-` stripped. The project slug comes from `hades.toml` `project`, else
 the root checkout's directory name, sanitised the same way, and must be at most 30 characters.
-The label is `<project>-<name>` with the name cut so the label fits 63 characters, then a trailing
-`-` stripped. The label is the worktree's identity everywhere: hostname `<label>.<domain>`,
-manifest file, site file, vhost.
+
+The label is rendered from the host's `label_template` (section 6.3), by default
+`{{project}}-{{name}}`, which is what Roman chose for tokyo (`jarl-<worktree>.romanc.io`). On a
+server shared by several developers the infra playbook sets `{{project}}-{{user}}-{{name}}`, so two
+people on the same branch of the same project cannot collide (builder's call; the template keeps
+the choice per host). The name is cut so the label fits 63 characters, then a trailing `-` is
+stripped. When a template without `{{user}}` produces a label that another user's or another
+worktree's manifest already holds, `up` fails with "label taken by <user> for <path>"; that is the
+accepted behaviour on a single-user box.
+
+The label names everything public about a worktree: hostname `<label>.<domain>`, manifest file,
+site file, vhost. The worktree's identity, used to find its manifest, is its path (section 5).
 
 ### 6.3 Configuration layers
 
@@ -171,13 +211,17 @@ server mode; its absence means laptop mode. Written by the infra playbook, never
 
 ```toml
 domain = "example.test"             # public URLs are <label>.<domain>
+label_template = "{{project}}-{{name}}"   # shared servers: "{{project}}-{{user}}-{{name}}"
 port_range = "4100-4999"
 ports_dir = "/srv/hades/ports"
 sites_dir = "/srv/hades/sites"
 manifests_dir = "/srv/hades/manifests"
-caddy_reload = "/usr/local/bin/hades-caddy-reload"   # run as: sudo -n <caddy_reload>
 tool_paths = []                      # extra PATH entries for project commands
 chrome_path = ""                     # optional; enables the chrome-devtools MCP entry
+
+[caddy]
+config = "/etc/caddy/Caddyfile"      # validated by `hades caddy-reload` before reloading
+reload = ["systemctl", "reload", "caddy"]
 
 [postgres]
 host = "127.0.0.1"
@@ -205,7 +249,7 @@ preset = "phoenix"               # default: detected (section 6.4)
 web = true                       # default: per preset
 setup = ["mix setup"]            # replaces the preset's setup steps
 teardown = ["mix some.cleanup"]  # extra steps, run before hades' own teardown
-databases = ["gym_nation_%{suffix}%"]  # SQL LIKE patterns; default: preset rule
+databases = ["gym_nation"]       # database name prefixes; default: the Mix app name (6.4)
 
 [env]                            # extra variables, templated with {{host}} {{port}} {{url}}
 JARL_ENDPOINT = "{{host}}"       # {{suffix}} {{name}} {{project}} {{label}}
@@ -242,8 +286,11 @@ Detection runs in the worktree, in this order, first match wins; `preset = "..."
 `web = true` gets a port and, in server mode, a URL. A non-web preset still gets a manifest and a
 port only when `web = true` is set in config (Expo's Metro server is the expected case).
 
-What `up` does, in order, for a web preset in server mode. Each step is idempotent; on the first
-failure everything claimed in this run is released and `up` exits 1.
+What `up` does, in order, for a web preset in server mode. Each step is idempotent. A failure in
+steps 1 to 9 releases everything claimed in this run and exits 1: nothing outside hades' own
+registry has happened yet. A failure from step 10 on (the project's own setup) exits 1 but keeps
+the manifest, port, URL and env files, because `mix setup` may already have created databases that
+only the manifest knows how to find; the user re-runs `up` after fixing the cause, or runs `down`.
 
 1. Resolve context, label, preset, config. If a manifest for the label exists and belongs to this
    user and this worktree, this is a re-run: reuse its port and continue. If it belongs to another
@@ -251,13 +298,17 @@ failure everything claimed in this run is released and `up` exits 1.
 2. Claim the lowest free port in the range by creating `ports/<port>` as a symlink to the worktree
    path; symlink creation is atomic, so two racing claims cannot both win a port.
 3. Write the manifest (section 6.5) before doing anything else that leaves traces.
-4. Compute the environment: `PORT`, `DB_PORT`, `DB_SUFFIX`, `SECRET_KEY_BASE` (64 random bytes,
-   base64), `PHX_HOST` and `HADES_URL`, `HADES_LABEL`, plus `[env]` entries and, when a RabbitMQ
-   vhost is requested, `RABBITMQ_VHOST` and `AMQP_URL`.
-   `DB_SUFFIX` is `_<user>_<name>` restricted to `[a-z0-9_]` and guaranteed at most 32 bytes: when
-   longer, the first 23 bytes followed by `_` and the first 8 hex characters of the SHA-256 of the
-   full string. A suffix that is already short never triggers jarl's own hashing, so the names
-   hades expects are the names the project creates.
+4. Compute the environment: `PORT`; `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` from the
+   host's Postgres block; `DB_SUFFIX`; `DATABASE_URL` and `TEST_DATABASE_URL`
+   (`postgres://<user>:<password>@<host>:<port>/<app>_dev<suffix>` and the `_test` twin, for
+   projects with a single repo that prefer one variable); `SECRET_KEY_BASE` (64 random bytes,
+   base64); `PHX_HOST`, `HADES_URL`, `HADES_LABEL`; the `[env]` entries; and, when a RabbitMQ vhost
+   is requested, `RABBITMQ_VHOST` and `AMQP_URL`. These are the documented variables of the
+   credentials safety rule in 6.9.
+   `DB_SUFFIX` is `_<user>_<name>` with `-` turned into `_` and everything outside `[a-z0-9_]`
+   dropped, guaranteed at most 32 bytes: when longer, the first 23 bytes followed by `_` and the
+   first 8 hex characters of the SHA-256 of the full string. A suffix that is already short never
+   triggers jarl's own hashing, so the names hades expects are the names the project creates.
 5. Write the environment to two files in the worktree, both of which `init` adds to
    `.gitignore`: `.env.worktree` (KEY=VALUE, fully owned by hades, read by projects such as jarl
    through a loader) and `.envrc` (a managed block between `# hades:begin` and `# hades:end`
@@ -268,9 +319,9 @@ failure everything claimed in this run is released and `up` exits 1.
    <email>`".
 7. Services: if `[services.rabbitmq] vhost = true` and the host offers RabbitMQ, create vhost
    `<label>` and grant the configured user full permissions on it through the management API.
-8. Publish the URL: write `sites/<label>.caddy` and run `sudo -n <caddy_reload>`. A reload failure
-   fails `up` (an unreachable URL is a failed `up`; the wrapper's validation keeps one user's bad
-   file from breaking Caddy for everyone).
+8. Publish the URL: write `sites/<label>.caddy` and run `sudo -n /usr/local/bin/hades
+   caddy-reload`. A reload failure fails `up` (an unreachable URL is a failed `up`; the
+   validation inside `caddy-reload` keeps one user's bad file from breaking Caddy for everyone).
 9. MCP wiring (section 6.6).
 10. Setup steps, with the environment from step 4 and the extended `PATH`, from the worktree,
     unless `--skip-setup`.
@@ -283,18 +334,27 @@ independent of the others' success: project `teardown` steps; drop the databases
 project's rule with `DROP DATABASE ... WITH (FORCE)`; delete the vhost; remove the site file and
 reload; remove the port link; remove the manifest. Exit 0 unless `--strict`.
 
-Database rule (phoenix and elixir): databases on the configured cluster whose name starts with the
-Mix application name (`app:` in `mix.exs`) and contains `DB_SUFFIX` followed by nothing or by
-digits only (`MIX_TEST_PARTITION` appends digits). `databases` patterns in `hades.toml` replace
-the rule. A database created with another worktree's suffix can never match, because the suffix
-embeds the sanitised name and the user.
+Database rule (phoenix and elixir): hades lists the cluster's database names and matches each
+against `^<prefix>.*<suffix>[0-9]*$` with both parts escaped literally, where `<prefix>` is each
+entry of `databases` in `hades.toml`, or the Mix application name (`app:` in `mix.exs`) when the
+key is absent, and `<suffix>` is the worktree's `DB_SUFFIX`. The trailing digits allow
+`MIX_TEST_PARTITION`. There is no SQL LIKE and no wildcard for the author to get wrong; the suffix
+guard is always applied. A database belonging to another worktree can never match, because the
+suffix embeds the user and the full sanitised name and must end the database name (up to
+partition digits). The concrete prefixes and suffix are recorded in the manifest at `up` time, and
+`down` and `gc` match against the recorded values, not against the current config.
 
 ### 6.5 Manifests and the registry
 
 `manifests/<label>.toml`, written by the user running `up`, so owned by that user; the sticky
 registry directories mean nobody else can remove it. Contents: hades version, created-at, user,
 uid, project, name, label, host, port, worktree path, root path, preset, `DB_SUFFIX`, the
-database rule or patterns in effect, services created (vhost name), ADE that invoked `up`.
+database prefixes in effect, services created (vhost name), ADE that invoked `up`.
+
+Lookup is by worktree path: `down`, `env`, `port` and a repeated `up` find the manifest whose
+recorded worktree path equals the resolved worktree path (paths compared after resolving
+symlinks). The implementation may keep a reverse index (for example `paths/<hash of path>` as a
+symlink to the manifest) or scan the manifests directory; both are small (builder's call).
 
 Ownership rule: `down` acts only on a manifest owned by the invoking user whose worktree path is
 the worktree being torn down. `gc` as root acts on any manifest whose worktree path no longer
@@ -320,11 +380,14 @@ jarl's `.config/wt.toml` today and move into hades verbatim.
 
 Hades ships the hook one-liners; `init` writes them.
 
-- Paseo, `paseo.json`: `{"worktree": {"setup": ["hades up"], "teardown": ["hades down"]},
-  "servicePorts": {"portScript": "hades-port"}}` where `hades-port` is a tiny executable wrapper
-  for `hades port` only if Paseo requires a bare executable (it runs the port script without a
-  shell). Builder's call whether to ship the wrapper or document `portScript = "hades"` with an
-  argument-less `port` default; Paseo passes four positional arguments that `port` must ignore.
+- Paseo, `paseo.json`: `{"worktree": {"setup": ["hades up"], "teardown": ["hades down"],
+  "servicePorts": {"portScript": "hades-port"}}}`. Paseo runs the port script without a shell and
+  with four positional arguments, so the release ships a `hades-port` executable (a symlink or
+  tiny wrapper to `hades port`, builder's call) that ignores its arguments and reads the port from
+  the manifest found by `PASEO_WORKTREE_PATH`. This lets a declared Paseo service such as
+  `mix phx.server` run on the same port hades published, and show up in Paseo's UI with its proxy
+  URL and health. The service declaration itself is the project's choice and not written by
+  `init`.
 - Orca, `orca.yaml`: `scripts.setup: hades up`, `scripts.archive: hades down`,
   `setupAgentStartupPolicy: wait-for-setup`.
 - worktrunk, `.config/wt.toml`: `pre-start = "hades up --name {{ branch }}"`,
@@ -342,9 +405,16 @@ when a hook file exists without hades in it, it prints the lines to add.
   linux/arm64 and darwin/amd64 are built because the matrix makes it free and are labelled
   untested. Tarballs plus a checksums file. The version is embedded at build time and printed by
   `hades version` and recorded in manifests.
-- Install: the infra playbook downloads a pinned release into `/usr/local/bin/hades` (and the
-  reload wrapper it owns). Laptops: the release tarball or `go install`. A Homebrew tap only if
-  goreleaser gives it for free (builder's call).
+- Install: the infra playbook downloads a pinned release into `/usr/local/bin/hades`
+  (root-owned, mode 0755) and installs the sudoers line for `hades caddy-reload`. Laptops: the
+  release tarball or `go install`. A Homebrew tap only if goreleaser gives it for free (builder's
+  call).
+- `hades caddy-reload` is the one subcommand meant to run as root. It validates every file in
+  `sites_dir` against the grammar `^import worktree [a-z0-9.-]+ [0-9]+$` (one line, newline
+  terminated), refuses to continue if any file fails and names it, runs `caddy validate --config
+  <caddy.config>`, then runs the configured reload command. With `--check` it stops after
+  validation. It reads only the host config and the sites directory and takes no other input, so
+  the sudoers rule exposes nothing else.
 - Go 1.25, modules, no CGO. Dependencies kept to a TOML parser, a Postgres driver, and at most one
   CLI helper library; everything else from the standard library.
 
@@ -384,6 +454,12 @@ when a hook file exists without hades in it, it prints the lines to add.
   status themselves: install the pinned binary, write `host.toml`, install the reload wrapper,
   create group `hades` and the registry directories, run `hades gc` from a timer, and use
   `hades doctor` and `hades status` in verification.
+- Phoenix projects with generator-default config (pops, tokyo, PawsAndCo if it did not inherit
+  jarl's config): `config/dev.exs` and `config/test.exs` read `PORT`, `DB_HOST`, `DB_PORT`,
+  `DB_USER`, `DB_PASSWORD` and `DB_SUFFIX` with the generator's values as defaults (or
+  `DATABASE_URL`/`TEST_DATABASE_URL` for a single repo), about ten lines per project.
+  `hades init` prints the exact snippet for the detected preset and names the files to edit; it
+  does not edit them.
 - Other projects: `hades init` in each, commit, done; PawsAndCo copies jarl's `hades.toml`.
 
 ## 8. Left to the builder
@@ -392,7 +468,8 @@ when a hook file exists without hades in it, it prints the lines to add.
 - The exact port scan (lowest free first is required; locking strategy for same-user re-runs is
   not).
 - Node package manager detection details beyond lockfile presence.
-- Whether `hades port` needs a shell-free wrapper for Paseo.
+- Whether `hades-port` is a symlink or a wrapper, and whether manifest lookup by path uses a
+  reverse index or a scan.
 - The internal layout of the Go module and the test fixtures.
 
 ## 9. Open questions
