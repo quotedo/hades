@@ -21,12 +21,12 @@ func toMap(kv []KV) map[string]string {
 func TestUpdateEnvrcPreservesUserLinesAndIsIdempotent(t *testing.T) {
 	p := filepath.Join(t.TempDir(), ".envrc")
 	os.WriteFile(p, []byte("use asdf\nexport MINE=1\n"), 0o644)
-	kv := []KV{{"PORT", "4100"}, {"DB_SUFFIX", "_roman_x"}}
+	kv := []KV{{"PORT", "4100"}, {"DB_SUFFIX", "_alice_x"}}
 	if err := UpdateEnvrc(p, kv); err != nil {
 		t.Fatal(err)
 	}
 	first, _ := os.ReadFile(p)
-	want := "use asdf\nexport MINE=1\n# hades:begin\nexport PORT=4100\nexport DB_SUFFIX=_roman_x\n# hades:end\n"
+	want := "use asdf\nexport MINE=1\n# hades:begin\nexport PORT=4100\nexport DB_SUFFIX=_alice_x\n# hades:end\n"
 	if string(first) != want {
 		t.Fatalf("%q", first)
 	}
@@ -59,12 +59,12 @@ func TestEnvWorktreeRoundTrip(t *testing.T) {
 
 func TestComputeServerPhoenix(t *testing.T) {
 	h := config.Host{Domain: "example.test", Postgres: config.Postgres{Host: "127.0.0.1", Port: 5433, User: "postgres", Password: "postgres"}, RabbitMQ: &config.RabbitMQ{AMQPURL: "amqp://u:p@mq.test:5672"}}
-	kv, err := Compute(Inputs{Port: 4100, Label: "jarl-x", Host: "jarl-x.example.test", URL: "https://jarl-x.example.test", Suffix: "_roman_x", Name: "x", Project: "jarl", User: "roman", Preset: preset.Preset{Kind: preset.Phoenix, AppName: "gym_nation"}, HostCfg: h, Vhost: "jarl-x", Extra: map[string]string{"JARL_ENDPOINT": "{{host}}"}, ExistingSecret: "keep"})
+	kv, err := Compute(Inputs{Port: 4100, Label: "shop-x", Host: "shop-x.example.test", URL: "https://shop-x.example.test", Suffix: "_alice_x", Name: "x", Project: "shop", User: "alice", Preset: preset.Preset{Kind: preset.Phoenix, AppName: "shop"}, HostCfg: h, Vhost: "shop-x", Extra: map[string]string{"SHOP_ENDPOINT": "{{host}}"}, ExistingSecret: "keep"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	m := toMap(kv)
-	if m["PORT"] != "4100" || m["DB_PORT"] != "5433" || m["DATABASE_URL"] != "postgres://postgres:postgres@127.0.0.1:5433/gym_nation_dev_roman_x" || m["TEST_DATABASE_URL"] != "postgres://postgres:postgres@127.0.0.1:5433/gym_nation_test_roman_x" || m["SECRET_KEY_BASE"] != "keep" || m["PHX_HOST"] != "jarl-x.example.test" || m["JARL_ENDPOINT"] != "jarl-x.example.test" || m["RABBITMQ_VHOST"] != "jarl-x" || m["AMQP_URL"] != "amqp://u:p@mq.test:5672/jarl-x" {
+	if m["PORT"] != "4100" || m["DB_PORT"] != "5433" || m["DATABASE_URL"] != "postgres://postgres:postgres@127.0.0.1:5433/shop_dev_alice_x" || m["TEST_DATABASE_URL"] != "postgres://postgres:postgres@127.0.0.1:5433/shop_test_alice_x" || m["SECRET_KEY_BASE"] != "keep" || m["PHX_HOST"] != "shop-x.example.test" || m["SHOP_ENDPOINT"] != "shop-x.example.test" || m["RABBITMQ_VHOST"] != "shop-x" || m["AMQP_URL"] != "amqp://u:p@mq.test:5672/shop-x" {
 		t.Fatalf("%v", m)
 	}
 	if kv[0].Key != "PORT" {
@@ -107,7 +107,7 @@ func TestUpdateEnvrcCreatesPrivateFileAndKeepsExistingMode(t *testing.T) {
 
 func TestComputeAMQPURLErrorDoesNotEchoTheURL(t *testing.T) {
 	h := config.Host{RabbitMQ: &config.RabbitMQ{AMQPURL: "amqp://u:sup3rsecret@mq.test:bad port/"}}
-	_, err := Compute(Inputs{Port: 4100, Label: "jarl-x", HostCfg: h, Vhost: "jarl-x"})
+	_, err := Compute(Inputs{Port: 4100, Label: "shop-x", HostCfg: h, Vhost: "shop-x"})
 	if err == nil || strings.Contains(err.Error(), "sup3rsecret") || !strings.Contains(err.Error(), "amqp_url") {
 		t.Fatal(err)
 	}

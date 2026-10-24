@@ -80,7 +80,7 @@ Phoenix projects read `PORT`, `DB_*` and `DB_SUFFIX` in `config/dev.exs` and `co
 At the repository root, committed; read from the worktree first, then the root checkout, then preset defaults. Every key is optional.
 
 ```toml
-project = "jarl"                 # URL slug, max 30 chars; default: root directory name
+project = "shop"                 # URL slug, max 30 chars; default: root directory name
 preset = "phoenix"               # phoenix | elixir | go | node | none; default: detected
 web = true                       # port and URL; default true for phoenix, else false
 setup = ["mix setup"]            # replaces the preset's setup steps
@@ -88,7 +88,7 @@ teardown = ["mix some.cleanup"]  # extra steps before hades' own teardown
 databases = ["app_dev", "app_test"]   # base names; default from the Mix app name
 
 [env]
-JARL_ENDPOINT = "{{host}}"       # placeholders: host, port, url, suffix, name, project, label
+SHOP_ENDPOINT = "{{host}}"       # placeholders: host, port, url, suffix, name, project, label
 
 [services.rabbitmq]
 vhost = true                     # server mode: a vhost <label>, exported as RABBITMQ_VHOST and AMQP_URL

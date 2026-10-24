@@ -47,9 +47,9 @@ func addSite(t *testing.T, h *config.Host, label string, port int) {
 func TestWriteValidateRemove(t *testing.T) {
 	h := newHost(t)
 	dir := h.SitesDir
-	addSite(t, h, "jarl-x", 4100)
-	b, _ := os.ReadFile(filepath.Join(dir, "jarl-x.caddy"))
-	if string(b) != "import worktree jarl-x.example.test 4100\n" {
+	addSite(t, h, "shop-x", 4100)
+	b, _ := os.ReadFile(filepath.Join(dir, "shop-x.caddy"))
+	if string(b) != "import worktree shop-x.example.test 4100\n" {
 		t.Fatalf("%q", b)
 	}
 	if err := caddy.ValidateSites(h); err != nil {

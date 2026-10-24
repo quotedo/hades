@@ -1,12 +1,12 @@
-project = "jarl"
+project = "shop"
 preset = "phoenix"
 web = true
 setup = ["mix setup"]
 teardown = ["mix some.cleanup"]
-databases = ["gym_nation"]
+databases = ["shop"]
 
 [env]
-JARL_ENDPOINT = "{{host}}"
+SHOP_ENDPOINT = "{{host}}"
 
 [services.rabbitmq]
 vhost = true

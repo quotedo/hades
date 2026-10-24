@@ -24,18 +24,18 @@ func TestVhostEnsureAndDelete(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &rabbit.Client{ManagementURL: srv.URL, User: "guest", Password: "guest", HTTP: srv.Client()}
-	if err := c.Ensure(context.Background(), "jarl-x"); err != nil {
+	if err := c.Ensure(context.Background(), "shop-x"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Delete(context.Background(), "gone"); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"PUT /api/vhosts/jarl-x", "PUT /api/permissions/jarl-x/guest", "DELETE /api/vhosts/gone"}
+	want := []string{"PUT /api/vhosts/shop-x", "PUT /api/permissions/shop-x/guest", "DELETE /api/vhosts/gone"}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatal(calls)
 	}
-	u, _ := rabbit.AMQPURL("amqp://guest:guest@127.0.0.1:5672", "jarl-x")
-	if u != "amqp://guest:guest@127.0.0.1:5672/jarl-x" {
+	u, _ := rabbit.AMQPURL("amqp://guest:guest@127.0.0.1:5672", "shop-x")
+	if u != "amqp://guest:guest@127.0.0.1:5672/shop-x" {
 		t.Fatal(u)
 	}
 }
