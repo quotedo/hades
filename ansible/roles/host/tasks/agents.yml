@@ -1,0 +1,97 @@
+---
+# Agent CLIs and Paseo (design v2 6.2): npm globals under the store's default Node, installed
+# as root through the npm shim, so a default-Node bump installs them again under the new Node.
+# chdir: / keeps a stray .tool-versions from choosing another Node.
+- name: Install the agent CLIs and Paseo
+  vars:
+    host_npm_wanted: "{{ agent_clis.values() | list + ['@getpaseo/cli@' ~ paseo_version] }}"
+    host_npm_installed: "{{ host_npm_ls.stdout | default('{}', true) | from_json }}"
+    # A package is missing when npm does not list it, or lists another version than the pinned one.
+    host_npm_missing: >-
+      {%- set out = [] -%}
+      {%- for spec in host_npm_wanted -%}
+      {%- set name = spec | regex_replace('(.)@[^/]*$', '\\1') -%}
+      {%- set have = host_npm_installed.dependencies[name].version | default('') -%}
+      {%- if have == '' or (spec != name and spec != name ~ '@' ~ have) -%}
+      {%- set _ = out.append(spec) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+  block:
+    - name: Read the installed npm globals
+      ansible.builtin.command:
+        cmd: "{{ mise_shims }}/npm ls -g --json --depth=0"
+        chdir: /
+      register: host_npm_ls
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    # One command for everything missing, then shims for the new binaries.
+    - name: Install the missing npm globals
+      ansible.builtin.shell:
+        cmd: "{{ mise_shims }}/npm install -g {{ host_npm_missing | map('quote') | join(' ') }} && mise reshim --system"
+        chdir: /
+      environment:
+        npm_config_update_notifier: "false"
+        npm_config_fund: "false"
+      changed_when: true
+      when: host_npm_missing | length > 0
+
+    # Read by the user role: every paseo.service restarts after a Paseo (re)install.
+    - name: Record whether Paseo was installed in this run
+      ansible.builtin.set_fact:
+        host_paseo_changed: "{{ host_npm_missing | select('match', '@getpaseo/cli@') | list | length > 0 }}"
+
+- name: Orca
+  when: host_orca_wanted
+  block:
+    - name: Install the libraries Orca needs
+      ansible.builtin.apt:
+        name: "{{ orca_packages }}"
+        state: present
+      environment:
+        NEEDRESTART_SUSPEND: "1"
+
+    - name: Create the Orca directory
+      ansible.builtin.file:
+        path: "{{ orca_root }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download Orca
+      ansible.builtin.get_url:
+        url: "{{ orca_releases_url }}/download/v{{ orca_version }}/orca-linux.AppImage"
+        dest: "{{ orca_root }}/orca-{{ orca_version }}.AppImage"
+        mode: "0755"
+
+    - name: Link orca.AppImage to the pinned version
+      ansible.builtin.file:
+        src: "{{ orca_root }}/orca-{{ orca_version }}.AppImage"
+        dest: "{{ orca_root }}/orca.AppImage"
+        state: link
+        force: true
+
+    # --appimage-extract-and-run unpacks to a temporary directory instead of mounting, so no FUSE.
+    - name: Write the orca-ide wrapper
+      ansible.builtin.copy:
+        content: |
+          #!/bin/sh
+          exec {{ orca_root }}/orca.AppImage --appimage-extract-and-run "$@"
+        dest: /usr/local/bin/orca-ide
+        mode: "0755"
+
+    - name: Find other Orca versions
+      ansible.builtin.find:
+        paths: "{{ orca_root }}"
+        patterns: orca-*.AppImage
+        excludes: orca-{{ orca_version }}.AppImage
+      register: host_orca_old
+
+    - name: Remove other Orca versions
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ host_orca_old.files }}"
+      loop_control:
+        label: "{{ item.path }}"

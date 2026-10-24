@@ -57,11 +57,26 @@ kerl_configure_options: "--without-wx --without-javac --without-odbc" # noqa: va
 # apt packages a host adds on top of host_packages; never removed by the role.
 host_extra_packages: []
 
-# Chrome for Testing; the binary is <chrome_root>/chrome
+# Installed as root with npm under the store's default Node (agents.yml). agent_clis maps a
+# command to its npm package; a package without @<version> gets the latest when missing.
+agent_clis: # noqa: var-naming[no-role-prefix]
+  claude: "@anthropic-ai/claude-code"
+  codex: "@openai/codex"
+paseo_version: "0.12.0" # noqa: var-naming[no-role-prefix]
+# One Orca AppImage in orca_root with the /usr/local/bin/orca-ide wrapper, only while a present
+# dev user lists orca. orca_packages are the Electron libraries beyond host_chrome_packages.
+orca_version: "1.4.232" # noqa: var-naming[no-role-prefix]
+orca_releases_url: https://github.com/stablyai/orca/releases # noqa: var-naming[no-role-prefix]
+orca_root: /opt/orca # noqa: var-naming[no-role-prefix]
+orca_packages: [libnotify4, libsecret-1-0, libxss1, libxtst6, xdg-utils] # noqa: var-naming[no-role-prefix]
+host_orca_wanted: >-
+  {{ dev_users | default([]) | selectattr('ades', 'defined') | selectattr('ades', 'contains', 'orca')
+     | map(attribute='state', default='present') | select('eq', 'present') | list | length > 0 }}
+
+# Chrome for Testing; the binary is <chrome_root>/chrome, a link into <chrome_root>/<version>/.
+# chrome_channel names a channel of the Chrome for Testing index (stable, beta, dev, canary).
 chrome_root: /opt/chrome-for-testing # noqa: var-naming[no-role-prefix]
 chrome_channel: stable # noqa: var-naming[no-role-prefix]
-# System Node from NodeSource, used only to run @puppeteer/browsers for the Chrome install.
-node_major: 24 # noqa: var-naming[no-role-prefix]
 # Runtime libraries and fonts Chrome needs; on Ubuntu 24.04+ the first two are virtual
 # packages provided by their t64 builds.
 host_chrome_packages:

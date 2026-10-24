@@ -271,3 +271,39 @@
     quiet: true
   vars:
     host_test_mise_config_lines: "{{ (host_test_mise_config.content | b64decode).splitlines() }}"
+
+# `mise which` names the binary behind a shim (the shims themselves link to mise).
+- name: Read the global CLI versions
+  ansible.builtin.shell: set -e; mise which {{ item }}; {{ mise_shims }}/{{ item }} --version
+  loop: [claude, codex, paseo]
+  register: host_test_clis
+  changed_when: false
+  failed_when: false
+
+- name: Assert the agent CLIs and Paseo are installed in the store
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout_lines[0].startswith(mise_store ~ '/installs/node/' ~ tools.node[0] ~ '/bin/')
+      - item.item != 'paseo' or paseo_version in item.stdout
+    fail_msg: "{{ item.item }} must run from the default Node in the store ({{ paseo_version }} for paseo): {{ item.stdout }} {{ item.stderr }}"
+    quiet: true
+  loop: "{{ host_test_clis.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Stat Orca and its wrapper
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: ["{{ orca_root }}/orca.AppImage", /usr/local/bin/orca-ide]
+  register: host_test_orca
+  when: host_orca_wanted
+
+- name: Assert Orca is the pinned version and its wrapper is executable
+  ansible.builtin.assert:
+    that:
+      - (host_test_orca.results[0].stat.lnk_target | default('')).endswith('/orca-' ~ orca_version ~ '.AppImage')
+      - host_test_orca.results[1].stat.mode | default('') == '0755'
+    fail_msg: "{{ orca_root }}/orca.AppImage must link to orca-{{ orca_version }}.AppImage and /usr/local/bin/orca-ide be mode 0755"
+    quiet: true
+  when: host_orca_wanted

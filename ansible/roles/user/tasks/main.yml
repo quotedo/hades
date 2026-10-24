@@ -41,17 +41,6 @@
   loop_control:
     label: "{{ item.name | default('<unnamed>') }}"
 
-- name: GitHub CLI
-  ansible.builtin.import_tasks: gh.yml
-
-- name: Install the libraries Orca needs
-  ansible.builtin.apt:
-    name: "{{ user_orca_packages }}"
-    state: present
-  environment:
-    NEEDRESTART_SUSPEND: "1"
-  when: user_present | map(attribute='ades', default=[]) | flatten is contains('orca')
-
 - name: Read the existing accounts
   ansible.builtin.getent:
     database: passwd
