@@ -49,6 +49,6 @@
       - "'hades_domain must be defined' in preflight_missing_domain.stdout"
       - "'Logins collide' in preflight_colliding.stdout"
       - "'[j-smith, jsmith]' in preflight_colliding.stdout"
-      - "'Present dev_users share a uid: 3001, 3001, 3002' in preflight_duplicate_uids.stdout"
+      - "'Present dev_users share a uid: 3001 [alice, bob]' in preflight_duplicate_uids.stdout"
     quiet: true
   run_once: true

@@ -13,31 +13,15 @@
     creates: "{{ user_home }}/.asdf/plugins/{{ item }}"
   loop: "{{ asdf_plugins }}"
 
-- name: Resolve the global versions
-  ansible.builtin.command: asdf latest {{ item.key }} {{ item.value }}
-  register: user_global_versions
-  changed_when: false
-  check_mode: false
+# Only when ~/.tool-versions has no line for the tool: a user's own choice is never replaced.
+- name: Install and set the missing global versions
+  ansible.builtin.shell: |
+    grep -q '^{{ item.key }} ' ~/.tool-versions 2>/dev/null && exit 0
+    v=$(asdf latest {{ item.key }} {{ item.value }}) && asdf install {{ item.key }} "$v" \
+      && asdf set --home {{ item.key }} "$v" && echo installed
+  register: user_global
+  changed_when: "'installed' in user_global.stdout_lines"
   loop: "{{ asdf_global_versions | dict2items }}"
-
-- name: Install the global versions
-  ansible.builtin.command: asdf install {{ item.item.key }} {{ item.stdout }}
-  args:
-    creates: "{{ user_home }}/.asdf/installs/{{ item.item.key }}/{{ item.stdout }}"
-  loop: "{{ user_global_versions.results }}"
-  loop_control:
-    label: "{{ item.item.key }} {{ item.stdout }}"
-
-- name: Set the global versions
-  ansible.builtin.lineinfile:
-    path: "{{ user_home }}/.tool-versions"
-    regexp: "^{{ item.item.key }} "
-    line: "{{ item.item.key }} {{ item.stdout }}"
-    create: true
-    mode: "0644"
-  loop: "{{ user_global_versions.results }}"
-  loop_control:
-    label: "{{ item.item.key }} {{ item.stdout }}"
 
 # Elixir comes with a project's .tool-versions; without a global one, mix is not on PATH yet.
 - name: Check for mix

@@ -55,7 +55,7 @@
       - -c
       - >-
         asdf --version && node --version && claude --version && codex --version
-        && direnv version && hades version
+        && direnv version && hades version && gh --version
         && printf 'ERL_FLAGS=%s\nCHROME_PATH=%s\n' "$ERL_FLAGS" "$CHROME_PATH"
   become: true
   register: user_test_login
@@ -104,9 +104,12 @@
       - user_test_login.results[i].rc == 0
       - ('ERL_FLAGS=' ~ erl_flags) in user_test_login.results[i].stdout_lines
       - ('CHROME_PATH=' ~ chrome_root ~ '/chrome') in user_test_login.results[i].stdout_lines
-      - user_test_sudo.results[i].rc != 0
+      - user_test_sudo.results[i].rc == 1
+      - user_test_sudo.results[i].stderr is search('^sudo:', multiline=True)
       - user_test_doctor.results[i].stdout is search('^ok +host-config:', multiline=True)
-      - user_test_doctor.results[i].stdout_lines | select('match', '^FAIL ') | reject('match', '^FAIL (postgres|rabbitmq):') | list == []
+      - >-
+        user_test_doctor.results[i].rc == 0 or (user_test_doctor.results[i].rc == 1 and user_test_doctor_fails != []
+        and user_test_doctor_fails | reject('match', '^FAIL (postgres|rabbitmq):') | list == [])
     fail_msg: |-
       {{ item.name }}: passwd {{ user_test_pw | join(':') }}; groups {{ user_test_groups | join(',') }}
       linger {{ user_test_linger.results[i].stdout }}; user@ LimitNOFILE {{ user_test_manager.results[i].status.LimitNOFILE }},
@@ -114,14 +117,16 @@
       slice {{ user_test_slice.results[i].status | dict2items
                | selectattr('key', 'in', ['MemoryHigh', 'MemoryMax', 'MemorySwapMax', 'CPUWeight', 'TasksMax']) | items2dict }}
       login rc {{ user_test_login.results[i].rc }}: {{ (user_test_login.results[i].stdout_lines + user_test_login.results[i].stderr_lines) | join(' | ') }}
-      sudo -n true rc {{ user_test_sudo.results[i].rc }}
-      doctor: {{ user_test_doctor.results[i].stdout_lines | select('match', '^(FAIL|WARN) ') | join(' | ') or user_test_doctor.results[i].stderr }}
+      sudo -n true rc {{ user_test_sudo.results[i].rc }}: {{ user_test_sudo.results[i].stderr }}
+      doctor rc {{ user_test_doctor.results[i].rc }}: {{ user_test_doctor.results[i].stdout_lines | select('match', '^(FAIL|WARN) ') | join(' | ')
+                                                     or user_test_doctor.results[i].stderr }}
     quiet: true
   loop: "{{ user_present }}"
   loop_control:
     index_var: i
     label: "{{ item.name }}"
   vars:
+    user_test_doctor_fails: "{{ user_test_doctor.results[i].stdout_lines | select('match', '^FAIL ') | list }}"
     user_test_pw: "{{ ansible_facts.getent_passwd[item.name] | default(['missing'] * 6) }}"
     user_test_groups: >-
       {{ ansible_facts.getent_group | dict2items | selectattr('value.2', 'search', '(^|,)' ~ item.name ~ '(,|$)') | map(attribute='key') | list }}
