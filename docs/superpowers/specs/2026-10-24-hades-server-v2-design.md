@@ -121,6 +121,15 @@ The owner also asked about encrypting home directories; this document records wh
   `awg-quick`) and `amneziawg-linux-kmod`. The userspace `amneziawg-go` is not packaged there.
 - The vendor's documented Linux path is the kernel module via DKMS with the running kernel's
   headers; `awg-quick@<name>.service` reads `/etc/amnezia/amneziawg/<name>.conf`.
+- *(found 2026-10-25)* The company VPN is AmneziaWG 2.0 (`amnezia-awg2`, protocol version 3.1): the
+  client config carries the 2.0 parameters (`S3`, `S4`, `HeaderProtectionKey`, `ContentPaddingAddition`,
+  `RandomTrailers`, `DisableCookies`, range values such as `RekeyAfterTime = 100-120` and
+  `PersistentKeepalive = 25-35`). The server-side tools and module must support protocol 2.0; the
+  PPA's packages may lag. The builder checks `awg setconf` on the host with the real config first and
+  falls back to the latest `amneziawg-go` release plus `amneziawg-tools` from source when the PPA's
+  versions reject a key. The owner's exported key (Amnezia `vpn://` string) was decoded on the
+  controller into a plain config with split-tunnel `AllowedIPs` mirroring the owner's own split list
+  (eight routes) and no `DNS` line; it is exported from `.envrc` as `AMNEZIA_WG_CONF_TOKYO`.
 
 ### How secrets travel in Ansible *(found, builder check)*
 
