@@ -56,11 +56,11 @@ Apply times on the reference host with nothing to change:
 
 | Tag group | Seconds |
 |---|---|
-| `host` | 82 |
-| `postgres` | 23 |
-| `services` | 22 |
-| `ingress` (`--skip-tags cloudflared`) | 24 |
-| `user` | 100 (two dev users) |
+| `host` | 79 |
+| `postgres` | 24 |
+| `services` | 23 |
+| `ingress` | 42 |
+| `user` | 71 (two dev users) |
 | `protected` | 41 |
 
 ## Cloudflare
@@ -224,19 +224,19 @@ Homes are not encrypted. The ADE daemons run around the clock, so every home wou
 
 | Tag | Proves | Time on the reference host |
 |---|---|---|
-| `preflight` | preflight rejects the bad fixtures in `tests/inventories/` and accepts the valid one; no inventory literal appears in the roles or playbooks | 4 s |
-| `host` | registry, host config, sudoers rule, kernel settings, `hades.slice`, set-property caps still effective, CPU governor, the store holds exactly `tools`, mise's settings, agent CLIs, Paseo and Orca at their versions | 144 s |
-| `isolation` | the rule table is loaded at boot; a non-dev account (`nobody`) is refused on the dev ports while root and ssh still connect | 44 s |
-| `ops` | gc and backup timers, a backup run, `hades-status`, journald and Docker log caps, Chrome headless with its sandbox | 137 s |
-| `postgres` | dev cluster on loopback in `hades.slice`, `pg_hba.conf`, credentials, wrong password refused | 26 s |
-| `services` | containers running in `hades.slice` on loopback, no dev user in group docker, RabbitMQ and LocalStack answer | 26 s |
-| `ingress` | Caddy on loopback only, API on its unix socket, unknown host names redirect to the apex domain, gated paths 403 without the Access header; with the Cloudflare variables: cloudflared active, the edge redirects to the team domain, the Access policy equals the inventory's list | 48 s |
-| `user` | accounts, lingering, resource policy, the toolchain from the store in a login shell, `MIX_HOME`, sudo only for administrators, sshd settings, blocked ports refused, `hades doctor` | 58 s |
-| `ade` | each ADE's unit and listeners, Paseo's password, Orca's port in the input chain, no stale units | 44 s |
-| `offboard` | absent users gone and archived, GPG keys exported | 17 s |
-| `protected` | floor, caps and private homes | 60 s |
-| `vpn` | the tunnel unit and interface, no default route through it, a recent handshake, the DKMS module for the running kernel, `vpn_probe` | |
-| `acceptance` | the sample project end to end, described below | 118 s |
+| `preflight` | preflight rejects the bad fixtures in `tests/inventories/` and accepts the valid one; no inventory literal appears in the roles or playbooks | 5 s |
+| `host` | registry, host config, sudoers rule, kernel settings, `hades.slice`, set-property caps still effective, CPU governor, the store holds exactly `tools`, mise's settings, agent CLIs, Paseo and Orca at their versions | 33 s |
+| `isolation` | the rule table is loaded at boot; a non-dev account (`nobody`) is refused on the dev ports while root and ssh still connect | 10 s |
+| `ops` | gc and backup timers, a backup run, `hades-status`, journald and Docker log caps, Chrome headless with its sandbox | 77 s |
+| `postgres` | dev cluster on loopback in `hades.slice`, `pg_hba.conf`, credentials, wrong password refused | 6 s |
+| `services` | containers running in `hades.slice` on loopback, no dev user in group docker, RabbitMQ and LocalStack answer | 9 s |
+| `ingress` | Caddy on loopback only, API on its unix socket, unknown host names redirect to the apex domain, gated paths 403 without the Access header; with the Cloudflare variables: cloudflared active, the edge redirects to the team domain, the Access policy equals the inventory's list | 20 s |
+| `user` | accounts, lingering, resource policy, the toolchain from the store in a login shell, `MIX_HOME`, sudo only for administrators, sshd settings, blocked ports refused, `hades doctor` | 15 s |
+| `ade` | each ADE's unit and listeners, Paseo's password, Orca's port in the input chain, no stale units | 10 s |
+| `offboard` | absent users gone and archived, GPG keys exported | 3 s |
+| `protected` | floor, caps and private homes | 12 s |
+| `vpn` | the tunnel unit and interface, no default route through it, a recent handshake, the DKMS module for the running kernel, `vpn_probe` | Task 9b |
+| `acceptance` | the sample project end to end, described below | 48 s |
 
 The `acceptance` check runs only with `-e acceptance_user=<a throwaway dev user>` and is skipped otherwise. It works in that user's home with the sample project in `tests/sample-project/`:
 
