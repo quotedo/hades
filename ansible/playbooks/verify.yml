@@ -13,6 +13,7 @@
     # Do not use vars_files instead: play vars_files outrank inventory host vars.
     - { role: host, tags: [never] }
     - { role: postgres, tags: [never] }
+    - { role: services, tags: [never] }
   tasks:
     - name: Preflight tests
       ansible.builtin.import_tasks: tasks/preflight_tests.yml
@@ -33,3 +34,9 @@
     - name: Postgres tests
       ansible.builtin.import_tasks: tasks/postgres_tests.yml
       tags: [postgres]
+
+    # The stack exists only when a service is listed.
+    - name: Shared services tests
+      ansible.builtin.import_tasks: tasks/services_tests.yml
+      tags: [services]
+      when: dev_services | length > 0

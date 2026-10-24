@@ -22,7 +22,7 @@
   roles:
     - { role: host, tags: [host] }
     - { role: postgres, tags: [postgres] }
-    - { role: services, tags: [services] }
+    - { role: services, tags: [services], when: dev_services | length > 0 }
     - { role: ingress, tags: [ingress] }
     - { role: user, tags: [user] }
     - { role: protected, tags: [protected] }

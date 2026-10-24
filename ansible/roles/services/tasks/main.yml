@@ -1,4 +1,99 @@
 ---
-- name: Placeholder until this role is implemented
-  ansible.builtin.debug:
-    msg: "services role placeholder"
+# preflight.yml is untagged and skipped by `--tags services`, so this role checks its own inputs.
+# site.yml runs it only when dev_services lists something: compose refuses an empty project.
+- name: Assert the variables this role consumes
+  ansible.builtin.assert:
+    that:
+      - dev_services is sequence
+      - dev_services is not string
+      - dev_services | difference(['rabbitmq', 'localstack', 'redis']) | length == 0
+      - dev_services_host is string
+      - dev_services_host | length > 0
+      - services_ports | map('int') | select('gt', 0) | select('lt', 65536) | list | length == services_ports | length
+      - rabbitmq_user is string
+      - rabbitmq_user | length > 0
+      - rabbitmq_password is string
+      - rabbitmq_password | length > 0
+      - localstack_buckets is sequence
+      - localstack_buckets is not string
+      - localstack_buckets | reject('match', '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') | list | length == 0
+    fail_msg: >-
+      dev_services must be a list drawn from rabbitmq, localstack and redis, dev_services_host an
+      address, every service port 1-65535, rabbitmq_user and rabbitmq_password non-empty strings
+      and localstack_buckets a list of S3 bucket names
+    quiet: true
+  vars:
+    services_ports: "{{ [rabbitmq_amqp_port, rabbitmq_management_port, rabbitmq_mqtt_port, localstack_port, redis_port] }}"
+
+# A host that already runs Docker (any install method) keeps it exactly as it is.
+- name: Check for Docker Compose
+  ansible.builtin.command: docker compose version
+  register: services_compose
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install Docker CE from Docker's apt repository
+  when: services_compose.rc != 0
+  block:
+    - name: Download Docker's signing key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Write the Docker source
+      ansible.builtin.copy:
+        content: |
+          # Managed by Ansible (hades services role)
+          Types: deb
+          URIs: https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}
+          Suites: {{ ansible_facts.distribution_release }}
+          Components: stable
+          Signed-By: /etc/apt/keyrings/docker.asc
+        dest: /etc/apt/sources.list.d/docker.sources
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install Docker CE
+      ansible.builtin.apt:
+        name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
+        state: present
+        update_cache: true
+
+- name: Create the services directory
+  ansible.builtin.file:
+    path: "{{ services_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the compose project and its unit
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { src: docker-compose.yml.j2, dest: "{{ services_dir }}/docker-compose.yml", mode: "0644" }
+    - { src: rabbitmq-enabled-plugins.j2, dest: "{{ services_dir }}/rabbitmq-enabled-plugins", mode: "0644" }
+    - { src: localstack-init.sh.j2, dest: "{{ services_dir }}/localstack-init.sh", mode: "0755" }
+    - { src: hades-services.service.j2, dest: /etc/systemd/system/hades-services.service, mode: "0644" }
+  loop_control:
+    label: "{{ item.dest }}"
+  register: services_files
+
+# A changed file restarts the unit, whose `up -d` recreates only the changed services. In check
+# mode a unit file that is about to be written does not exist yet.
+- name: Enable and start the shared services
+  ansible.builtin.systemd_service:
+    name: hades-services.service
+    enabled: true
+    state: "{{ 'restarted' if services_files is changed else 'started' }}"
+    daemon_reload: true
+  when: not (ansible_check_mode and services_files is changed)
