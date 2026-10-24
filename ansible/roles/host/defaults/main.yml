@@ -22,6 +22,11 @@ hades_registry_root: /srv/hades # noqa: var-naming[no-role-prefix]
 hades_tool_paths: [] # noqa: var-naming[no-role-prefix]
 dev_services: [] # noqa: var-naming[no-role-prefix]
 
+# Cloudflare Access (ingress role): extra emails or @domain entries the policy admits besides the
+# present dev users' emails, and the session length (Cloudflare's maximum).
+access_allow: [] # noqa: var-naming[no-role-prefix]
+access_session: 720h # noqa: var-naming[no-role-prefix]
+
 # Caddy (installed by the ingress role)
 caddy_port: 8090 # noqa: var-naming[no-role-prefix]
 caddy_config: /etc/caddy/Caddyfile # noqa: var-naming[no-role-prefix]

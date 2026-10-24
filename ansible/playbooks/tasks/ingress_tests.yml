@@ -115,21 +115,10 @@
         argv: "{{ caddy_reload_command }}"
       changed_when: false
 
-- name: Stat the Cloudflare dashboard runbook
-  ansible.builtin.stat:
-    path: "{{ hades_config_dir }}/ingress.md"
-  register: ingress_test_runbook
-
-- name: Assert the Cloudflare dashboard runbook exists
-  ansible.builtin.assert:
-    that:
-      - ingress_test_runbook.stat.exists
-    fail_msg: "{{ hades_config_dir }}/ingress.md is missing"
-    quiet: true
-
-# Skipped without a token unless the tag is requested: a host with no zone runs no tunnel.
-- name: Check the tunnel connector
-  when: lookup('ansible.builtin.env', 'CLOUDFLARE_TUNNEL_TOKEN') | length > 0 or 'cloudflared' in ansible_run_tags
+# Skipped without Cloudflare credentials unless the tag is requested: a host with no zone runs no
+# tunnel.
+- name: Check the tunnel connector and Cloudflare Access
+  when: lookup('ansible.builtin.env', 'CF_API_TOKEN') | length > 0 or 'cloudflared' in ansible_run_tags
   tags: [cloudflared]
   block:
     - name: Read cloudflared's unit
@@ -143,3 +132,43 @@
           - ingress_test_cloudflared.status.ActiveState | default('missing') == 'active'
         fail_msg: "cloudflared.service is {{ ingress_test_cloudflared.status.ActiveState | default('missing') }}"
         quiet: true
+
+    # Through the edge: Access must answer before the request reaches the tunnel.
+    - name: Request an unknown label through Cloudflare
+      ansible.builtin.uri:
+        url: https://probe-{{ 999999999 | random }}.{{ hades_domain }}/
+        follow_redirects: none
+        status_code: 302
+      delegate_to: localhost
+      become: false
+      register: ingress_test_edge
+
+    - name: Assert Cloudflare Access redirects to the team domain
+      ansible.builtin.assert:
+        that: ingress_test_edge.location.startswith('https://' ~ cloudflare_team_domain ~ '/')
+        fail_msg: "edge Location is {{ ingress_test_edge.location }}"
+        quiet: true
+
+    - name: Read the Access application
+      ansible.builtin.uri:
+        url: "{{ ingress_cloudflare_api }}/accounts/{{ lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') }}/access/apps?domain=*.{{ hades_domain }}"
+        headers:
+          Authorization: Bearer {{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}
+      delegate_to: localhost
+      become: false
+      register: ingress_test_apps
+      no_log: true
+
+    - name: Assert the Access policy admits exactly the inventory's list
+      ansible.builtin.assert:
+        that:
+          - ingress_test_policies | length == 1
+          - ingress_test_policies[0].include | symmetric_difference(ingress_access_include) == []
+        fail_msg: >-
+          Access policies {{ ingress_test_policies | map(attribute='include') | to_json }},
+          inventory {{ ingress_access_include | to_json }}
+        quiet: true
+      vars:
+        ingress_test_policies: >-
+          {{ ingress_test_apps.json.result | selectattr('domain', 'eq', '*.' ~ hades_domain)
+             | map(attribute='policies') | flatten }}

@@ -23,7 +23,7 @@ Start from `ansible/inventory.example.yml`. Per host:
 
 Secrets never go into `ansible/`. Copy `.env.example` to `.env`, fill it in and export it with `set -a; . ./.env; set +a`.
 
-- `CLOUDFLARE_TUNNEL_TOKEN` is written to `/etc/cloudflared/token` (root, 0600). Without a token, run every playbook with `--skip-tags cloudflared`.
+- With `CF_ACCOUNT_ID` and `CF_API_TOKEN` the ingress role creates the tunnel, the wildcard DNS record and the Access application, admits each present dev user's `email` plus `access_allow`, and writes the tunnel token to `/etc/cloudflared/token` (root, 0600). Without them, run every playbook with `--skip-tags cloudflared`.
 - Private Hex repository keys are read from the environment variables that `hex_repos` names.
 - Paseo passwords are generated on the host and never leave it.
 
@@ -54,7 +54,7 @@ Apply times on the reference host with nothing to change:
 
 ## Interactive steps, in order
 
-1. Run the first apply with `--skip-tags cloudflared`. It writes `/etc/hades/ingress.md`, the Cloudflare dashboard steps: create the tunnel and the Access application, then export the token and apply `--tags ingress`.
+1. Export `CF_ACCOUNT_ID` and `CF_API_TOKEN`, give each present dev user an `email`, and apply `--tags ingress`.
 2. Before any user lists `orca`, set `tailscale_enabled: true`, apply `--tags ingress` to install Tailscale and run `tailscale up` on the host. Then add `orca` and apply `--tags user`. Preflight refuses `orca` when `tailscale_enabled` is false, and the Orca tasks fail on a host that is not logged in to Tailscale.
 3. Each user runs `gh auth login`, `gh auth setup-git` and each agent CLI's own login. Private `repos` clone only after that; until then a run prints "could not clone" and goes on.
 4. Paseo Desktop connects with "Remote SSH". The first apply prints each user's password once. It stays in `~/.config/hades/paseo.env` (0600; root can read it). For a phone, the user runs `paseo daemon pair --relay`.

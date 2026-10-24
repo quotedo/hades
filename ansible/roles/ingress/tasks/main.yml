@@ -19,19 +19,17 @@
       set, a non-empty string
     quiet: true
 
-# First, so that a run without a token stops before it changes anything.
-- name: Cloudflare Tunnel
+# First, so that a run without Cloudflare credentials stops before it changes anything.
+- name: Cloudflare tunnel, DNS record and Access application
+  ansible.builtin.import_tasks: cloudflare.yml
+  tags: [cloudflared]
+
+- name: Cloudflare Tunnel connector
   ansible.builtin.import_tasks: cloudflared.yml
   tags: [cloudflared]
 
 - name: Caddy
   ansible.builtin.import_tasks: caddy.yml
-
-- name: Write the Cloudflare dashboard runbook
-  ansible.builtin.template:
-    src: ingress.md.j2
-    dest: "{{ hades_config_dir }}/ingress.md"
-    mode: "0644"
 
 - name: Tailscale
   ansible.builtin.import_tasks: tailscale.yml

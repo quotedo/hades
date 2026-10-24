@@ -74,6 +74,20 @@
              if users | length > 1 %}{{ uid }} [{{ users | map(attribute='name') | join(', ') }}] {% endfor %}
         quiet: true
 
+    # The Cloudflare tasks (ingress role) build the Access allow-list from these.
+    - name: Assert every present dev user has an email when Cloudflare is managed
+      ansible.builtin.assert:
+        that:
+          - item.email is defined
+          - item.email is string
+          - item.email is match('^[^@\\s]+@[^@\\s]+$')
+        fail_msg: "dev_users entry {{ item.name }} needs an email (the Cloudflare Access allow-list) while CF_API_TOKEN is set"
+        quiet: true
+      loop: "{{ hades_present_users }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: lookup('ansible.builtin.env', 'CF_API_TOKEN') | length > 0
+
     # Orca's pairing address must be one clients dial privately, so Orca comes with Tailscale.
     # Unset, tailscale_enabled defaults to true when a present user lists orca (ingress role).
     - name: Assert Tailscale is enabled when a present user lists orca
