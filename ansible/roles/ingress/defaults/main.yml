@@ -1,0 +1,11 @@
+---
+# caddy_port, caddy_config, caddy_reload_command, hades_live_dir and hades_domain are shared
+# defaults in roles/host.
+
+# Caddy binds here only, and worktree apps listen here; cloudflared reaches Caddy locally.
+ingress_loopback_address: 127.0.0.1
+# `systemctl reload caddy` runs `caddy reload`, which needs Caddy's API. A unix socket that
+# Caddy creates mode 0200 for its own account keeps local users from rewriting the config.
+ingress_caddy_api_socket: /var/lib/caddy/api.sock
+# Orca pairs over Tailscale. The name is the one the collection documents.
+tailscale_enabled: "{{ user_present | map(attribute='ades', default=[]) | flatten is contains('orca') }}" # noqa: var-naming[no-role-prefix]

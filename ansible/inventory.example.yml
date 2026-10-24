@@ -1,0 +1,26 @@
+---
+# Copy to inventory.yml in your site repository and replace every placeholder.
+dev_servers:
+  hosts:
+    box:
+      ansible_host: <IP>
+      ansible_user: <SUDO_USER>
+      hades_domain: <DOMAIN>
+      hades_label_template: !unsafe '{{project}}-{{name}}'
+      cloudflare_team_domain: <TEAM>.cloudflareaccess.com
+      dev_services: [rabbitmq, localstack]
+      protected:
+        floor: true
+        capped_users: []
+        capped_units: []
+        blocked_ports: [5432]
+        private_homes: []
+      dev_users:
+        - name: dev1
+          uid: 2001
+          state: present
+          ssh_keys: ["<SSH_PUBLIC_KEY>"]
+          ades: [paseo]
+          paseo_port: 6767
+          gpg_key: true
+          repos: []

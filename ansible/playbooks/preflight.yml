@@ -1,0 +1,85 @@
+---
+# Input validation. Runs before anything touches a host.
+- name: Preflight
+  hosts: dev_servers
+  gather_facts: false
+  vars:
+    # Each user is combined onto {'state': 'present', 'ades': []}, so one without state counts as
+    # present.
+    hades_present_users: >-
+      {{ [{'state': 'present', 'ades': []}] | product(dev_users | default([])) | map('combine') | selectattr('state', 'eq', 'present') | list }}
+  tasks:
+    - name: Assert hades_domain is a non-empty string
+      ansible.builtin.assert:
+        that:
+          - hades_domain is defined
+          - hades_domain is string
+          - hades_domain | length > 0
+        fail_msg: hades_domain must be defined as a non-empty string
+        quiet: true
+
+    - name: Assert dev_users is a list
+      ansible.builtin.assert:
+        that:
+          - dev_users is defined
+          - dev_users is sequence
+          - dev_users is not string
+          - dev_users is not mapping
+        fail_msg: dev_users must be defined as a list
+        quiet: true
+
+    - name: Assert every dev_users entry is well formed
+      ansible.builtin.assert:
+        that:
+          - item.name is defined
+          - item.name is string
+          - item.name is match('^[a-z][a-z0-9_-]{0,31}$')
+          - item.uid is defined
+          - item.uid is integer
+          - item.uid >= 1000
+          - (item.state | default('present')) in ['present', 'absent']
+          - (item.ades | default([])) is sequence
+          - (item.ades | default([])) is not string
+          - (item.ades | default([])) is subset(['paseo', 'orca'])
+        fail_msg: >-
+          dev_users entry {{ item.name | default('<unnamed>') }} is invalid: name must match
+          ^[a-z][a-z0-9_-]{0,31}$, uid must be an integer >= 1000, state must be present or
+          absent, ades must be a list drawn from paseo and orca
+        quiet: true
+      loop: "{{ dev_users }}"
+      loop_control:
+        label: "{{ item.name | default('<unnamed>') }}"
+
+    - name: Assert alphanumeric projections of present logins are unique
+      ansible.builtin.assert:
+        that:
+          - hades_keys | unique | length == hades_keys | length
+        fail_msg: >-
+          Logins collide after dropping non-alphanumerics:
+          {% for key in hades_keys | unique if hades_keys.count(key) > 1 %}[{{ hades_names | zip(hades_keys)
+             | selectattr('1', 'eq', key) | map(attribute='0') | join(', ') }}] {% endfor %}
+        quiet: true
+      vars:
+        hades_names: "{{ hades_present_users | map(attribute='name') | list }}"
+        hades_keys: "{{ hades_names | map('regex_replace', '[^a-z0-9]', '') | list }}"
+
+    - name: Assert uids of present dev users are unique
+      ansible.builtin.assert:
+        that:
+          - hades_present_users | map(attribute='uid') | unique | length == hades_present_users | length
+        fail_msg: >-
+          Present dev_users share a uid:
+          {% for uid, users in hades_present_users | groupby('uid')
+             if users | length > 1 %}{{ uid }} [{{ users | map(attribute='name') | join(', ') }}] {% endfor %}
+        quiet: true
+
+    # Orca's pairing address must be one clients dial privately, so Orca comes with Tailscale.
+    # Unset, tailscale_enabled defaults to true when a present user lists orca (ingress role).
+    - name: Assert Tailscale is enabled when a present user lists orca
+      ansible.builtin.assert:
+        that:
+          - hades_orca_users == [] or tailscale_enabled | default(true) | bool
+        fail_msg: "orca is listed by: {{ hades_orca_users | join(', ') }} — it pairs over Tailscale: set tailscale_enabled: true"
+        quiet: true
+      vars:
+        hades_orca_users: "{{ hades_present_users | selectattr('ades', 'contains', 'orca') | map(attribute='name') | list }}"

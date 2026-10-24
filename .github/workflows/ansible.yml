@@ -1,0 +1,22 @@
+name: ansible
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ansible:
+    runs-on: ubuntu-latest
+    env:
+      ANSIBLE_CONFIG: ${{ github.workspace }}/ansible/ansible.cfg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ansible-core ansible-lint
+      - run: ansible-galaxy collection install -r ansible/requirements.yml
+      - run: ansible-playbook --syntax-check -i ansible/inventory.example.yml ansible/playbooks/site.yml
+      - run: ansible-playbook --syntax-check -i ansible/inventory.example.yml ansible/playbooks/verify.yml
+      - run: ansible-lint -c ansible/.ansible-lint ansible/
+      - run: ansible/scripts/check-no-literals.sh ansible/inventory.example.yml

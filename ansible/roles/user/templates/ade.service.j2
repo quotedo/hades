@@ -1,0 +1,21 @@
+# {{ ansible_managed }}
+[Unit]
+Description={{ ade | capitalize }} for {{ user.name }}
+
+[Service]
+# User units do not read /etc/profile.d, so the login environment is repeated here. The shims
+# call asdf, hence ~/.asdf/bin.
+Environment=PATH=%h/.local/bin:%h/.asdf/shims:%h/.asdf/bin{% for path in hades_tool_paths %}:{{ path }}{% endfor %}:/usr/local/bin:/usr/bin:/bin
+Environment="ERL_FLAGS={{ erl_flags }}" CHROME_PATH={{ chrome_root }}/chrome
+{% if ade == 'paseo' %}
+Environment=PASEO_LISTEN={{ host_loopback_address }}:{{ user.paseo_port }} PASEO_RELAY_ENABLED=false
+EnvironmentFile=%h/.config/hades/paseo.env
+ExecStart=%h/.asdf/shims/paseo daemon run
+{% else %}
+Environment=ORCA_TERMINAL_MEMORY_MAX={{ orca_terminal_memory_max }} ORCA_TERMINAL_MEMORY_SWAP_MAX={{ orca_terminal_swap_max }}
+ExecStart=%h/.local/bin/orca-ide serve --port {{ user.orca_port }} --pairing-address {{ user_tailscale_ip.stdout }}
+{% endif %}
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

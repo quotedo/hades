@@ -1,0 +1,11 @@
+---
+# Ports, credentials, dev_services and dev_services_host are shared defaults in roles/host.
+# The image and bucket names are the ones the collection documents, so the role-prefix rule is
+# waived per line.
+services_dir: "{{ hades_registry_root }}/services"
+rabbitmq_image: rabbitmq:4-management # noqa: var-naming[no-role-prefix]
+# The last tag that runs without a LocalStack auth token; newer releases use calendar versions.
+localstack_image: localstack/localstack:4 # noqa: var-naming[no-role-prefix]
+redis_image: redis:7 # noqa: var-naming[no-role-prefix]
+# Created at every LocalStack start: its state is not persisted.
+localstack_buckets: [] # noqa: var-naming[no-role-prefix]

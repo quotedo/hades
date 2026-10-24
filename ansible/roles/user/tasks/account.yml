@@ -1,0 +1,82 @@
+---
+# Group hades only: `groups` replaces the supplementary groups, so no sudo or docker membership
+# survives a run.
+- name: Create the account
+  ansible.builtin.user:
+    name: "{{ user.name }}"
+    uid: "{{ user.uid }}"
+    groups: ["{{ hades_group }}"]
+    append: false
+    shell: /bin/bash
+    home: "{{ user_home }}"
+
+- name: Create the home and config directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default(user.name) }}"
+    group: "{{ item.owner | default(user.name) }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - { path: "{{ user_home }}", mode: "0750" }
+    - { path: "{{ user_home }}/.ssh", mode: "0700" }
+    - { path: "{{ user_home }}/.config" }
+    - { path: "{{ user_home }}/.config/hades", mode: "0700" }
+    - { path: "{{ user_home }}/.config/systemd" }
+    - { path: "{{ user_home }}/.config/systemd/user" }
+    - { path: "{{ user_home }}/.local" }
+    - { path: "{{ user_home }}/.local/bin" }
+    - { path: "{{ user_home }}/.asdf" }
+    - { path: "{{ user_home }}/.asdf/bin" }
+    - { path: "/etc/systemd/system/user-{{ user.uid }}.slice.d", owner: root }
+    - { path: "/etc/systemd/system/user@{{ user.uid }}.service.d", owner: root }
+
+- name: Write the per-uid resource policy
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - { src: user-slice-dropin.conf.j2, dest: "/etc/systemd/system/user-{{ user.uid }}.slice.d/{{ hades_user_slice_dropin_name }}" }
+    - { src: user-service-dropin.conf.j2, dest: "/etc/systemd/system/user@{{ user.uid }}.service.d/50-hades.conf" }
+  register: user_dropins
+
+# Not a handler: the reload has to precede lingering below, which starts the user manager.
+- name: Reload systemd for the resource policy
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: user_dropins is changed # noqa: no-handler
+
+- name: Write the user manager limits, authorized keys and shell environment
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ user_home }}/{{ item.dest }}"
+    owner: "{{ user.name }}"
+    group: "{{ user.name }}"
+    mode: "{{ item.mode | default('0644') }}"
+  loop:
+    - { src: system-user-manager.conf.j2, dest: .config/systemd/user.conf }
+    - { src: authorized_keys.j2, dest: .ssh/authorized_keys, mode: "0600" }
+    - { src: env.sh.j2, dest: .config/hades/env.sh }
+
+- name: Source the shell environment from ~/.bashrc
+  ansible.builtin.lineinfile:
+    path: "{{ user_home }}/.bashrc"
+    line: '. "$HOME/.config/hades/env.sh"'
+    insertbefore: BOF
+    create: true
+    owner: "{{ user.name }}"
+    group: "{{ user.name }}"
+    mode: "0644"
+
+# Last, so the user manager it starts reads the limits above.
+- name: Enable lingering
+  ansible.builtin.command: loginctl enable-linger {{ user.name }}
+  args:
+    creates: /var/lib/systemd/linger/{{ user.name }}
+
+# Type=notify: this returns once the user manager and its bus are up, so `systemctl --user` works.
+- name: Start the user manager
+  ansible.builtin.systemd_service:
+    name: user@{{ user.uid }}.service
+    state: started

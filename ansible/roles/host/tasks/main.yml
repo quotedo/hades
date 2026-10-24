@@ -1,0 +1,45 @@
+---
+# Loopback isolation (isolation.yml) is included by site.yml at the end of the play.
+# preflight.yml is untagged and skipped by `--tags host`, so this role checks its own inputs
+# before touching the host.
+- name: Assert the variables this role consumes
+  ansible.builtin.assert:
+    that:
+      - hades_domain is defined
+      - hades_domain is string
+      - hades_domain | length > 0
+      - hades_label_template is string
+      - hades_label_template | length > 0
+      - dev_services is sequence
+      - dev_services is not string
+      - dev_services is not mapping
+      - hades_version is string
+      - hades_version | length > 0
+      - backup_dir is string
+      - backup_dir is match('^/.+')
+      - chrome_channel is string
+      - chrome_channel | length > 0
+      - node_major | int > 0
+    fail_msg: >-
+      hades_domain, hades_label_template, hades_version and chrome_channel must be non-empty
+      strings, backup_dir an absolute path, node_major a Node major version and dev_services
+      a list
+    quiet: true
+
+- name: Packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Kernel settings and CPU governor
+  ansible.builtin.import_tasks: sysctl.yml
+
+- name: Dev services slice
+  ansible.builtin.import_tasks: slices.yml
+
+- name: Hades CLI, registry, host config and sudoers
+  ansible.builtin.import_tasks: hades.yml
+
+- name: Gc and backup timers, status, journal and Docker log caps, login environment
+  ansible.builtin.import_tasks: ops.yml
+
+- name: Chrome for Testing
+  ansible.builtin.import_tasks: chrome.yml

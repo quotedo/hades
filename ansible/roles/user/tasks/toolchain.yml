@@ -1,0 +1,63 @@
+---
+# Installed once; remove ~/.asdf/bin/asdf to move to a newer asdf_version.
+- name: Install asdf
+  ansible.builtin.unarchive:
+    src: "{{ asdf_url }}"
+    remote_src: true
+    dest: "{{ user_home }}/.asdf/bin"
+    creates: "{{ user_home }}/.asdf/bin/asdf"
+
+- name: Add the asdf plugins
+  ansible.builtin.command: asdf plugin add {{ item }}
+  args:
+    creates: "{{ user_home }}/.asdf/plugins/{{ item }}"
+  loop: "{{ asdf_plugins }}"
+
+# Only when ~/.tool-versions has no line for the tool: a user's own choice is never replaced.
+- name: Install and set the missing global versions
+  ansible.builtin.shell: |
+    grep -q '^{{ item.key }} ' ~/.tool-versions 2>/dev/null && exit 0
+    v=$(asdf latest {{ item.key }} {{ item.value }}) && asdf install {{ item.key }} "$v" \
+      && asdf set --home {{ item.key }} "$v" && echo installed
+  register: user_global
+  changed_when: "'installed' in user_global.stdout_lines"
+  loop: "{{ asdf_global_versions | dict2items }}"
+
+# Elixir comes with a project's .tool-versions; without a global one, mix is not on PATH yet.
+- name: Check for mix
+  ansible.builtin.command: mix --version
+  register: user_mix
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Hex, rebar and the private Hex repositories
+  when: user_mix.rc == 0
+  block:
+    - name: Install Hex and rebar
+      ansible.builtin.shell: mix local.hex --force && mix local.rebar --force
+      args:
+        creates: "{{ user_home }}/.mix/archives/hex-*"
+
+    - name: List the Hex repositories
+      ansible.builtin.command: mix hex.repo list
+      register: user_hex_repos
+      changed_when: false
+      check_mode: false
+
+    - name: Add the private Hex repositories
+      ansible.builtin.command:
+        argv:
+          - mix
+          - hex.repo
+          - add
+          - "{{ item.name }}"
+          - "{{ item.url }}"
+          - --auth-key
+          - "{{ lookup('env', item.key_env) }}"
+          - --fetch-public-key
+          - "{{ lookup('env', item.fingerprint_env) }}"
+      when: user_hex_repos.stdout is not search('^' ~ item.name ~ '\\s', multiline=True)
+      changed_when: true
+      no_log: true
+      loop: "{{ hex_repos }}"

@@ -1,0 +1,14 @@
+# {{ ansible_managed }}
+# Lets Chrome for Testing create the user namespaces its sandbox needs where unprivileged user
+# namespaces are restricted (Ubuntu 24.04+). Like the distribution's own chrome profile it
+# confines nothing; it only names the binary. Attached by the real path, since execve resolves
+# the {{ chrome_root }}/chrome link.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile chrome-for-testing {{ chrome_root }}/browsers/**/chrome flags=(unconfined) {
+  userns,
+
+  # Site-specific additions and overrides. See local/README for details.
+  include if exists <local/chrome-for-testing>
+}

@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Back up the ADE state and agent logins of the dev users
+
+[Service]
+Type=oneshot
+ExecStart={{ hades_bin_dir }}/hades-backup
+Nice=19
+IOSchedulingClass=idle

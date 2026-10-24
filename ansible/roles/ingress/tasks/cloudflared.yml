@@ -1,0 +1,72 @@
+---
+- name: Assert the tunnel token is set on the controller
+  ansible.builtin.assert:
+    that:
+      - lookup('ansible.builtin.env', 'CLOUDFLARE_TUNNEL_TOKEN') | length > 0
+    fail_msg: >-
+      CLOUDFLARE_TUNNEL_TOKEN is empty: export the tunnel's token from the Cloudflare dashboard
+      (steps in {{ hades_config_dir }}/ingress.md, written by a run with --skip-tags cloudflared)
+    quiet: true
+
+- name: Download Cloudflare's signing key
+  ansible.builtin.get_url:
+    url: https://pkg.cloudflare.com/cloudflare-main.gpg
+    dest: /etc/apt/keyrings/cloudflare-main.gpg
+    mode: "0644"
+
+# Cloudflare publishes the one suite `any` for every release.
+- name: Add the cloudflared repository
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible (hades ingress role)
+      Types: deb
+      URIs: https://pkg.cloudflare.com/cloudflared
+      Suites: any
+      Components: main
+      Signed-By: /etc/apt/keyrings/cloudflare-main.gpg
+    dest: /etc/apt/sources.list.d/cloudflared.sources
+    mode: "0644"
+  register: ingress_cloudflared_repo
+
+- name: Install cloudflared
+  ansible.builtin.apt:
+    name: cloudflared
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ 0 if ingress_cloudflared_repo is changed else 3600 }}"
+  environment:
+    NEEDRESTART_SUSPEND: "1"
+  when: not (ansible_check_mode and ingress_cloudflared_repo is changed)
+
+- name: Create the cloudflared directory
+  ansible.builtin.file:
+    path: /etc/cloudflared
+    state: directory
+    mode: "0700"
+
+# The unit reads it with --token-file, so the token is in no world-readable file and no process
+# list. A rotated token is written, and the connector restarted, on the next run.
+- name: Write the tunnel token
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_TUNNEL_TOKEN') }}"
+    dest: /etc/cloudflared/token
+    mode: "0600"
+  no_log: true
+  notify: cloudflared restart
+
+- name: Write the cloudflared unit
+  ansible.builtin.template:
+    src: cloudflared.service.j2
+    dest: /etc/systemd/system/cloudflared.service
+    mode: "0644"
+  register: ingress_cloudflared_unit
+  notify: cloudflared restart
+
+# In check mode a unit file that is about to be written does not exist yet.
+- name: Enable and start cloudflared
+  ansible.builtin.systemd_service:
+    name: cloudflared.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not (ansible_check_mode and ingress_cloudflared_unit is changed)

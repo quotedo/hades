@@ -1,0 +1,99 @@
+---
+# preflight.yml is untagged and skipped by `--tags user`, so this role checks its own inputs.
+- name: Assert the variables this role consumes
+  ansible.builtin.assert:
+    that:
+      - user_present | map(attribute='name') | select('string') | list | length == user_present | length
+      - user_present | map(attribute='uid') | select('integer') | list | length == user_present | length
+      - user_present | map(attribute='ssh_keys', default=[]) | reject('sequence') | list == []
+      - user_present | map(attribute='ssh_keys', default=[]) | select('string') | list == []
+      - hades_tool_paths is sequence
+      - hades_tool_paths is not string
+      - asdf_version is string
+      - asdf_plugins is sequence
+      - asdf_plugins is not string
+      - asdf_global_versions is mapping
+      - "'nodejs' in asdf_global_versions"
+      - agent_clis is mapping
+      - hex_repos is sequence
+      - hex_repos is not string
+      - user_ade_users | selectattr('ades', 'contains', 'paseo') | map(attribute='paseo_port', default='') | reject('integer') | list == []
+      - user_ade_users | selectattr('ades', 'contains', 'orca') | map(attribute='orca_port', default='') | reject('integer') | list == []
+    fail_msg: >-
+      every present dev_users entry needs a string name, an integer uid and a list ssh_keys, and an
+      integer paseo_port or orca_port for each ADE it lists; hades_tool_paths, asdf_plugins and
+      hex_repos must be lists, asdf_global_versions a mapping with nodejs (the agent CLIs run on
+      it) and agent_clis a mapping of command to npm package
+    quiet: true
+  vars:
+    user_ade_users: "{{ user_present | selectattr('ades', 'defined') }}"
+
+- name: Assert each Hex repository is complete and its keys are in the controller environment
+  ansible.builtin.assert:
+    that:
+      - item.name is string
+      - item.url is string
+      - lookup('env', item.key_env) | length > 0
+      - lookup('env', item.fingerprint_env) | length > 0
+    fail_msg: "hex_repos entry {{ item.name | default('<unnamed>') }} needs name, url, key_env and fingerprint_env, both set in the environment"
+    quiet: true
+  loop: "{{ hex_repos }}"
+  loop_control:
+    label: "{{ item.name | default('<unnamed>') }}"
+
+- name: GitHub CLI
+  ansible.builtin.import_tasks: gh.yml
+
+- name: Install the libraries Orca needs
+  ansible.builtin.apt:
+    name: "{{ user_orca_packages }}"
+    state: present
+  environment:
+    NEEDRESTART_SUSPEND: "1"
+  when: user_present | map(attribute='ades', default=[]) | flatten is contains('orca')
+
+- name: Read the existing accounts
+  ansible.builtin.getent:
+    database: passwd
+
+- name: Read the existing groups
+  ansible.builtin.getent:
+    database: group
+
+# The user module would otherwise renumber and regroup, or delete, an existing (protected) account.
+# An absent entry may only name an account in group hades: one the role created.
+- name: Assert no dev user name belongs to a foreign account
+  ansible.builtin.assert:
+    that:
+      - item.name not in ansible_facts.getent_passwd or ansible_facts.getent_passwd[item.name][1] | int == item.uid
+      - item.state == 'present' or item.name not in ansible_facts.getent_passwd
+        or item.name in ansible_facts.getent_group[hades_group][2].split(',')
+    fail_msg: >-
+      dev_users {{ item.name }} ({{ item.state }}, uid {{ item.uid }}) names an account hades did not create
+      (uid {{ ansible_facts.getent_passwd[item.name][1] | default('') }}); hades does not take over or delete it
+    quiet: true
+  loop: "{{ user_present + user_absent }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# An absent user without an account is skipped.
+- name: Offboard each absent dev user
+  ansible.builtin.include_tasks: offboard.yml
+  when: user.name in ansible_facts.getent_passwd
+  loop: "{{ user_absent }}"
+  loop_control:
+    loop_var: user
+    label: "{{ user.name }}"
+  vars:
+    user_uid: "{{ ansible_facts.getent_passwd[user.name][1] }}"
+
+# In check mode a new account does not exist yet, so nothing can run as it.
+- name: Set up each present dev user
+  ansible.builtin.include_tasks: present.yml
+  when: not ansible_check_mode or user.name in ansible_facts.getent_passwd
+  loop: "{{ user_present }}"
+  loop_control:
+    loop_var: user
+    label: "{{ user.name }}"
+  vars:
+    user_home: "{{ user_home_base }}/{{ user.name }}"

@@ -1,0 +1,162 @@
+---
+# preflight.yml is untagged and skipped by `--tags postgres`, so this role checks its own inputs.
+- name: Assert the variables this role consumes
+  ansible.builtin.assert:
+    that:
+      - dev_pg_port | int > 0
+      - dev_pg_port | int < 65536
+      - dev_pg_major | int > 0
+      - dev_pg_user is string
+      - dev_pg_user | length > 0
+      - dev_pg_password is string
+      - dev_pg_password | length > 0
+      - dev_pg_cluster is match('^[a-z0-9_]+$')
+      - dev_pg_os_user is string
+      - dev_pg_os_user | length > 0
+      - postgres_listen_addresses is sequence
+      - postgres_listen_addresses is not string
+      - postgres_listen_addresses | length > 0
+      - postgres_settings is mapping
+    fail_msg: >-
+      dev_pg_port must be a port, dev_pg_major a Postgres major version, dev_pg_user,
+      dev_pg_password and dev_pg_os_user non-empty strings, dev_pg_cluster a cluster name,
+      postgres_listen_addresses a non-empty list and postgres_settings a mapping
+    quiet: true
+
+# An existing PGDG source (any file, any format) is left exactly as it is.
+- name: Find an existing PGDG source
+  ansible.builtin.find:
+    paths: /etc/apt
+    patterns: [sources.list, "*.list", "*.sources"]
+    # Matched from the start of each line.
+    contains: .*apt\.postgresql\.org
+    recurse: true
+  register: postgres_pgdg_sources
+
+- name: Add the PGDG repository
+  when: postgres_pgdg_sources.matched == 0
+  block:
+    - name: Download the PGDG signing key
+      ansible.builtin.get_url:
+        url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+        dest: /etc/apt/keyrings/pgdg.asc
+        mode: "0644"
+
+    - name: Write the PGDG source
+      ansible.builtin.copy:
+        content: |
+          # Managed by Ansible (hades postgres role)
+          Types: deb
+          URIs: https://apt.postgresql.org/pub/repos/apt
+          Suites: {{ ansible_facts.distribution_release }}-pgdg
+          Components: main
+          Signed-By: /etc/apt/keyrings/pgdg.asc
+        dest: /etc/apt/sources.list.d/pgdg.sources
+        mode: "0644"
+      register: postgres_pgdg
+
+# postgresql-common creates and starts a default <major>/main cluster on install. Seeded only
+# before postgresql-common exists, so a host that already has Postgres keeps its own settings.
+- name: Check whether postgresql-common is installed
+  ansible.builtin.stat:
+    path: /usr/bin/pg_lsclusters
+  register: postgres_common
+
+- name: Keep the package install from creating a main cluster
+  when: not postgres_common.stat.exists
+  block:
+    - name: Create the createcluster.d directory
+      ansible.builtin.file:
+        path: /etc/postgresql-common/createcluster.d
+        state: directory
+        mode: "0755"
+
+    - name: Disable the default main cluster
+      ansible.builtin.copy:
+        content: |
+          # Managed by Ansible (hades postgres role): only the dev cluster runs here.
+          create_main_cluster = false
+        dest: /etc/postgresql-common/createcluster.d/hades.conf
+        mode: "0644"
+
+# contrib ships inside postgresql-N; the community.postgresql modules need python3-psycopg2.
+- name: Install Postgres, PostGIS and psycopg2
+  ansible.builtin.apt:
+    name:
+      - postgresql-{{ dev_pg_major }}
+      - postgresql-{{ dev_pg_major }}-postgis-3
+      - postgresql-client-{{ dev_pg_major }}
+      - python3-psycopg2
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ 0 if postgres_pgdg is changed else 3600 }}"
+    install_recommends: false
+  # Keeps Ubuntu's needrestart from restarting services (the packaged Postgres among them).
+  environment:
+    NEEDRESTART_SUSPEND: "1"
+
+- name: Create the dev cluster account
+  ansible.builtin.user:
+    name: "{{ dev_pg_os_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: /var/lib/{{ dev_pg_os_user }}
+
+# pg_lsclusters lists the clusters that have a postgresql.conf, so `creates` is the "not listed
+# yet" check. An explicit locale keeps initdb from inheriting the operator's ssh locale.
+- name: Create the dev cluster
+  ansible.builtin.command: >-
+    pg_createcluster --user {{ dev_pg_os_user }} --group {{ dev_pg_os_user }} -p {{ dev_pg_port }}
+    --start-conf auto --locale C.UTF-8 {{ dev_pg_major }} {{ dev_pg_cluster }}
+  args:
+    creates: /etc/postgresql/{{ dev_pg_major }}/{{ dev_pg_cluster }}/postgresql.conf
+
+- name: Write the dev cluster settings and client authentication
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: /etc/postgresql/{{ dev_pg_major }}/{{ dev_pg_cluster }}/{{ item.dest }}
+    owner: "{{ dev_pg_os_user }}"
+    group: "{{ dev_pg_os_user }}"
+    mode: "0640"
+  loop:
+    - { src: dev-tuning.conf.j2, dest: conf.d/hades-dev.conf }
+    - { src: pg_hba.conf.j2, dest: pg_hba.conf }
+  notify: postgres restart
+
+# The instance directory only: postgresql@.service.d would move every cluster into hades.slice.
+- name: Create the dev cluster unit drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/postgresql@{{ dev_pg_major }}-{{ dev_pg_cluster }}.service.d
+    state: directory
+    mode: "0755"
+
+- name: Put the dev cluster into hades.slice
+  ansible.builtin.template:
+    src: postgresql-slice.conf.j2
+    dest: /etc/systemd/system/postgresql@{{ dev_pg_major }}-{{ dev_pg_cluster }}.service.d/hades.conf
+    mode: "0644"
+  notify: postgres restart
+
+- name: Enable and start the dev cluster
+  ansible.builtin.systemd_service:
+    name: postgresql@{{ dev_pg_major }}-{{ dev_pg_cluster }}.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# The cluster's bootstrap superuser is the owning account, reachable only over the socket (peer).
+# pg_createcluster puts the socket in /tmp for clusters not owned by postgres. In check mode
+# neither the account nor the cluster exists yet.
+- name: Create the dev superuser with its password
+  community.postgresql.postgresql_user:
+    name: "{{ dev_pg_user }}"
+    password: "{{ dev_pg_password }}"
+    role_attr_flags: SUPERUSER
+    login_user: "{{ dev_pg_os_user }}"
+    login_db: postgres
+    login_unix_socket: /tmp
+    port: "{{ dev_pg_port }}"
+  become: true
+  become_user: "{{ dev_pg_os_user }}"
+  no_log: true
+  when: not ansible_check_mode

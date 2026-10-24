@@ -1,0 +1,115 @@
+---
+- name: List the shared service containers
+  ansible.builtin.command: docker compose -f {{ services_dir }}/docker-compose.yml ps --format json
+  become: true
+  register: services_test_ps
+  changed_when: false
+  failed_when: false
+
+- name: Assert every listed service is running
+  ansible.builtin.assert:
+    that:
+      - services_test_ps.rc == 0
+      - dev_services | difference(services_test_running) | length == 0
+    fail_msg: >-
+      expected {{ dev_services | join(', ') }} running, got {{ services_test_running | join(', ') or 'none' }}:
+      {{ services_test_ps.stderr }}
+    quiet: true
+  vars:
+    services_test_running: >-
+      {{ services_test_ps.stdout_lines | map('from_json') | selectattr('State', 'equalto', 'running')
+         | map(attribute='Service') | list }}
+
+- name: Inspect the shared service containers
+  ansible.builtin.command:
+    argv: "{{ ['docker', 'inspect'] + (services_test_ps.stdout_lines | map('from_json') | map(attribute='ID') | list) }}"
+  become: true
+  register: services_test_inspect
+  changed_when: false
+
+- name: Assert every container runs in hades.slice
+  ansible.builtin.assert:
+    that:
+      - services_test_parents | reject('equalto', 'hades.slice') | list | length == 0
+    fail_msg: "cgroup parents: {{ services_test_parents | join(', ') }}"
+    quiet: true
+  vars:
+    services_test_parents: "{{ services_test_inspect.stdout | from_json | map(attribute='HostConfig.CgroupParent') | list }}"
+
+- name: Read the listening TCP sockets
+  ansible.builtin.command: ss -Hltn
+  register: services_test_ss
+  changed_when: false
+
+# Each port of a listed service has listeners, and every one of them is on dev_services_host.
+- name: Assert the service ports listen on dev_services_host only
+  ansible.builtin.assert:
+    that:
+      - services_test_lines | length > 0
+      - services_test_lines | reject('search', ' ' ~ (dev_services_host | regex_escape) ~ ':' ~ item ~ ' ') | list | length == 0
+    fail_msg: "port {{ item }} listeners: {{ services_test_lines | join(' | ') or 'none' }}"
+    quiet: true
+  loop: >-
+    {{ dev_services | map('extract', {'rabbitmq': [rabbitmq_amqp_port, rabbitmq_management_port, rabbitmq_mqtt_port],
+                                      'localstack': [localstack_port], 'redis': [redis_port]}) | flatten }}
+  vars:
+    services_test_lines: "{{ services_test_ss.stdout_lines | select('search', ':' ~ item ~ ' ') | list }}"
+
+- name: Read the shared services unit
+  ansible.builtin.systemd_service:
+    name: hades-services.service
+  register: services_test_unit
+
+- name: Assert the shared services unit is enabled
+  ansible.builtin.assert:
+    that:
+      - services_test_unit.status.UnitFileState | default('missing') == 'enabled'
+    fail_msg: "hades-services.service is {{ services_test_unit.status.UnitFileState | default('missing') }}"
+    quiet: true
+
+- name: Read group docker
+  ansible.builtin.getent:
+    database: group
+    key: docker
+
+- name: Assert no dev user is in group docker
+  ansible.builtin.assert:
+    that:
+      - services_test_docker_devs | length == 0
+    fail_msg: "dev users in group docker: {{ services_test_docker_devs | join(', ') }}"
+    quiet: true
+  vars:
+    services_test_docker_devs: "{{ user_present | map(attribute='name') | intersect(ansible_facts.getent_group.docker[2].split(',')) }}"
+
+# As root: loopback isolation lets only root, dev users and service accounts reach the ports.
+# Retried while the broker or LocalStack is still starting.
+- name: Query the RabbitMQ management API with the contracted credentials
+  ansible.builtin.uri:
+    url: http://{{ dev_services_host }}:{{ rabbitmq_management_port }}/api/overview
+    url_username: "{{ rabbitmq_user }}"
+    url_password: "{{ rabbitmq_password }}"
+    force_basic_auth: true
+  become: true
+  register: services_test_rabbitmq
+  until: services_test_rabbitmq.status == 200
+  retries: 30
+  delay: 2
+  when: "'rabbitmq' in dev_services"
+
+- name: Query the LocalStack health endpoint
+  ansible.builtin.uri:
+    url: http://{{ dev_services_host }}:{{ localstack_port }}/_localstack/health
+  become: true
+  register: services_test_localstack
+  until: services_test_localstack.status == 200
+  retries: 30
+  delay: 2
+  when: "'localstack' in dev_services"
+
+- name: Assert each LocalStack bucket exists
+  ansible.builtin.uri:
+    url: http://{{ dev_services_host }}:{{ localstack_port }}/{{ item }}
+    method: HEAD
+  become: true
+  loop: "{{ localstack_buckets }}"
+  when: "'localstack' in dev_services"

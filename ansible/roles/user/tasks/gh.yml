@@ -1,0 +1,38 @@
+---
+# GitHub CLI from GitHub's apt repository, for every user (`gh auth login` is per user).
+- name: Download the GitHub CLI signing key
+  ansible.builtin.get_url:
+    url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
+    dest: /etc/apt/keyrings/githubcli.gpg
+    mode: "0644"
+  register: user_gh_key
+
+- name: Add the GitHub CLI repository
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible (hades user role)
+      Types: deb
+      URIs: https://cli.github.com/packages
+      Suites: stable
+      Components: main
+      Architectures: amd64
+      Signed-By: /etc/apt/keyrings/githubcli.gpg
+    dest: /etc/apt/sources.list.d/github-cli.sources
+    mode: "0644"
+  register: user_gh_repo
+
+- name: Stat gh
+  ansible.builtin.stat:
+    path: /usr/bin/gh
+  register: user_gh
+
+# The apt cache is refreshed while gh is missing too, so a run that stopped after adding the
+# repository still finds the package next time.
+- name: Install the GitHub CLI
+  ansible.builtin.apt:
+    name: gh
+    state: present
+    update_cache: "{{ user_gh_key is changed or user_gh_repo is changed or not user_gh.stat.exists }}"
+  # Keeps Ubuntu's needrestart from restarting services after the install.
+  environment:
+    NEEDRESTART_SUSPEND: "1"

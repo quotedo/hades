@@ -1,0 +1,39 @@
+---
+# preflight.yml is untagged and skipped by `--tags ingress`, so this role checks its own inputs.
+- name: Assert the variables this role consumes
+  ansible.builtin.assert:
+    that:
+      - hades_domain is string
+      - hades_domain | length > 0
+      - hades_label_template is string
+      - caddy_port | string is match('^[0-9]+$')
+      - caddy_port | int < 65536
+      - caddy_config is match('^/.+')
+      - hades_live_dir is match('^/.+')
+      - hades_config_dir is match('^/.+')
+      - tailscale_enabled is boolean
+      - cloudflare_team_domain is not defined or (cloudflare_team_domain is string and cloudflare_team_domain | length > 0)
+    fail_msg: >-
+      hades_domain must be a non-empty string, caddy_port a port, caddy_config, hades_live_dir and
+      hades_config_dir absolute paths, tailscale_enabled a boolean and cloudflare_team_domain, when
+      set, a non-empty string
+    quiet: true
+
+# First, so that a run without a token stops before it changes anything.
+- name: Cloudflare Tunnel
+  ansible.builtin.import_tasks: cloudflared.yml
+  tags: [cloudflared]
+
+- name: Caddy
+  ansible.builtin.import_tasks: caddy.yml
+
+- name: Write the Cloudflare dashboard runbook
+  ansible.builtin.template:
+    src: ingress.md.j2
+    dest: "{{ hades_config_dir }}/ingress.md"
+    mode: "0644"
+
+- name: Tailscale
+  ansible.builtin.import_tasks: tailscale.yml
+  when: tailscale_enabled
+  tags: [tailscale]

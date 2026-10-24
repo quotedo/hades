@@ -1,0 +1,7 @@
+#!/bin/sh
+# {{ ansible_managed }}
+# LocalStack ready hook: creates the buckets listed in HADES_BUCKETS (set in docker-compose.yml).
+set -eu
+for bucket in $HADES_BUCKETS; do
+  awslocal s3api head-bucket --bucket "$bucket" 2>/dev/null || awslocal s3 mb "s3://$bucket"
+done

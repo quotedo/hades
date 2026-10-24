@@ -1,0 +1,211 @@
+---
+- name: Group hades exists
+  ansible.builtin.getent:
+    database: group
+    key: "{{ hades_group }}"
+
+- name: Stat the registry directories
+  ansible.builtin.stat:
+    path: "{{ hades_registry_root }}/{{ item }}"
+  loop: [ports, sites, manifests]
+  register: host_test_registry
+
+- name: Assert the registry directories are root:hades 3775
+  ansible.builtin.assert:
+    that:
+      - item.stat.isdir
+      - item.stat.mode == '3775'
+      - item.stat.pw_name == 'root'
+      - item.stat.gr_name == hades_group
+    fail_msg: "{{ item.item }}: expected a root:{{ hades_group }} directory with mode 3775"
+    quiet: true
+  loop: "{{ host_test_registry.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Stat the Caddy live directory
+  ansible.builtin.stat:
+    path: "{{ hades_live_dir }}"
+  register: host_test_live_dir
+
+- name: Assert the Caddy live directory is root 0755
+  ansible.builtin.assert:
+    that:
+      - host_test_live_dir.stat.isdir
+      - host_test_live_dir.stat.mode == '0755'
+      - host_test_live_dir.stat.pw_name == 'root'
+    fail_msg: "{{ hades_live_dir }} must be a root-owned directory with mode 0755"
+    quiet: true
+
+- name: Read the installed hades version
+  ansible.builtin.command: "{{ hades_bin_dir }}/hades version"
+  register: host_test_version
+  changed_when: false
+
+- name: Stat hades-port
+  ansible.builtin.stat:
+    path: "{{ hades_bin_dir }}/hades-port"
+  register: host_test_hades_port
+
+- name: Assert hades is the pinned version and hades-port is installed
+  ansible.builtin.assert:
+    that:
+      - host_test_version.stdout == hades_version
+      - host_test_hades_port.stat.exists
+      - host_test_hades_port.stat.mode == '0755'
+      - host_test_hades_port.stat.pw_name == 'root'
+    fail_msg: "hades reports {{ host_test_version.stdout }}, expected {{ hades_version }}; hades-port must be root 0755"
+    quiet: true
+
+- name: Stat the host config
+  ansible.builtin.stat:
+    path: "{{ hades_config_dir }}/host.toml"
+  register: host_test_config_stat
+
+- name: Read the host config
+  ansible.builtin.slurp:
+    src: "{{ hades_config_dir }}/host.toml"
+  register: host_test_config
+  when: host_test_config_stat.stat.exists
+
+- name: Assert the host config is root 0644 with the contracted values
+  ansible.builtin.assert:
+    that:
+      - host_test_config_stat.stat.exists
+      - host_test_config_stat.stat.mode == '0644'
+      - host_test_config_stat.stat.pw_name == 'root'
+      - ('domain = "' ~ hades_domain ~ '"') in host_test_config_text
+      - ('live_dir = "' ~ hades_live_dir ~ '"') in host_test_config_text
+      - ('port = ' ~ dev_pg_port) in host_test_config_text
+    fail_msg: "{{ hades_config_dir }}/host.toml is missing, has the wrong mode or owner, or lacks domain, live_dir or the Postgres port"
+    quiet: true
+  vars:
+    host_test_config_text: "{{ host_test_config.content | default('') | b64decode }}"
+
+- name: Validate the sudoers rule
+  ansible.builtin.command: visudo -cf /etc/sudoers.d/hades
+  become: true
+  changed_when: false
+
+- name: Read the sudoers rule
+  ansible.builtin.slurp:
+    src: /etc/sudoers.d/hades
+  become: true
+  register: host_test_sudoers
+
+- name: Assert the sudoers rule allows exactly caddy-reload and keeps no environment
+  ansible.builtin.assert:
+    that:
+      - host_test_rule in host_test_sudoers_lines
+      - host_test_sudoers_lines | reject('match', '^#') | reject('equalto', '') | list == [host_test_rule]
+    fail_msg: "/etc/sudoers.d/hades must hold exactly: {{ host_test_rule }}"
+    quiet: true
+  vars:
+    host_test_sudoers_lines: "{{ (host_test_sudoers.content | b64decode).splitlines() }}"
+    host_test_rule: >-
+      %{{ hades_group }} ALL=(root) NOPASSWD: {{ hades_bin_dir }}/hades caddy-reload,
+      {{ hades_bin_dir }}/hades caddy-reload --check
+
+- name: Read the kernel settings
+  ansible.builtin.command: sysctl -n vm.swappiness fs.inotify.max_user_instances fs.inotify.max_user_watches
+  register: host_test_sysctl
+  changed_when: false
+
+- name: Assert the kernel settings
+  ansible.builtin.assert:
+    that:
+      - host_test_sysctl.stdout_lines[0] | int == vm_swappiness | int
+      - host_test_sysctl.stdout_lines[1] | int == inotify_max_user_instances | int
+      - host_test_sysctl.stdout_lines[2] | int == inotify_max_user_watches | int
+    fail_msg: "sysctl reports {{ host_test_sysctl.stdout_lines | join(', ') }}"
+    quiet: true
+
+- name: Read the hades.slice properties
+  ansible.builtin.systemd_service:
+    name: hades.slice
+  register: host_test_slice
+
+- name: Assert the hades.slice memory limit
+  ansible.builtin.assert:
+    that:
+      - host_test_slice.status.MemoryMax == host_test_expected
+    fail_msg: "hades.slice MemoryMax is {{ host_test_slice.status.MemoryMax }}, expected {{ host_test_expected }}"
+    quiet: true
+  vars:
+    host_test_expected: >-
+      {{ 'infinity' if hades_slice_memory_max == 'infinity' else (hades_slice_memory_max | human_to_bytes | string) }}
+
+# Caps an operator set with `systemctl set-property` on user slices must stay effective:
+# nothing this collection writes may sort after and override them.
+- name: Find set-property drop-ins on user slices
+  ansible.builtin.find:
+    paths: /etc/systemd/system.control
+    patterns: "*.conf"
+    recurse: true
+  register: host_test_control
+
+- name: Read the set-property drop-ins on user slices
+  ansible.builtin.slurp:
+    src: "{{ item.path }}"
+  loop: "{{ host_test_control.files | selectattr('path', 'search', '/user-[0-9]+\\.slice\\.d/') | sort(attribute='path') }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: host_test_control_files
+
+# Per slice, the last value in filename order wins, as in systemd. Only absolute values are
+# compared, since `systemctl show` reports bytes and not percentages.
+- name: Collect the set-property CPUWeight and MemoryMax per user slice
+  ansible.builtin.set_fact:
+    host_test_caps: >-
+      {%- set ns = namespace(caps={}) -%}
+      {%- for f in host_test_control_files.results -%}
+      {%- set unit = f.item.path | dirname | basename | regex_replace('\.d$', '') -%}
+      {%- for line in (f.content | b64decode).splitlines() -%}
+      {%- set m = line | regex_search('^(CPUWeight|MemoryMax)=([0-9]+|infinity)$', '\\1', '\\2') -%}
+      {%- if m -%}
+      {%- set _ = ns.caps.update({unit: ns.caps.get(unit, {}) | combine({m[0]: m[1]})}) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ ns.caps }}
+
+- name: Read the capped user slices
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+  loop: "{{ host_test_caps.keys() | list }}"
+  register: host_test_capped
+
+- name: Assert the set-property caps on user slices are effective
+  ansible.builtin.assert:
+    that:
+      - host_test_mismatches | length == 0
+    fail_msg: "user slice caps overridden: {{ host_test_mismatches | join('; ') }}"
+    quiet: true
+  vars:
+    host_test_mismatches: >-
+      {%- set out = [] -%}
+      {%- for r in host_test_capped.results -%}
+      {%- for k, v in host_test_caps[r.item].items() if r.status[k] != v -%}
+      {%- set _ = out.append(r.item ~ ' ' ~ k ~ '=' ~ r.status[k] ~ ', set-property says ' ~ v) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Check whether the host exposes a CPU frequency governor
+  ansible.builtin.stat:
+    path: /sys/devices/system/cpu/cpu0/cpufreq
+  register: host_test_cpufreq
+
+- name: Read every CPU's governor
+  ansible.builtin.shell: cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+  register: host_test_governors
+  changed_when: false
+  when: host_test_cpufreq.stat.exists
+
+- name: Assert every CPU runs the configured governor
+  ansible.builtin.assert:
+    that:
+      - host_test_governors.stdout_lines | unique == [cpu_governor]
+    fail_msg: "governors in use: {{ host_test_governors.stdout_lines | unique | join(', ') }}"
+    quiet: true
+  when: host_test_cpufreq.stat.exists
