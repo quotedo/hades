@@ -183,6 +183,7 @@ The owner also asked about encrypting home directories; this document records wh
     python: ["<latest 3.14 patch>", "3.12.10"]  # latest default; infra's pin
     golang: ["<latest 1.26 patch>"]             # tyrr-go needs >= 1.26.1
     kubectl: ["<latest 1.33 patch>"]            # production is 1.33; one minor above staging, within skew
+    gh: ["<latest 2.x>"]                        # replaces v1's per-user gh install (v1 final review K16)
   ```
 
   The builder pins the `<latest …>` entries to exact versions at plan time. Versions are exact,

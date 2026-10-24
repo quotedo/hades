@@ -99,11 +99,12 @@
 
 ---
 
-### Task 3: Agent CLIs, Paseo and Orca in the store; Chrome through the store's Node
+### Task 3: Agent CLIs, Paseo, Orca and gh in the store; Chrome for Testing from its own index
 
 **Files:**
 - Create: `ansible/roles/host/tasks/agents.yml`
-- Modify: `ansible/roles/host/defaults/main.yml` (add `agent_clis`, `paseo_version`, `orca_version`, `orca_releases_url`, `orca_root`, `orca_packages`), `ansible/roles/host/tasks/main.yml` (import `agents.yml` after `toolchain.yml`), `ansible/roles/host/tasks/chrome.yml` (delete the NodeSource key/repo/pin/install/assert tasks, lines 14–96; `npx` becomes `{{ mise_shims }}/npx`), `ansible/roles/user/defaults/main.yml` (remove `agent_clis`, `paseo_version`, `orca_version`, `user_orca_releases_url`, `user_orca_packages`)
+- Modify: `ansible/roles/host/defaults/main.yml` (add `agent_clis`, `paseo_version`, `orca_version`, `orca_releases_url`, `orca_root`, `orca_packages`), `ansible/roles/host/tasks/main.yml` (import `agents.yml` after `toolchain.yml`), `ansible/roles/host/tasks/chrome.yml` (delete the NodeSource key/repo/pin/install/assert tasks and the `npx @puppeteer/browsers` install; Chrome for Testing comes from its own index: `uri` on `https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json`, pick `channels[chrome_channel | capitalize].downloads.chrome` where `platform == 'linux64'`, `get_url` the zip to `hades_download_dir`, `unarchive` under `chrome_root` with `creates`, link `{{ chrome_root }}/chrome` to the unpacked binary; the AppArmor profile's attachment path follows the new binary location; the `ops_tests.yml` Node assertion goes), `ansible/roles/user/defaults/main.yml` (remove `agent_clis`, `paseo_version`, `orca_version`, `user_orca_releases_url`, `user_orca_packages`)
+- Delete: `ansible/roles/user/tasks/gh.yml` (gh comes from `tools`: `gh: ["<latest 2.x at build time>"]` in the reference list; the `gh.yml` import in `roles/user/tasks/main.yml` goes; `gh auth login` and `gh auth setup-git` stay the user's interactive step)
 - Test: `ansible/playbooks/tasks/host_tests.yml`
 
 **Interfaces:**
@@ -112,9 +113,9 @@
 
 - [ ] **Step 1 (RED):** Add to `host_tests.yml`: `Read the global CLI versions` (`{{ mise_shims }}/claude --version`, `codex --version`, `paseo --version`, `/usr/local/bin/orca-ide --version` as `nobody`-free root command, `changed_when: false`, `failed_when: false`) and `Assert the agent CLIs, Paseo and Orca are installed in the store` (`paseo --version` stdout `== paseo_version`; `orca.AppImage` link target ends with `orca-{{ orca_version }}.AppImage`; `claude` and `codex` exit 0). Run `verify.yml --tags host`; expected FAIL.
 - [ ] **Step 2:** Write `agents.yml`: (a) `Read the installed npm globals` (`{{ mise_shims }}/npm ls -g --json --depth=0`, `changed_when: false`, `failed_when: false`); (b) `Install the agent CLIs and Paseo` with `{{ mise_shims }}/npm install -g <pkg>@<version>` looped over `agent_clis` (version `latest` unless the map value carries `@`) plus `@getpaseo/cli@{{ paseo_version }}`, `when:` the package is missing from (a) or its version differs, `changed_when: true`, `environment: {npm_config_update_notifier: "false", npm_config_fund: "false"}`; (c) `set_fact: host_paseo_changed` from (b)'s Paseo item; (d) `Install the Orca runtime libraries` (`apt: orca_packages`, `NEEDRESTART_SUSPEND`) and `Download Orca` (`get_url` to the versioned filename, mode 0755) and `Link orca.AppImage` (`file: state=link`) and `Write orca-ide`, all `when: dev_users | default([]) | selectattr('ades','defined') | map(attribute='ades') | flatten | select('eq','orca') | list | length > 0`; (e) `Remove other Orca versions` (`find` in `orca_root` for `orca-*.AppImage` not the current, `file: absent`). `mise reshim` after (b) when changed.
-- [ ] **Step 3:** In `chrome.yml` delete the NodeSource tasks and change the `npx` argv to `{{ mise_shims }}/npx`; keep everything else. In `.ansible-lint`/noqa nothing new.
+- [ ] **Step 3:** In `chrome.yml` replace the NodeSource and `npx` tasks with the index lookup, download, unpack and link described in Files; keep the ldd and AppArmor tasks, updating the profile's attachment path. Delete `roles/user/tasks/gh.yml` and its import; add `gh` to the reference `tools` list in `inventory.example.yml`. RED first: `host_tests.yml` asserts `{{ chrome_root }}/chrome --version` prints the index's stable version and `{{ mise_shims }}/gh --version` prints the pinned gh.
 - [ ] **Step 4:** `site.yml --tags host --check --diff`, real run, `verify.yml --tags host` → PASS, real run again → `changed=0`. Read-only: `ls -l {{ mise_store }}/installs/node/*/bin/{claude,codex,paseo}`.
-- [ ] **Step 5: Commit** — `git commit -m "ansible host: agent CLIs, Paseo and Orca installed once in the store; Chrome installs through the store's Node, NodeSource dropped"`
+- [ ] **Step 5: Commit** — `git commit -m "ansible host: agent CLIs, Paseo, Orca and gh installed once in the store; Chrome for Testing from its own index, NodeSource dropped"`
 
 ---
 
