@@ -27,7 +27,7 @@
 - name: Stat the private homes
   ansible.builtin.stat:
     path: "{{ ansible_facts.getent_passwd[item][4] }}"
-  loop: "{{ protected.private_homes }}"
+  loop: "{{ protected.private_homes | default([]) }}"
   register: protected_test_homes
 
 - name: Assert the private homes are 0750
