@@ -59,6 +59,34 @@
         mode: "0644"
       register: postgres_pgdg
 
+# postgresql-common creates and starts a default <major>/main cluster on install. Seeded only
+# before postgresql-common exists, so a host that already has Postgres keeps its own settings.
+- name: Check whether postgresql-common is installed
+  ansible.builtin.stat:
+    path: /usr/bin/pg_lsclusters
+  register: postgres_common
+
+- name: Keep the package install from creating a main cluster
+  when: not postgres_common.stat.exists
+  block:
+    - name: Create the createcluster.d directory
+      ansible.builtin.file:
+        path: /etc/postgresql-common/createcluster.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Disable the default main cluster
+      ansible.builtin.copy:
+        content: |
+          # Managed by Ansible (hades postgres role): only the dev cluster runs here.
+          create_main_cluster = false
+        dest: /etc/postgresql-common/createcluster.d/hades.conf
+        owner: root
+        group: root
+        mode: "0644"
+
 # contrib ships inside postgresql-N; the community.postgresql modules need python3-psycopg2.
 - name: Install Postgres, PostGIS and psycopg2
   ansible.builtin.apt:
