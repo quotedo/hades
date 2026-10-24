@@ -157,6 +157,8 @@ under the acceptance load and adjusted in inventory, never by hand.
 
 ### 6.3 ADE daemons per user
 
+> Superseded by the v2 design (`2026-10-24-hades-server-v2-design.md`).
+
 Inventory lists `ades: [paseo, orca]` per user; each is a thin tasks file with the same four jobs:
 install a pinned version, run it as a systemd user unit, authenticate it, and provide an update
 script. Host components switch on by need: the Electron/Xvfb library set and Tailscale only when
@@ -191,6 +193,8 @@ agents: Chrome for Testing (stable) system-wide under `/opt/chrome-for-testing` 
 server into agent configs. Neither ADE needs a server-side browser for its own browser pane.
 
 ### 6.4 Toolchain per user
+
+> Superseded by the v2 design (`2026-10-24-hades-server-v2-design.md`).
 
 asdf-vm (Go binary) per user with plugins `erlang`, `elixir`, `nodejs`, `golang`, `python`
 (inventory `asdf_plugins`); global versions from inventory (`asdf_global_versions`, e.g. Node LTS

@@ -4,8 +4,8 @@ An Ansible collection that turns an Ubuntu or Debian x86_64 host into a multi-us
 
 ```sh
 ansible-playbook -i inventory.yml playbooks/preflight.yml
-ansible-playbook -i inventory.yml playbooks/site.yml --tags host --skip-tags cloudflared   # then postgres, services, ingress, user, protected
+ansible-playbook -i inventory.yml playbooks/site.yml --tags host --skip-tags cloudflared   # then postgres, services, ingress, user, protected, vpn
 ansible-playbook -i inventory.yml playbooks/verify.yml --skip-tags cloudflared
 ```
 
-Drop `--skip-tags cloudflared` once `CLOUDFLARE_TUNNEL_TOKEN` is exported.
+Drop `--skip-tags cloudflared` once `CF_ACCOUNT_ID` and `CF_API_TOKEN` are exported.
