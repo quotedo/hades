@@ -307,6 +307,33 @@ The owner also asked about encrypting home directories; this document records wh
   initiate connections into their tailnet (not needed). Offboarding checklist: revoke the share.
   Orca's input-chain rule (`lo` and `tailscale0` only) is unaffected. Docs only; no role change.
 
+### 6.6a Cloudflare from the inventory *(owner, 2026-10-24 23:08)*
+
+The owner enabled Zero Trust on 2026-10-24; the tunnel, the wildcard DNS record and the Access
+application for the reference host were created through the Cloudflare API with an account token
+(`CF_ACCOUNT_ID`, `CF_API_TOKEN` in the operator's environment). The owner then asked for 30-day
+sessions and an easily editable allow-list of developer emails instead of a whole mail domain.
+Decision: the ingress role owns the Cloudflare side from the inventory, so there is no dashboard
+procedure and no separate utility:
+
+- `dev_users[].email` (new, optional per entry; preflight requires it on every present user when
+  the Cloudflare tasks are enabled). The Access policy's allow-list is exactly the emails of the
+  present dev users plus `access_allow` (inventory list of extra emails or `@domain` entries, default
+  `[]`). Offboarding a user removes their email on the next apply. Editing the list is editing the
+  inventory and applying `--tags ingress`.
+- With `CF_ACCOUNT_ID` and `CF_API_TOKEN` in the environment the role ensures, idempotently, via
+  `uri`: a tunnel named `hades-<inventory_hostname>` with ingress `*.<hades_domain>` → Caddy and a
+  404 catch-all; a proxied `*.<hades_domain>` CNAME to the tunnel; the tunnel token fetched from the
+  API and written over stdin (Task 1's pattern), so `CLOUDFLARE_TUNNEL_TOKEN` disappears; a
+  self-hosted Access application on `*.<hades_domain>` with `access_session: 720h` (Cloudflare's
+  maximum; also set on the organisation), hidden from the launcher, one policy `team` allowing the
+  list above. Without the two variables the Cloudflare tasks are skipped and the tunnel part of
+  v1 (`--skip-tags cloudflared`) behaves as before.
+- `roles/ingress/templates/ingress.md.j2` and `/etc/hades/ingress.md` go; `docs/server.md` says
+  "export the two variables, list the emails, apply".
+- Verify: an unknown label requested through the edge answers 302 to the team domain; the Access
+  policy's include list equals the inventory list.
+
 ### 6.7 Home encryption: not done
 
 - The ADE daemons run as each user around the clock, so every home must stay unlocked all the
