@@ -75,7 +75,7 @@ Details: [CLI reference](docs/cli.md).
 - [Developer guide](docs/developer.md): using a hades server day to day.
 - [Server reference](docs/server.md): inventory, secrets, apply, verify, onboarding, offboarding, upgrades.
 - [CLI reference](docs/cli.md): commands, `hades.toml`, host config, ADE hooks, environment variables.
-- Design records: [CLI](docs/superpowers/specs/2026-10-23-hades-cli-design.md), [server v1](docs/superpowers/specs/2026-10-23-hades-server-design.md), [server v2](docs/superpowers/specs/2026-10-24-hades-server-v2-design.md).
+- Design records, for contributors: [CLI](docs/superpowers/specs/2026-10-23-hades-cli-design.md), [server](docs/superpowers/specs/2026-10-23-hades-server-design.md) and its [second revision](docs/superpowers/specs/2026-10-24-hades-server-v2-design.md).
 
 ## Guarantees
 

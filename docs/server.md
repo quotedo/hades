@@ -46,7 +46,7 @@ ansible-playbook -i inventory.yml playbooks/verify.yml --tags host   # and so on
 
 Apply one tag group at a time: a full `site.yml` exceeds a 10-minute command timeout. Every group is idempotent; a second run reports `changed=0`. Without Cloudflare variables add `--skip-tags cloudflared`; without `vpn_enabled` the `vpn` group is skipped. From a site repository, install the collection with `ansible-galaxy collection install git+https://github.com/quotedo/hades.git#/ansible/` and `import_playbook` `quotedo.hades.site` and `quotedo.hades.verify`.
 
-| Tag group | Installs | Seconds (reference host, no change) |
+| Tag group | Installs | Seconds (16-core host, nothing to change) |
 |---|---|---|
 | `host` | packages, kernel settings, hades CLI and registry, tool store, agent CLIs, Paseo, Orca, Chrome for Testing, loopback isolation, backups, `hades-status` | 81 |
 | `postgres` | dev cluster on loopback, `hades.slice` | 24 |
@@ -203,7 +203,7 @@ Rules: `state: absent` acts only on accounts the role created (group `hades`, ma
 | `vpn` | tunnel unit, interface, no default route through it, handshake, DKMS module, probe |
 | `acceptance` | with `-e acceptance_user=<throwaway dev user>`: a sample project end to end (`hades up`, URL routing, database, isolation, `hades down`, `gc`, a missing tool version fails loudly). Cleans up after itself. |
 
-`-e reboot_test=true` reboots and repeats the boot-sensitive tags (not exercised on the reference host).
+`-e reboot_test=true` reboots the host and repeats the boot-sensitive tags.
 
 ## Operations
 
@@ -227,10 +227,3 @@ Rules: `state: absent` acts only on accounts the role created (group `hades`, ma
 - Isolation hooks the output path only: traffic from a container is not matched.
 - `hades-status` embeds the dev Postgres password, which every local account can read anyway.
 - No load test backs the resource numbers; they are the design's starting values.
-
-## Migrating from v1
-
-1. In each dev home remove `~/.asdf`, `~/.tool-versions`, `~/.local/opt/orca`, `~/.local/bin/hades-ade-update`, `~/.local/bin/orca-ide`.
-2. Apply `--tags host,user`.
-3. Replace `CLOUDFLARE_TUNNEL_TOKEN` with `CF_ACCOUNT_ID` and `CF_API_TOKEN`; rename the v1 tunnel to `hades-<host name>`; apply `--tags ingress`.
-4. Optional cleanup the roles never do: `apt remove nodejs`, `/etc/apt/sources.list.d/nodesource.sources`, `/etc/apt/keyrings/nodesource.asc`, `/etc/apt/preferences.d/nodesource`, `/var/cache/hades/npm`, `/etc/hades/ingress.md`.
