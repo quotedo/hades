@@ -65,3 +65,29 @@
       ansible.builtin.import_tasks: tasks/protected_tests.yml
       tags: [protected]
       when: protected is defined
+
+    - name: Acceptance tests
+      ansible.builtin.import_tasks: tasks/acceptance_tests.yml
+      tags: [acceptance]
+
+    # Opt-in (-e reboot_test=true): the boot-sensitive checks again after a reboot.
+    - name: Reboot, then verify again
+      when: reboot_test | default(false) | bool
+      tags: [reboot]
+      block:
+        - name: Reboot the host
+          ansible.builtin.reboot:
+          become: true
+        - name: Host tests after the reboot
+          ansible.builtin.import_tasks: tasks/host_tests.yml
+        - name: Loopback isolation tests after the reboot
+          ansible.builtin.import_tasks: tasks/isolation_tests.yml
+        - name: Postgres tests after the reboot
+          ansible.builtin.import_tasks: tasks/postgres_tests.yml
+        - name: Shared services tests after the reboot
+          ansible.builtin.import_tasks: tasks/services_tests.yml
+          when: dev_services | length > 0
+        - name: Ingress tests after the reboot
+          ansible.builtin.import_tasks: tasks/ingress_tests.yml
+        - name: ADE daemon tests after the reboot
+          ansible.builtin.import_tasks: tasks/ade_tests.yml
