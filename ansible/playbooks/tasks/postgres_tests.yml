@@ -1,0 +1,139 @@
+---
+- name: List the Postgres clusters
+  ansible.builtin.command: pg_lsclusters --no-header
+  register: postgres_test_clusters
+  changed_when: false
+
+- name: Pick the dev cluster line
+  ansible.builtin.set_fact:
+    postgres_test_cluster: >-
+      {{ postgres_test_clusters.stdout_lines | map('split') | selectattr('0', 'equalto', dev_pg_major | string)
+         | selectattr('1', 'equalto', dev_pg_cluster) | list }}
+
+- name: Assert the dev cluster is online on its port and owned by its account
+  ansible.builtin.assert:
+    that:
+      - postgres_test_cluster | length == 1
+      - postgres_test_cluster[0][2] == dev_pg_port | string
+      - postgres_test_cluster[0][3] == 'online'
+      - postgres_test_cluster[0][4] == dev_pg_os_user
+    fail_msg: >-
+      pg_lsclusters must list {{ dev_pg_major }} {{ dev_pg_cluster }} {{ dev_pg_port }} online
+      {{ dev_pg_os_user }}: {{ postgres_test_clusters.stdout_lines | join(' | ') }}
+    quiet: true
+
+- name: Stat the dev cluster data directory
+  ansible.builtin.stat:
+    path: "{{ postgres_test_cluster[0][5] }}"
+  register: postgres_test_datadir
+
+- name: Assert the data directory is owned by the dev cluster account
+  ansible.builtin.assert:
+    that:
+      - postgres_test_datadir.stat.isdir
+      - postgres_test_datadir.stat.pw_name == dev_pg_os_user
+    fail_msg: "{{ postgres_test_datadir.stat.path }} must be a directory owned by {{ dev_pg_os_user }}"
+    quiet: true
+
+- name: Read the dev cluster unit
+  ansible.builtin.systemd_service:
+    name: "postgresql@{{ dev_pg_major }}-{{ dev_pg_cluster }}.service"
+  register: postgres_test_unit
+
+- name: Assert the dev cluster unit is enabled, running and in hades.slice
+  ansible.builtin.assert:
+    that:
+      - postgres_test_unit.status.UnitFileState == 'enabled'
+      - postgres_test_unit.status.ActiveState == 'active'
+      - postgres_test_unit.status.Slice == 'hades.slice'
+    fail_msg: >-
+      postgresql@{{ dev_pg_major }}-{{ dev_pg_cluster }}.service is
+      {{ postgres_test_unit.status.UnitFileState }}, {{ postgres_test_unit.status.ActiveState }}
+      in {{ postgres_test_unit.status.Slice | default('no slice') }}
+    quiet: true
+
+- name: Read the dev cluster listeners
+  ansible.builtin.command: ss -Hltn "sport = :{{ dev_pg_port }}"
+  register: postgres_test_listeners
+  changed_when: false
+
+# Loopback only: the configured addresses are the listeners, and every one of them is loopback.
+- name: Assert the dev cluster listens on loopback only
+  ansible.builtin.assert:
+    that:
+      - postgres_test_addresses | sort == postgres_listen_addresses | sort
+      - postgres_test_addresses | reject('match', '^127\\.') | reject('equalto', '::1') | list | length == 0
+    fail_msg: "port {{ dev_pg_port }} listens on {{ postgres_test_addresses | join(', ') }}"
+    quiet: true
+  vars:
+    postgres_test_addresses: >-
+      {{ postgres_test_listeners.stdout_lines | map('split') | map(attribute=3)
+         | map('regex_replace', ':[0-9]+$', '') | map('trim', '[]') | list }}
+
+- name: Read the dev cluster pg_hba.conf
+  ansible.builtin.slurp:
+    src: "/etc/postgresql/{{ dev_pg_major }}/{{ dev_pg_cluster }}/pg_hba.conf"
+  become: true
+  register: postgres_test_hba
+  failed_when: false
+
+# Only the cluster account over the socket, and scram-sha-256 from the loopback addresses.
+- name: Assert pg_hba.conf allows nothing but local and loopback entries
+  ansible.builtin.assert:
+    that:
+      - postgres_test_hba.content is defined
+      - postgres_test_hba_rules | length > 0
+      - postgres_test_hba_bad | length == 0
+    fail_msg: "pg_hba.conf is missing or has entries other than local/loopback: {{ postgres_test_hba_bad }}"
+    quiet: true
+  vars:
+    postgres_test_hba_rules: >-
+      {{ (postgres_test_hba.content | default('') | b64decode).splitlines() | map('trim')
+         | reject('match', '#') | reject('equalto', '') | map('split') | list }}
+    postgres_test_hba_bad: >-
+      {%- set out = [] -%}
+      {%- for f in postgres_test_hba_rules -%}
+      {%- if not ((f[0] == 'local' and f[2] == dev_pg_os_user and f[3] == 'peer')
+                  or (f[0] == 'host' and f[3] in ['127.0.0.1/32', '::1/128'] and f[4] == 'scram-sha-256')) -%}
+      {%- set _ = out.append(f | join(' ')) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ out }}
+
+# As root: loopback isolation lets only root, dev users and service accounts reach the port.
+- name: Query the dev cluster over TCP with the contracted credentials
+  ansible.builtin.command: >-
+    psql -XtA -h {{ dev_pg_host }} -p {{ dev_pg_port }} -U {{ dev_pg_user }} -d postgres
+    -c 'show fsync' -c "select 1 from pg_available_extensions where name = 'postgis'"
+  environment:
+    PGPASSWORD: "{{ dev_pg_password }}"
+  become: true
+  register: postgres_test_query
+  changed_when: false
+  failed_when: false
+
+- name: Assert fsync is off and postgis is available
+  ansible.builtin.assert:
+    that:
+      - postgres_test_query.rc == 0
+      - postgres_test_query.stdout_lines == ['off', '1']
+    fail_msg: "psql exited {{ postgres_test_query.rc }}: {{ postgres_test_query.stdout }} {{ postgres_test_query.stderr }}"
+    quiet: true
+
+- name: Connect with a wrong password
+  ansible.builtin.command: >-
+    psql -XtA -h {{ dev_pg_host }} -p {{ dev_pg_port }} -U {{ dev_pg_user }} -d postgres -c 'select 1'
+  environment:
+    PGPASSWORD: "{{ dev_pg_password }}-wrong"
+  become: true
+  register: postgres_test_wrong
+  changed_when: false
+  failed_when: false
+
+- name: Assert a wrong password is refused
+  ansible.builtin.assert:
+    that:
+      - postgres_test_wrong.rc != 0
+      - postgres_test_wrong.stderr is search('password authentication failed')
+    fail_msg: "psql with a wrong password exited {{ postgres_test_wrong.rc }}: {{ postgres_test_wrong.stderr }}"
+    quiet: true

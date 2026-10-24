@@ -1,0 +1,4 @@
+# {{ ansible_managed }}
+{% for name, value in postgres_settings.items() %}
+{{ name }} = '{{ value }}'
+{% endfor %}

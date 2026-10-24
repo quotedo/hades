@@ -12,6 +12,7 @@
     # inventory values still win; the `never` tag keeps the role's tasks from running here.
     # Do not use vars_files instead: play vars_files outrank inventory host vars.
     - { role: host, tags: [never] }
+    - { role: postgres, tags: [never] }
   tasks:
     - name: Preflight tests
       ansible.builtin.import_tasks: tasks/preflight_tests.yml
@@ -28,3 +29,7 @@
     - name: Ops tests
       ansible.builtin.import_tasks: tasks/ops_tests.yml
       tags: [ops]
+
+    - name: Postgres tests
+      ansible.builtin.import_tasks: tasks/postgres_tests.yml
+      tags: [postgres]
