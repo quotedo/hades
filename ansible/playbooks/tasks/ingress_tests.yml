@@ -1,0 +1,109 @@
+---
+- name: Validate the Caddyfile
+  ansible.builtin.command: caddy validate --config {{ caddy_config }} --adapter caddyfile
+  become: true
+  changed_when: false
+
+- name: Read Caddy's unit
+  ansible.builtin.systemd_service:
+    name: caddy.service
+  register: ingress_test_caddy
+
+- name: Assert Caddy is active in hades.slice
+  ansible.builtin.assert:
+    that:
+      - ingress_test_caddy.status.ActiveState | default('missing') == 'active'
+      - ingress_test_caddy.status.Slice | default('missing') == 'hades.slice'
+    fail_msg: >-
+      caddy.service is {{ ingress_test_caddy.status.ActiveState | default('missing') }} in
+      {{ ingress_test_caddy.status.Slice | default('no slice') }}, expected active in hades.slice
+    quiet: true
+
+- name: Read the listening TCP sockets with their processes
+  ansible.builtin.command: ss -Hltnp
+  become: true
+  register: ingress_test_ss
+  changed_when: false
+
+# Every caddy_port listener is on the loopback address, and Caddy listens nowhere else (no 80/443).
+- name: Assert Caddy listens on the loopback caddy_port only
+  ansible.builtin.assert:
+    that:
+      - ingress_test_port_lines | length > 0
+      - ingress_test_port_lines | reject('search', ingress_test_bind) | list | length == 0
+      - ingress_test_ss.stdout_lines | select('search', '"caddy"') | reject('search', ingress_test_bind) | list | length == 0
+    fail_msg: "listeners: {{ ingress_test_ss.stdout_lines | select('search', ':' ~ caddy_port ~ ' |\"caddy\"') | join(' | ') or 'none' }}"
+    quiet: true
+  vars:
+    ingress_test_bind: " {{ ingress_loopback_address | regex_escape }}:{{ caddy_port }} "
+    ingress_test_port_lines: "{{ ingress_test_ss.stdout_lines | select('search', ':' ~ caddy_port ~ ' ') | list }}"
+
+- name: Query the catch-all site
+  ansible.builtin.uri:
+    url: http://{{ ingress_loopback_address }}:{{ caddy_port }}/
+    headers:
+      Host: nothing.{{ hades_domain }}
+    status_code: 404
+  become: true
+
+- name: Probe a gated path through a temporary worktree site
+  become: true
+  block:
+    - name: Write the probe site
+      ansible.builtin.copy:
+        content: "import worktree probe.{{ hades_domain }} {{ ingress_test_probe_port }}\n"
+        dest: "{{ hades_live_dir }}/probe.caddy"
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Reload Caddy with the probe site
+      ansible.builtin.command:
+        argv: "{{ caddy_reload_command }}"
+      changed_when: false
+
+    - name: Assert a gated path without the Access header is refused
+      ansible.builtin.uri:
+        url: http://{{ ingress_loopback_address }}:{{ caddy_port }}/dev/mailbox
+        headers:
+          Host: probe.{{ hades_domain }}
+        status_code: 403
+  always:
+    - name: Remove the probe site
+      ansible.builtin.file:
+        path: "{{ hades_live_dir }}/probe.caddy"
+        state: absent
+
+    - name: Reload Caddy without the probe site
+      ansible.builtin.command:
+        argv: "{{ caddy_reload_command }}"
+      changed_when: false
+
+- name: Stat the Cloudflare dashboard runbook
+  ansible.builtin.stat:
+    path: "{{ hades_config_dir }}/ingress.md"
+  register: ingress_test_runbook
+
+- name: Assert the Cloudflare dashboard runbook exists
+  ansible.builtin.assert:
+    that:
+      - ingress_test_runbook.stat.exists
+    fail_msg: "{{ hades_config_dir }}/ingress.md is missing"
+    quiet: true
+
+# Skipped without a token unless the tag is requested: a host with no zone runs no tunnel.
+- name: Check the tunnel connector
+  when: lookup('ansible.builtin.env', 'CLOUDFLARE_TUNNEL_TOKEN') | length > 0 or 'cloudflared' in ansible_run_tags
+  tags: [cloudflared]
+  block:
+    - name: Read cloudflared's unit
+      ansible.builtin.systemd_service:
+        name: cloudflared.service
+      register: ingress_test_cloudflared
+
+    - name: Assert cloudflared is active
+      ansible.builtin.assert:
+        that:
+          - ingress_test_cloudflared.status.ActiveState | default('missing') == 'active'
+        fail_msg: "cloudflared.service is {{ ingress_test_cloudflared.status.ActiveState | default('missing') }}"
+        quiet: true

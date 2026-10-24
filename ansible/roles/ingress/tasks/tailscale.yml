@@ -1,0 +1,39 @@
+---
+- name: Download Tailscale's signing key
+  ansible.builtin.get_url:
+    url: https://pkgs.tailscale.com/stable/{{ ansible_facts.distribution | lower }}/{{ ansible_facts.distribution_release }}.noarmor.gpg
+    dest: /etc/apt/keyrings/tailscale.gpg
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add the Tailscale repository
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible (hades ingress role)
+      Types: deb
+      URIs: https://pkgs.tailscale.com/stable/{{ ansible_facts.distribution | lower }}
+      Suites: {{ ansible_facts.distribution_release }}
+      Components: main
+      Signed-By: /etc/apt/keyrings/tailscale.gpg
+    dest: /etc/apt/sources.list.d/tailscale.sources
+    owner: root
+    group: root
+    mode: "0644"
+  register: ingress_tailscale_repo
+
+- name: Install Tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ 0 if ingress_tailscale_repo is changed else 3600 }}"
+  environment:
+    NEEDRESTART_SUSPEND: "1"
+  when: not (ansible_check_mode and ingress_tailscale_repo is changed)
+
+- name: Allow inbound traffic on the Tailscale interface
+  community.general.ufw:
+    rule: allow
+    direction: in
+    interface: tailscale0

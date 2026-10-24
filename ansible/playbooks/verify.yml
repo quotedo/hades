@@ -14,6 +14,9 @@
     - { role: host, tags: [never] }
     - { role: postgres, tags: [never] }
     - { role: services, tags: [never] }
+    # Its tasks carry their own tags (cloudflared, tailscale), and requesting one of those selects a
+    # task past `never`; `when: false` keeps them from running here as well.
+    - { role: ingress, tags: [never], when: false }
   tasks:
     - name: Preflight tests
       ansible.builtin.import_tasks: tasks/preflight_tests.yml
@@ -40,3 +43,7 @@
       ansible.builtin.import_tasks: tasks/services_tests.yml
       tags: [services]
       when: dev_services | length > 0
+
+    - name: Ingress tests
+      ansible.builtin.import_tasks: tasks/ingress_tests.yml
+      tags: [ingress]

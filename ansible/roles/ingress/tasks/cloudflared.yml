@@ -1,0 +1,57 @@
+---
+- name: Assert the tunnel token is set on the controller
+  ansible.builtin.assert:
+    that:
+      - lookup('ansible.builtin.env', 'CLOUDFLARE_TUNNEL_TOKEN') | length > 0
+    fail_msg: >-
+      CLOUDFLARE_TUNNEL_TOKEN is empty: export the tunnel's token from the Cloudflare dashboard
+      (steps in {{ hades_config_dir }}/ingress.md, written by a run with --skip-tags cloudflared)
+    quiet: true
+
+- name: Download Cloudflare's signing key
+  ansible.builtin.get_url:
+    url: https://pkg.cloudflare.com/cloudflare-main.gpg
+    dest: /etc/apt/keyrings/cloudflare-main.gpg
+    owner: root
+    group: root
+    mode: "0644"
+
+# Cloudflare publishes the one suite `any` for every release.
+- name: Add the cloudflared repository
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible (hades ingress role)
+      Types: deb
+      URIs: https://pkg.cloudflare.com/cloudflared
+      Suites: any
+      Components: main
+      Signed-By: /etc/apt/keyrings/cloudflare-main.gpg
+    dest: /etc/apt/sources.list.d/cloudflared.sources
+    owner: root
+    group: root
+    mode: "0644"
+  register: ingress_cloudflared_repo
+
+- name: Install cloudflared
+  ansible.builtin.apt:
+    name: cloudflared
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ 0 if ingress_cloudflared_repo is changed else 3600 }}"
+  environment:
+    NEEDRESTART_SUSPEND: "1"
+  when: not (ansible_check_mode and ingress_cloudflared_repo is changed)
+
+# Once. cloudflared writes the token to /etc/cloudflared/ mode 0600 and the unit reads it with
+# --token-file, so it is in no world-readable file and no process list. apt updates the package,
+# hence no self-update timer.
+- name: Install the tunnel service with its token
+  ansible.builtin.command:
+    argv:
+      - cloudflared
+      - service
+      - install
+      - --no-update-service
+      - "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_TUNNEL_TOKEN') }}"
+    creates: /etc/systemd/system/cloudflared.service
+  no_log: true

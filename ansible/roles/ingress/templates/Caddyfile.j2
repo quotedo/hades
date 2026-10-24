@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+# The Cloudflare tunnel terminates TLS, so Caddy serves plain HTTP on loopback only. Its API
+# socket is set in the unit (CADDY_ADMIN).
+{
+	auto_https off
+	default_bind {{ ingress_loopback_address }}
+}
+
+# `import worktree <host> <port>`, written by `hades caddy-reload` into {{ hades_live_dir }}.
+# The dev paths need the header Cloudflare Access adds; without it they answer 403.
+(worktree) {
+	http://{args[0]}:{{ caddy_port }} {
+		@gated {
+			path /dev* /tidewave* /phoenix/live_reload*
+			not header Cf-Access-Jwt-Assertion *
+		}
+		respond @gated 403
+		reverse_proxy {{ ingress_loopback_address }}:{args[1]}
+	}
+}
+
+import {{ hades_live_dir }}/*.caddy
+
+http://:{{ caddy_port }} {
+	respond "No worktree is live at {host}. Worktree sites are https://<label>.{{ hades_domain }} with label {{ hades_label_template }}." 404
+}

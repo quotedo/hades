@@ -1,0 +1,80 @@
+---
+- name: Download Caddy's signing key
+  ansible.builtin.get_url:
+    url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+    dest: /etc/apt/keyrings/caddy.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add the Caddy repository
+  ansible.builtin.copy:
+    content: |
+      # Managed by Ansible (hades ingress role)
+      Types: deb
+      URIs: https://dl.cloudsmith.io/public/caddy/stable/deb/debian
+      Suites: any-version
+      Components: main
+      Signed-By: /etc/apt/keyrings/caddy.asc
+    dest: /etc/apt/sources.list.d/caddy.sources
+    owner: root
+    group: root
+    mode: "0644"
+  register: ingress_caddy_repo
+
+- name: Create Caddy's unit drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/caddy.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Put Caddy into hades.slice with its API socket
+  ansible.builtin.template:
+    src: caddy-slice.conf.j2
+    dest: /etc/systemd/system/caddy.service.d/hades.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: caddy restart
+
+# The package's own Caddyfile serves :80 and its postinst starts Caddy, so ours goes first: dpkg
+# keeps an existing conffile. Every later change goes through the validated task below.
+- name: Write the Caddyfile before the package is installed
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_config }}"
+    owner: root
+    group: root
+    mode: "0644"
+    force: false
+
+# In check mode the repository is not there yet when it is about to be added.
+- name: Install Caddy
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ 0 if ingress_caddy_repo is changed else 3600 }}"
+  # Keeps Ubuntu's needrestart from restarting services after the install.
+  environment:
+    NEEDRESTART_SUSPEND: "1"
+  when: not (ansible_check_mode and ingress_caddy_repo is changed)
+
+- name: Write the Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_config }}"
+    owner: root
+    group: root
+    mode: "0644"
+    validate: caddy validate --adapter caddyfile --config %s
+  notify: caddy restart
+
+- name: Enable and start Caddy
+  ansible.builtin.systemd_service:
+    name: caddy.service
+    enabled: true
+    state: started
+  when: not (ansible_check_mode and ingress_caddy_repo is changed)

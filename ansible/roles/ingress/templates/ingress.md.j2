@@ -1,0 +1,33 @@
+<!-- {{ ansible_managed }} -->
+# Ingress: the Cloudflare dashboard side
+
+Worktree sites are `https://<label>.{{ hades_domain }}`, label `{{ hades_label_template }}`.
+A Cloudflare Tunnel carries them to Caddy on `http://{{ ingress_loopback_address }}:{{ caddy_port }}`.
+
+## 1. Tunnel
+
+Zero Trust, Networks, Tunnels: create a cloudflared tunnel and copy its token.
+Add one public hostname:
+
+- Hostname: `*.{{ hades_domain }}`
+- Service: `http://{{ ingress_loopback_address }}:{{ caddy_port }}`
+
+DNS needs a proxied `*.{{ hades_domain }}` CNAME to the tunnel; add it if the dashboard did not.
+
+## 2. Access application
+
+Create a self-hosted application on `*.{{ hades_domain }}` with these paths:
+
+- `dev`, `dev/*`
+- `tidewave`, `tidewave/*`
+- `phoenix/live_reload`, `phoenix/live_reload/*`
+
+Give it a policy that admits only the team{% if cloudflare_team_domain is defined %} (team domain `{{ cloudflare_team_domain }}`){% endif %}.
+Caddy answers 403 on these paths when the `Cf-Access-Jwt-Assertion` header is missing.
+It checks only that the header is present, so the application must keep covering every path.
+
+## 3. Connector
+
+From the collection's `ansible/` directory on the controller:
+
+    CLOUDFLARE_TUNNEL_TOKEN=… ansible-playbook -i inventory.yml playbooks/site.yml --tags ingress
