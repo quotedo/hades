@@ -1,29 +1,6 @@
 ---
-# Installed once; remove ~/.asdf/bin/asdf to move to a newer asdf_version.
-- name: Install asdf
-  ansible.builtin.unarchive:
-    src: "{{ asdf_url }}"
-    remote_src: true
-    dest: "{{ user_home }}/.asdf/bin"
-    creates: "{{ user_home }}/.asdf/bin/asdf"
-
-- name: Add the asdf plugins
-  ansible.builtin.command: asdf plugin add {{ item }}
-  args:
-    creates: "{{ user_home }}/.asdf/plugins/{{ item }}"
-  loop: "{{ asdf_plugins }}"
-
-# Only when ~/.tool-versions has no line for the tool: a user's own choice is never replaced.
-- name: Install and set the missing global versions
-  ansible.builtin.shell: |
-    grep -q '^{{ item.key }} ' ~/.tool-versions 2>/dev/null && exit 0
-    v=$(asdf latest {{ item.key }} {{ item.value }}) && asdf install {{ item.key }} "$v" \
-      && asdf set --home {{ item.key }} "$v" && echo installed
-  register: user_global
-  changed_when: "'installed' in user_global.stdout_lines"
-  loop: "{{ asdf_global_versions | dict2items }}"
-
-# Elixir comes with a project's .tool-versions; without a global one, mix is not on PATH yet.
+# The toolchain is the host's shared store; only the per-user Hex state is set up here. Without
+# Elixir in the store, mix is missing and this is skipped.
 - name: Check for mix
   ansible.builtin.command: mix --version
   register: user_mix
@@ -38,12 +15,15 @@
       ansible.builtin.shell: mix local.hex --force && mix local.rebar --force
       args:
         creates: "{{ user_home }}/.mix/archives/hex-*"
+      register: user_hex
 
+    # In check mode a new Hex is not installed yet, so mix has no hex.repo task.
     - name: List the Hex repositories
       ansible.builtin.command: mix hex.repo list
       register: user_hex_repos
       changed_when: false
       check_mode: false
+      when: hex_repos | length > 0 and not (ansible_check_mode and user_hex is changed)
 
     - name: Add the private Hex repositories
       ansible.builtin.command:
@@ -57,7 +37,7 @@
           - "{{ lookup('env', item.key_env) }}"
           - --fetch-public-key
           - "{{ lookup('env', item.fingerprint_env) }}"
-      when: user_hex_repos.stdout is not search('^' ~ item.name ~ '\\s', multiline=True)
+      when: user_hex_repos is not skipped and user_hex_repos.stdout is not search('^' ~ item.name ~ '\\s', multiline=True)
       changed_when: true
       no_log: true
       loop: "{{ hex_repos }}"

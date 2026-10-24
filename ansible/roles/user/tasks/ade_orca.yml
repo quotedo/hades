@@ -7,29 +7,11 @@
   changed_when: false
   check_mode: false
 
-- name: Create ~/.local/opt/orca
-  ansible.builtin.file:
-    path: "{{ user_home }}/.local/opt/orca"
-    state: directory
-    mode: "0755"
-
-# Downloaded only when absent: Orca updates the AppImage in place, hades-ade-update moves it on.
-- name: Download Orca
-  ansible.builtin.get_url:
-    url: "{{ user_orca_releases_url }}/download/v{{ orca_version }}/orca-linux.AppImage"
-    dest: "{{ user_home }}/.local/opt/orca/orca.AppImage"
-    mode: "0755"
-  register: user_orca_download
-
-# --appimage-extract-and-run unpacks to a temporary directory instead of mounting, so no FUSE.
-- name: Write the orca-ide wrapper
-  ansible.builtin.copy:
-    content: |
-      #!/bin/sh
-      exec "$HOME/.local/opt/orca/orca.AppImage" --appimage-extract-and-run "$@"
-    dest: "{{ user_home }}/.local/bin/orca-ide"
-    mode: "0755"
-  register: user_orca_wrapper
+# The unit records the link's target, so a new orca_version rewrites the unit and restarts Orca.
+- name: Read the Orca version link
+  ansible.builtin.stat:
+    path: "{{ orca_root }}/orca.AppImage"
+  register: user_orca_link
 
 - name: Write the Orca unit
   ansible.builtin.template:
@@ -46,6 +28,6 @@
     scope: user
     enabled: true
     daemon_reload: "{{ user_orca_unit is changed }}"
-    state: "{{ 'restarted' if [user_orca_download, user_orca_wrapper, user_orca_unit] | select('changed') | list else 'started' }}"
+    state: "{{ 'restarted' if user_orca_unit is changed else 'started' }}"
   # In check mode a new unit is not written yet, so systemd cannot find it.
   when: not (ansible_check_mode and user_orca_unit is changed)
