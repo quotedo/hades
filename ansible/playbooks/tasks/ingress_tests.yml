@@ -64,8 +64,16 @@
     url: http://{{ ingress_loopback_address }}:{{ caddy_port }}/
     headers:
       Host: nothing.{{ hades_domain }}
-    status_code: 404
+    status_code: 302
+    follow_redirects: none
+  register: ingress_test_catchall
   become: true
+
+- name: Assert an unknown host name redirects to the apex
+  ansible.builtin.assert:
+    that: ingress_test_catchall.location == 'https://' ~ hades_domain
+    fail_msg: "catch-all Location is {{ ingress_test_catchall.location | default('missing') }}"
+    quiet: true
 
 - name: Probe a gated path through a temporary worktree site
   become: true

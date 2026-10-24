@@ -121,7 +121,7 @@ Keep the `state: absent` entry: `verify --tags offboard` expects it.
 | `ops` | gc and backup timers, a backup run, `hades-status`, journald and Docker log caps, Chrome headless with its sandbox | 137 s |
 | `postgres` | dev cluster on loopback in `hades.slice`, `pg_hba.conf`, credentials, wrong password refused | 26 s |
 | `services` | containers running in `hades.slice` on loopback, no dev user in group docker, RabbitMQ and LocalStack answer | 26 s |
-| `ingress` | Caddy on loopback only, API on its unix socket, catch-all 404, gated paths 403 without the Access header; cloudflared when a token is set | 48 s |
+| `ingress` | Caddy on loopback only, API on its unix socket, unknown host names redirect to the apex domain, gated paths 403 without the Access header; cloudflared when a token is set | 48 s |
 | `user` | accounts, lingering, resource policy, login toolchain, no sudo, blocked ports refused, `hades doctor` | 58 s |
 | `ade` | each ADE's unit and listeners, Paseo's password, Orca's port in the input chain, no stale units | 44 s |
 | `offboard` | absent users gone and archived, GPG keys exported | 17 s |
@@ -133,7 +133,7 @@ The `acceptance` check runs only with `-e acceptance_user=<a throwaway dev user>
 1. It commits the project and adds a worktree.
 2. It runs `hades up`.
 3. It checks the `hades ls` entry, both site files, Caddy routing to the worktree port, the dev database and loopback isolation, and that `hades doctor` passes.
-4. It runs `hades down` and checks that the host name answers 404 and the sites, the port claim and the database are gone.
+4. It runs `hades down` and checks that the host name redirects to the apex again and the sites, the port claim and the database are gone.
 5. It runs `hades gc` as root.
 
 It cleans up after itself even when a check fails.

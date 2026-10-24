@@ -148,7 +148,8 @@
         url: http://{{ ingress_loopback_address }}:{{ caddy_port }}/
         headers:
           Host: "{{ acceptance_entry.Host }}"
-        status_code: 404
+        status_code: 302
+        follow_redirects: none
 
     - name: Stat the site files and the port claim
       ansible.builtin.stat:
