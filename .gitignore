@@ -4,3 +4,4 @@
 /ansible/.env
 /ansible/.ansible/
 /.envrc
+/.superpowers/
