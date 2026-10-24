@@ -1,6 +1,6 @@
 ---
 # Per absent dev user: the account is gone, nothing in the registry belongs to its uid, its
-# per-uid drop-in directories are gone, and its home was archived once. Per present dev user with
+# per-uid drop-in directories are gone, and its home was archived. Per present dev user with
 # gpg_key: true: one key pair, exported.
 - name: Read the passwd entries
   ansible.builtin.getent:
@@ -27,16 +27,16 @@
   loop_control:
     label: "{{ item.name }}"
 
-- name: Assert each absent dev user is gone, left nothing behind and was archived once
+- name: Assert each absent dev user is gone, left nothing behind and was archived
   ansible.builtin.assert:
     that:
       - item.name not in ansible_facts.getent_passwd
       - offboard_test_registry.results[i].stdout_lines == []
-      - offboard_test_archives.results[i].matched == 1
+      - offboard_test_archives.results[i].matched >= 1
     fail_msg: >-
       {{ item.name }}: account {{ 'exists' if item.name in ansible_facts.getent_passwd else 'gone' }};
       left behind by uid {{ item.uid }}: {{ offboard_test_registry.results[i].stdout_lines | join(', ') or 'none' }};
-      archives: {{ offboard_test_archives.results[i].files | map(attribute='path') | join(', ') or 'none' }} (want one)
+      archives: {{ offboard_test_archives.results[i].files | map(attribute='path') | join(', ') or 'none' }} (want at least one)
     quiet: true
   loop: "{{ user_absent }}"
   loop_control:

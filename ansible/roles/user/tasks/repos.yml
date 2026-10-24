@@ -2,19 +2,16 @@
 # One present dev user's repositories (loop variable `user`), run as the user. A private one
 # needs `gh auth login` and `gh auth setup-git` first; until then its clone fails with a message
 # and the run goes on.
-- name: Clone the user's repositories
-  ansible.builtin.command:
-    argv: [git, clone, "{{ item }}", "{{ user_repo_dir }}"]
-    creates: "{{ user_repo_dir }}"
+- name: Clone the user's repositories # noqa: latest[git] (a dev clone follows the default branch)
+  ansible.builtin.git:
+    repo: "{{ item }}"
+    dest: "{{ user_home }}/{{ item | basename | regex_replace('\\.git$', '') }}"
+    update: false
   environment:
     GIT_TERMINAL_PROMPT: "0"
   register: user_repos_clone
-  # changed is false when `creates` skipped the clone.
-  changed_when: user_repos_clone.rc == 0 and user_repos_clone.changed
   failed_when: false
   loop: "{{ user.repos | default([]) }}"
-  vars:
-    user_repo_dir: "{{ user_home }}/{{ item | basename | regex_replace('\\.git$', '') }}"
 
 - name: Report the repositories that could not be cloned
   ansible.builtin.debug:

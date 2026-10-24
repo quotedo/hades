@@ -56,14 +56,21 @@
   ansible.builtin.getent:
     database: passwd
 
+- name: Read the existing groups
+  ansible.builtin.getent:
+    database: group
+
 # The user module would otherwise renumber and regroup, or delete, an existing (protected) account.
-- name: Assert no dev user name belongs to an account with another uid
+# An absent entry may only name an account in group hades: one the role created.
+- name: Assert no dev user name belongs to a foreign account
   ansible.builtin.assert:
     that:
       - item.name not in ansible_facts.getent_passwd or ansible_facts.getent_passwd[item.name][1] | int == item.uid
+      - item.state == 'present' or item.name not in ansible_facts.getent_passwd
+        or item.name in ansible_facts.getent_group[hades_group][2].split(',')
     fail_msg: >-
-      dev_users {{ item.name }} has uid {{ item.uid }}, but the host's account {{ item.name }} has uid
-      {{ ansible_facts.getent_passwd[item.name][1] | default('') }}; hades does not take over or delete an existing account
+      dev_users {{ item.name }} ({{ item.state }}, uid {{ item.uid }}) names an account hades did not create
+      (uid {{ ansible_facts.getent_passwd[item.name][1] | default('') }}); hades does not take over or delete it
     quiet: true
   loop: "{{ user_present + user_absent }}"
   loop_control:

@@ -1,9 +1,7 @@
 ---
 # One absent dev user whose account still exists (loop variable `user`, uid `user_uid`). Once the
-# account is gone, the next run skips this file.
-- name: Release the user's worktrees
-  ansible.builtin.command: hades gc --owner {{ user.name }}
-  changed_when: true
+# account is gone, the next run skips this file, so deleting the account comes last: every task
+# before it can be repeated.
 
 # Stops the ADE units running inside it; userdel refuses an account with live processes. Before
 # disabling lingering, which would start stopping it without waiting.
@@ -23,19 +21,19 @@
   changed_when: user_offboard_pkill.rc == 0
   failed_when: user_offboard_pkill.rc > 1
 
-# Offboard archives are never pruned: the nightly backup's prune pattern does not match them.
+# After the processes are gone, so none of them registers a worktree meanwhile.
+- name: Release the user's worktrees
+  ansible.builtin.command: hades gc --owner {{ user.name }}
+  changed_when: true
+
+# Every run archives again under its own time stamp, so a partial archive from an interrupted run
+# never stands in for the home. Offboard archives are never pruned: the nightly backup's prune
+# pattern does not match them.
 - name: Archive the home
   ansible.builtin.command:
-    argv: [tar, -czf, "{{ user_offboard_archive }}", -C, "{{ ansible_facts.getent_passwd[user.name][4] }}", .]
-    creates: "{{ user_offboard_archive }}"
-  vars:
-    user_offboard_archive: "{{ backup_dir }}/{{ user.name }}-offboard-{{ ansible_facts.date_time.date }}.tar.gz"
-
-- name: Delete the account and its home
-  ansible.builtin.user:
-    name: "{{ user.name }}"
-    state: absent
-    remove: true
+    argv: [tar, -czf, "{{ backup_dir }}/{{ user.name }}-offboard-{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz",
+           -C, "{{ ansible_facts.getent_passwd[user.name][4] }}", .]
+  changed_when: true
 
 # The role created both directories for this uid.
 - name: Remove the per-uid resource policy
@@ -49,3 +47,9 @@
 - name: Reload systemd without the resource policy
   ansible.builtin.systemd_service:
     daemon_reload: true
+
+- name: Delete the account and its home
+  ansible.builtin.user:
+    name: "{{ user.name }}"
+    state: absent
+    remove: true
