@@ -79,7 +79,8 @@ host_uid_max: 60000
 # they exist on the host. Their uids are resolved at run time.
 host_isolation_service_accounts: [caddy, cloudflared, hades-postgres]
 
-# Verify playbook: addresses and accounts the tests use.
+# The loopback address Paseo binds (user role), and the addresses and accounts the verify
+# playbook's tests use.
 host_loopback_address: 127.0.0.1
 host_test_ssh_port: "{{ ansible_port | default(22) }}"
 host_test_unprivileged_user: nobody

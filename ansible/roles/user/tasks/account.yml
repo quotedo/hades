@@ -23,6 +23,9 @@
     - { path: "{{ user_home }}/.config" }
     - { path: "{{ user_home }}/.config/hades", mode: "0700" }
     - { path: "{{ user_home }}/.config/systemd" }
+    - { path: "{{ user_home }}/.config/systemd/user" }
+    - { path: "{{ user_home }}/.local" }
+    - { path: "{{ user_home }}/.local/bin" }
     - { path: "{{ user_home }}/.asdf" }
     - { path: "{{ user_home }}/.asdf/bin" }
     - { path: "/etc/systemd/system/user-{{ user.uid }}.slice.d", owner: root }

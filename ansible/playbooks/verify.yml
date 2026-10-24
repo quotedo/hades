@@ -52,3 +52,7 @@
     - name: Dev user tests
       ansible.builtin.import_tasks: tasks/user_tests.yml
       tags: [user]
+
+    - name: ADE daemon tests
+      ansible.builtin.import_tasks: tasks/ade_tests.yml
+      tags: [ade]

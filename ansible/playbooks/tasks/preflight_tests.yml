@@ -32,6 +32,17 @@
   changed_when: false
   failed_when: preflight_duplicate_uids.rc == 0
 
+- name: Preflight rejects orca without Tailscale
+  ansible.builtin.command:
+    cmd: >-
+      ansible-playbook -i {{ playbook_dir }}/../tests/inventories/orca-without-tailscale.yml
+      {{ playbook_dir }}/preflight.yml
+  delegate_to: localhost
+  run_once: true
+  register: preflight_orca_without_tailscale
+  changed_when: false
+  failed_when: preflight_orca_without_tailscale.rc == 0
+
 - name: Preflight accepts a valid inventory
   ansible.builtin.command:
     cmd: >-
@@ -50,5 +61,6 @@
       - "'Logins collide' in preflight_colliding.stdout"
       - "'[j-smith, jsmith]' in preflight_colliding.stdout"
       - "'Present dev_users share a uid: 3001 [alice, bob]' in preflight_duplicate_uids.stdout"
+      - "'alice list orca, which pairs over Tailscale' in preflight_orca_without_tailscale.stdout"
     quiet: true
   run_once: true

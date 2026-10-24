@@ -77,3 +77,18 @@
         # Each user is combined onto {'state': 'present'}, so one without state counts as present.
         hades_present_users: >-
           {{ [{'state': 'present'}] | product(dev_users) | map('combine') | selectattr('state', 'eq', 'present') | list }}
+
+    # Orca's pairing address must be one clients dial privately, so Orca comes with Tailscale.
+    # Unset, tailscale_enabled defaults to true when a present user lists orca (ingress role).
+    - name: Assert Tailscale is enabled when a present user lists orca
+      ansible.builtin.assert:
+        that:
+          - hades_orca_users == [] or tailscale_enabled | default(true) | bool
+        fail_msg: "{{ hades_orca_users | join(', ') }} list orca, which pairs over Tailscale: set tailscale_enabled: true"
+        quiet: true
+      vars:
+        # Each user is combined onto {'state': 'present', 'ades': []}, so one without state
+        # counts as present.
+        hades_orca_users: >-
+          {{ [{'state': 'present', 'ades': []}] | product(dev_users) | map('combine') | selectattr('state', 'eq', 'present')
+             | selectattr('ades', 'contains', 'orca') | map(attribute='name') | list }}

@@ -28,3 +28,15 @@ hex_repos: [] # noqa: var-naming[no-role-prefix]
 agent_clis: # noqa: var-naming[no-role-prefix]
   claude: "@anthropic-ai/claude-code"
   codex: "@openai/codex"
+
+# ADE daemons. paseo_version is a floor: a missing or older Paseo is brought up to it, a newer
+# one a developer installed with hades-ade-update is left alone. Orca is downloaded once at
+# orca_version and then updates itself. orca_terminal_memory_max is a shared default in roles/host.
+paseo_version: "0.12.0" # noqa: var-naming[no-role-prefix]
+orca_version: "1.4.232" # noqa: var-naming[no-role-prefix]
+# Off: Paseo does not add its own MCP server to the agents it starts.
+paseo_mcp_inject: false # noqa: var-naming[no-role-prefix]
+user_orca_releases_url: https://github.com/stablyai/orca/releases
+# Xvfb and the Electron libraries beyond Chrome's (host_chrome_packages), installed when any
+# present user lists orca.
+user_orca_packages: [xvfb, libnotify4, libsecret-1-0, libxss1, libxtst6, xdg-utils]

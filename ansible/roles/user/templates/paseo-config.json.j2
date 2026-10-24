@@ -1,0 +1,8 @@
+{{ {
+  'version': 1,
+  'daemon': {
+    'listen': host_loopback_address ~ ':' ~ user.paseo_port,
+    'relay': {'enabled': false},
+    'mcp': {'injectIntoAgents': paseo_mcp_inject | bool},
+  },
+} | to_nice_json(indent=2) }}

@@ -17,11 +17,16 @@
       - agent_clis is mapping
       - hex_repos is sequence
       - hex_repos is not string
+      - user_ade_users | selectattr('ades', 'contains', 'paseo') | map(attribute='paseo_port', default='') | reject('integer') | list == []
+      - user_ade_users | selectattr('ades', 'contains', 'orca') | map(attribute='orca_port', default='') | reject('integer') | list == []
     fail_msg: >-
-      every present dev_users entry needs a string name, an integer uid and a list ssh_keys;
-      hades_tool_paths, asdf_plugins and hex_repos must be lists, asdf_global_versions a mapping
-      with nodejs (the agent CLIs run on it) and agent_clis a mapping of command to npm package
+      every present dev_users entry needs a string name, an integer uid and a list ssh_keys, and an
+      integer paseo_port or orca_port for each ADE it lists; hades_tool_paths, asdf_plugins and
+      hex_repos must be lists, asdf_global_versions a mapping with nodejs (the agent CLIs run on
+      it) and agent_clis a mapping of command to npm package
     quiet: true
+  vars:
+    user_ade_users: "{{ user_present | selectattr('ades', 'defined') }}"
 
 - name: Assert each Hex repository is complete and its keys are in the controller environment
   ansible.builtin.assert:
@@ -38,6 +43,14 @@
 
 - name: GitHub CLI
   ansible.builtin.import_tasks: gh.yml
+
+- name: Install the libraries Orca needs
+  ansible.builtin.apt:
+    name: "{{ user_orca_packages }}"
+    state: present
+  environment:
+    NEEDRESTART_SUSPEND: "1"
+  when: user_present | map(attribute='ades', default=[]) | flatten is contains('orca')
 
 - name: Read the existing accounts
   ansible.builtin.getent:

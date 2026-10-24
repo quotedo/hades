@@ -1,0 +1,9 @@
+---
+dev_servers:
+  hosts:
+    box:
+      ansible_connection: local
+      hades_domain: valid.example.test
+      tailscale_enabled: false
+      dev_users:
+        - { name: alice, uid: 2001, ades: [paseo, orca], paseo_port: 7001, orca_port: 7002 }
