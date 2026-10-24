@@ -23,7 +23,7 @@ func TestUpPhoenixServerHappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := out.Manifest
-	if m.Port != 4100 || m.Label != "demo-feature-x" || m.Host != "demo-feature-x.example.test" || !reflect.DeepEqual(m.DBBases, []string{"demo_dev", "demo_test"}) || m.DBSuffix != "_roman_feature_x" || m.Vhost != "" {
+	if m.Port != 4100 || m.Label != "demo-feature-x" || m.Host != "demo-feature-x.example.test" || !reflect.DeepEqual(m.DBBases, []string{"demo_dev", "demo_test"}) || m.DBSuffix != "_alice_feature_x" || m.Vhost != "" {
 		t.Fatalf("%+v", m)
 	}
 	if owner, _ := d.Reg.PortOwner(4100); owner != c.Worktree {
@@ -417,11 +417,11 @@ func TestUpRerunKeepsRecordedBasesAndVhost(t *testing.T) {
 		t.Fatalf("ensured %v env %v", rmq.ensured, toMap(out.Env))
 	}
 
-	d.PG.(*fakePG).names = []string{"demo_dev_roman_feature_x", "only_this_roman_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x", "only_this_alice_feature_x"}
 	if _, err := Down(context.Background(), d, c, true); err != nil {
 		t.Fatal(err)
 	}
-	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_roman_feature_x", "only_this_roman_feature_x"}) {
+	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_alice_feature_x", "only_this_alice_feature_x"}) {
 		t.Fatal(got)
 	}
 	if !reflect.DeepEqual(rmq.deleted, []string{"demo-feature-x"}) {

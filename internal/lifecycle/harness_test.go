@@ -93,22 +93,22 @@ func newServerDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 		Run:      &execx.Fake{},
 		PG:       &fakePG{},
 		Rabbit:   nil,
-		User:     UserInfo{Name: "roman", UID: os.Getuid(), Home: t.TempDir()},
+		User:     UserInfo{Name: "alice", UID: os.Getuid(), Home: t.TempDir()},
 		Version:  "test",
 		Now:      time.Now,
 		Log:      io.Discard,
 		Bin:      "/usr/local/bin/hades",
 		LookPath: func(string) (string, error) { return "", exec.ErrNotFound },
-		// The test process is "roman"; "other" is a user owning no files.
+		// The test process is "alice"; "other" is a user owning no files.
 		LoginOf: func(uid int) (string, error) {
 			if uid == os.Getuid() {
-				return "roman", nil
+				return "alice", nil
 			}
 			return "", fmt.Errorf("unknown uid %d", uid)
 		},
 		UIDOf: func(login string) (int, error) {
 			switch login {
-			case "roman":
+			case "alice":
 				return os.Getuid(), nil
 			case "other":
 				return os.Getuid() + 1, nil
@@ -122,7 +122,7 @@ func newServerDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 // newServerDepsSharing returns Deps and Context for a second worktree,
 // feature/y of another demo checkout, sharing d's host, registry and fakes.
 // The user is named userName with the same UID, because tests cannot chown:
-// "roman" is the same user, "other" a manifest whose user field differs from
+// "alice" is the same user, "other" a manifest whose user field differs from
 // its file owner.
 func newServerDepsSharing(t *testing.T, d Deps, fixture, userName string) (Deps, wtctx.Context) {
 	t.Helper()

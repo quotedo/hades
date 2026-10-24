@@ -10,7 +10,7 @@ import (
 )
 
 func TestSanitize(t *testing.T) {
-	cases := map[string]string{"Fix_Login/2": "fix-login-2", "--a--": "a", "???": "", "Roman Dev Server": "roman-dev-server"}
+	cases := map[string]string{"Fix_Login/2": "fix-login-2", "--a--": "a", "???": "", "Alice Dev Server": "alice-dev-server"}
 	for in, want := range cases {
 		if got := Sanitize(in); got != want {
 			t.Errorf("Sanitize(%q)=%q want %q", in, got, want)
@@ -79,7 +79,7 @@ func TestSuffix(t *testing.T) {
 	if a, b := Suffix("alice-feature", "x"), Suffix("alice", "feature/x"); a == b {
 		t.Fatalf("both %q", a)
 	}
-	if a, b := Suffix("roman_feature", "x"), Suffix("alice", "feature_x"); a == b {
+	if a, b := Suffix("alice_feature", "x"), Suffix("alice", "feature_x"); a == b {
 		t.Fatalf("both %q", a)
 	}
 	// 31 bytes ending in a digit: the trailing "_" makes 32, no hash.
