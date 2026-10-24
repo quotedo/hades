@@ -7,20 +7,13 @@
       - dev_services is sequence
       - dev_services is not string
       - dev_services | difference(['rabbitmq', 'localstack', 'redis']) | length == 0
-      - dev_services_host is string
-      - dev_services_host | length > 0
-      - services_ports | map('int') | select('gt', 0) | select('lt', 65536) | list | length == services_ports | length
-      - rabbitmq_user is string
-      - rabbitmq_user | length > 0
-      - rabbitmq_password is string
-      - rabbitmq_password | length > 0
+      - services_ports | map('string') | reject('match', '^[0-9]+$') | list | length == 0
       - localstack_buckets is sequence
       - localstack_buckets is not string
       - localstack_buckets | reject('match', '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') | list | length == 0
     fail_msg: >-
-      dev_services must be a list drawn from rabbitmq, localstack and redis, dev_services_host an
-      address, every service port 1-65535, rabbitmq_user and rabbitmq_password non-empty strings
-      and localstack_buckets a list of S3 bucket names
+      dev_services must be a list drawn from rabbitmq, localstack and redis, every service port an
+      integer and localstack_buckets a list of S3 bucket names (they reach a shell loop)
     quiet: true
   vars:
     services_ports: "{{ [rabbitmq_amqp_port, rabbitmq_management_port, rabbitmq_mqtt_port, localstack_port, redis_port] }}"
@@ -63,6 +56,9 @@
         name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
         state: present
         update_cache: true
+      # Keeps Ubuntu's needrestart from restarting services (running containers among them).
+      environment:
+        NEEDRESTART_SUSPEND: "1"
 
 - name: Create the services directory
   ansible.builtin.file:

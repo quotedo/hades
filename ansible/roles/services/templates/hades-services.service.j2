@@ -11,7 +11,6 @@ RemainAfterExit=yes
 WorkingDirectory={{ services_dir }}
 ExecStart=/usr/bin/docker compose up -d --remove-orphans
 Restart=on-failure
-RestartSec=10
 
 [Install]
 WantedBy=multi-user.target

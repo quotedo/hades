@@ -41,29 +41,19 @@
   register: services_test_ss
   changed_when: false
 
-# Every port of a listed service has listeners, and all of them are on dev_services_host.
+# Each port of a listed service has listeners, and every one of them is on dev_services_host.
 - name: Assert the service ports listen on dev_services_host only
   ansible.builtin.assert:
     that:
-      - services_test_bad | length == 0
-    fail_msg: "ports not bound to {{ dev_services_host }} only: {{ services_test_bad | join('; ') }}"
+      - services_test_lines | length > 0
+      - services_test_lines | reject('search', ' ' ~ (dev_services_host | regex_escape) ~ ':' ~ item ~ ' ') | list | length == 0
+    fail_msg: "port {{ item }} listeners: {{ services_test_lines | join(' | ') or 'none' }}"
     quiet: true
+  loop: >-
+    {{ dev_services | map('extract', {'rabbitmq': [rabbitmq_amqp_port, rabbitmq_management_port, rabbitmq_mqtt_port],
+                                      'localstack': [localstack_port], 'redis': [redis_port]}) | flatten }}
   vars:
-    services_test_ports: >-
-      {{ dev_services | map('extract', {'rabbitmq': [rabbitmq_amqp_port, rabbitmq_management_port, rabbitmq_mqtt_port],
-                                        'localstack': [localstack_port], 'redis': [redis_port]}) | flatten }}
-    services_test_listeners: >-
-      {{ services_test_ss.stdout_lines | map('split') | map(attribute=3)
-         | map('regex_search', '^(.*):([0-9]+)$', '\1', '\2') | list }}
-    services_test_bad: >-
-      {%- set out = [] -%}
-      {%- for p in services_test_ports -%}
-      {%- set addrs = services_test_listeners | selectattr('1', 'equalto', p | string) | map(attribute='0') | list -%}
-      {%- if addrs | length == 0 or addrs | reject('equalto', dev_services_host) | list | length > 0 -%}
-      {%- set _ = out.append(p ~ ' on ' ~ (addrs | join(', ') or 'nothing')) -%}
-      {%- endif -%}
-      {%- endfor -%}
-      {{ out }}
+    services_test_lines: "{{ services_test_ss.stdout_lines | select('search', ':' ~ item ~ ' ') | list }}"
 
 - name: Read the shared services unit
   ansible.builtin.systemd_service:
