@@ -75,6 +75,17 @@
   loop_control:
     label: "{{ item.name }}"
 
+# Vacuous where nothing listens on a blocked port.
+- name: Connect to each blocked port as each dev user, which must be refused
+  ansible.builtin.command: runuser -u {{ item.0.name }} -- nc -z -w 3 {{ host_loopback_address }} {{ item.1 }}
+  become: true
+  register: user_test_blocked
+  changed_when: false
+  failed_when: user_test_blocked.rc == 0
+  loop: "{{ user_present | product((protected | default({})).blocked_ports | default([])) | list }}"
+  loop_control:
+    label: "{{ item.0.name }} to {{ item.1 }}"
+
 - name: Run hades doctor as each dev user
   ansible.builtin.command: runuser -l {{ item.name }} -c 'hades doctor'
   become: true
@@ -85,7 +96,6 @@
   loop_control:
     label: "{{ item.name }}"
 
-# hades doctor may fail only on postgres or rabbitmq until those roles have run (exit 0 in Task 12).
 - name: Assert each dev user's account, resource policy and login environment
   ansible.builtin.assert:
     that:
@@ -107,9 +117,7 @@
       - user_test_sudo.results[i].rc == 1
       - user_test_sudo.results[i].stderr is search('^sudo:', multiline=True)
       - user_test_doctor.results[i].stdout is search('^ok +host-config:', multiline=True)
-      - >-
-        user_test_doctor.results[i].rc == 0 or (user_test_doctor.results[i].rc == 1 and user_test_doctor_fails != []
-        and user_test_doctor_fails | reject('match', '^FAIL (postgres|rabbitmq):') | list == [])
+      - user_test_doctor.results[i].rc == 0
     fail_msg: |-
       {{ item.name }}: passwd {{ user_test_pw | join(':') }}; groups {{ user_test_groups | join(',') }}
       linger {{ user_test_linger.results[i].stdout }}; user@ LimitNOFILE {{ user_test_manager.results[i].status.LimitNOFILE }},
@@ -126,7 +134,6 @@
     index_var: i
     label: "{{ item.name }}"
   vars:
-    user_test_doctor_fails: "{{ user_test_doctor.results[i].stdout_lines | select('match', '^FAIL ') | list }}"
     user_test_pw: "{{ ansible_facts.getent_passwd[item.name] | default(['missing'] * 6) }}"
     user_test_groups: >-
       {{ ansible_facts.getent_group | dict2items | selectattr('value.2', 'search', '(^|,)' ~ item.name ~ '(,|$)') | map(attribute='key') | list }}

@@ -28,8 +28,15 @@
     NEEDRESTART_SUSPEND: "1"
   when: not (ansible_check_mode and ingress_tailscale_repo is changed)
 
+# Only where ufw is installed: without it nothing blocks tailscale0.
+- name: Stat ufw
+  ansible.builtin.stat:
+    path: /usr/sbin/ufw
+  register: ingress_ufw
+
 - name: Allow inbound traffic on the Tailscale interface
   community.general.ufw:
     rule: allow
     direction: in
     interface: tailscale0
+  when: ingress_ufw.stat.exists

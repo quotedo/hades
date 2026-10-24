@@ -143,6 +143,13 @@
       ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ acceptance_wt }} && hades down --strict'
       changed_when: true
 
+    - name: Assert Caddy no longer routes the host name
+      ansible.builtin.uri:
+        url: http://{{ ingress_loopback_address }}:{{ caddy_port }}/
+        headers:
+          Host: "{{ acceptance_entry.Host }}"
+        status_code: 404
+
     - name: Stat the site files and the port claim
       ansible.builtin.stat:
         path: "{{ item }}"

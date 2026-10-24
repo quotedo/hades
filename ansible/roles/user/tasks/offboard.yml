@@ -28,11 +28,11 @@
 
 # Every run archives again under its own time stamp, so a partial archive from an interrupted run
 # never stands in for the home. Offboard archives are never pruned: the nightly backup's prune
-# pattern does not match them.
+# pattern does not match them. umask 077: the archive is 0600, like the nightly ones.
 - name: Archive the home
-  ansible.builtin.command:
-    argv: [tar, -czf, "{{ backup_dir }}/{{ user.name }}-offboard-{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz",
-           -C, "{{ ansible_facts.getent_passwd[user.name][4] }}", .]
+  ansible.builtin.shell: >-
+    umask 077; tar -czf {{ (backup_dir ~ '/' ~ user.name ~ '-offboard-' ~ ansible_facts.date_time.iso8601_basic_short ~ '.tar.gz') | quote }}
+    -C {{ ansible_facts.getent_passwd[user.name][4] | quote }} .
   changed_when: true
 
 # The role created both directories for this uid.
