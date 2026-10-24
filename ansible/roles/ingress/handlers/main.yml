@@ -8,3 +8,12 @@
     daemon_reload: true
   when: not ansible_check_mode
   listen: caddy restart
+
+# A changed token or unit applies at start only.
+- name: Restart cloudflared
+  ansible.builtin.systemd_service:
+    name: cloudflared.service
+    state: restarted
+    daemon_reload: true
+  when: not ansible_check_mode
+  listen: cloudflared restart

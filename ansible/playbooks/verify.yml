@@ -8,14 +8,14 @@
   hosts: dev_servers
   gather_facts: false
   roles:
-    # Loads the shared defaults (roles/host/defaults/main.yml) at role-default precedence, so
-    # inventory values still win; the `never` tag keeps the role's tasks from running here.
-    # Do not use vars_files instead: play vars_files outrank inventory host vars.
-    - { role: host, tags: [never] }
-    - { role: postgres, tags: [never] }
-    - { role: services, tags: [never] }
-    # Its tasks carry their own tags (cloudflared, tailscale), and requesting one of those selects a
-    # task past `never`; `when: false` keeps them from running here as well.
+    # Listed only to load each role's defaults for the tests, at role-default precedence, so
+    # inventory values still win. Do not use vars_files instead: play vars_files outrank inventory
+    # host vars. `never` keeps the roles' tasks out of the output; `when: false` keeps a task that
+    # carries its own tag (cloudflared, tailscale, ...) from running under `--tags <that tag>`,
+    # which selects it past `never`.
+    - { role: host, tags: [never], when: false }
+    - { role: postgres, tags: [never], when: false }
+    - { role: services, tags: [never], when: false }
     - { role: ingress, tags: [never], when: false }
   tasks:
     - name: Preflight tests

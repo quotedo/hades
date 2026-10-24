@@ -42,16 +42,41 @@
     NEEDRESTART_SUSPEND: "1"
   when: not (ansible_check_mode and ingress_cloudflared_repo is changed)
 
-# Once. cloudflared writes the token to /etc/cloudflared/ mode 0600 and the unit reads it with
-# --token-file, so it is in no world-readable file and no process list. apt updates the package,
-# hence no self-update timer.
-- name: Install the tunnel service with its token
-  ansible.builtin.command:
-    argv:
-      - cloudflared
-      - service
-      - install
-      - --no-update-service
-      - "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_TUNNEL_TOKEN') }}"
-    creates: /etc/systemd/system/cloudflared.service
+- name: Create the cloudflared directory
+  ansible.builtin.file:
+    path: /etc/cloudflared
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+# The unit reads it with --token-file, so the token is in no world-readable file and no process
+# list. A rotated token is written, and the connector restarted, on the next run.
+- name: Write the tunnel token
+  ansible.builtin.copy:
+    content: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_TUNNEL_TOKEN') }}"
+    dest: /etc/cloudflared/token
+    owner: root
+    group: root
+    mode: "0600"
   no_log: true
+  notify: cloudflared restart
+
+- name: Write the cloudflared unit
+  ansible.builtin.template:
+    src: cloudflared.service.j2
+    dest: /etc/systemd/system/cloudflared.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: ingress_cloudflared_unit
+  notify: cloudflared restart
+
+# In check mode a unit file that is about to be written does not exist yet.
+- name: Enable and start cloudflared
+  ansible.builtin.systemd_service:
+    name: cloudflared.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not (ansible_check_mode and ingress_cloudflared_unit is changed)
