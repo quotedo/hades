@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/quotedo/hades/internal/execx"
 	"github.com/quotedo/hades/internal/version"
 )
 
@@ -23,6 +24,7 @@ type Context struct {
 	Stdout, Stderr io.Writer
 	Getenv         func(string) string
 	Flags          Globals
+	Runner         execx.Runner // runs external commands; tests pass an execx.Fake
 }
 
 // Command runs one subcommand with the arguments left after global flag
@@ -45,12 +47,13 @@ var commands = map[string]Command{
 	"env":          envCmd,
 	"port":         port,
 	"init":         initCmd,
+	"join":         join,
 }
 
 // Main parses global flags (before and after the command word), dispatches
 // to the command and returns the exit code.
 func Main(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
-	ctx := &Context{Stdout: stdout, Stderr: stderr, Getenv: getenv}
+	ctx := &Context{Stdout: stdout, Stderr: stderr, Getenv: getenv, Runner: &execx.Real{}}
 	g := &ctx.Flags
 
 	fs := flag.NewFlagSet("hades", flag.ContinueOnError)
