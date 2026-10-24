@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -104,9 +105,10 @@ func TestDryRunGitBranchOnlyListingForms(t *testing.T) {
 	}
 }
 
-func TestToolPrepend(t *testing.T) {
-	got := execx.ToolPrepend("/h", []string{"/e"})
-	if strings.Join(got, ",") != "/h/.asdf/shims,/h/.local/bin,/e" {
-		t.Fatal(got)
+func TestToolPrependIncludesMiseShims(t *testing.T) {
+	got := execx.ToolPrepend("/h", []string{"/x"})
+	want := []string{"/h/.asdf/shims", "/h/.local/share/mise/shims", "/usr/local/share/mise/shims", "/h/.local/bin", "/x"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %q, want %q", got, want)
 	}
 }
