@@ -12,7 +12,7 @@ The Ansible collection in `ansible/` turns one host into a multi-user dev server
 Start from `ansible/inventory.example.yml`. Per host:
 
 - `hades_domain`: worktree sites are `https://<label>.<domain>`. `hades_label_template` is a YAML `!unsafe` string so Ansible never expands the CLI's placeholders.
-- `dev_services`: any of `rabbitmq`, `localstack`; empty means no shared-services stack.
+- `dev_services`: any of `rabbitmq`, `localstack`, `redis`; empty means no shared-services stack.
 - `dev_users`: `name`, `uid`, `state` (`present` or `absent`), `ssh_keys`, `ades` (`paseo`, `orca`), `paseo_port`, `orca_port`, `gpg_key`, `repos`. Logins must stay unique after dropping every character outside `[a-z0-9]`.
 - `protected`, for workloads that were on the host before hades:
   - `floor`: guarantees `system.slice` memory and CPU weight, and gives `user.slice` a CPU weight.
@@ -90,8 +90,9 @@ rm ~/.config/systemd/user/<ade>.service
 
 - `table inet hades` is loaded by its own `hades-nftables.service`. The role never enables `nftables.service` and never edits `/etc/nftables.conf`, which may flush ufw, Docker and other rules at boot.
 - Its `output` chain rejects new TCP connections to the dev ports from any uid outside root, the present dev users and the `caddy`, `cloudflared` and `hades-postgres` accounts. The dev ports are the worktree range, the dev Postgres, the shared services, Caddy and the ADE ports. A second rule keeps dev users off `protected.blocked_ports`. Both rules match only connections to this host's own addresses.
+- Isolation hooks `output` only, so traffic from a container is not matched: root and members of group `docker` can reach host-bound dev ports through one.
 - Per dev user, the role writes `user-<uid>.slice.d/20-hades.conf` (memory, CPU, tasks) and `user@<uid>.service.d/50-hades.conf` (open files). Caps on protected units are `20-hades-cap.conf`. The `20-` names sort before the `50-*.conf` files of `systemctl set-property`, so an operator's own values still win.
-- Docker is never restarted by the role (`docker_restart_on_change: false`). New log options reach containers created after the operator's next Docker restart.
+- Docker is never restarted by the role (`docker_restart_on_change: false`). New log options reach containers created after the operator's next Docker restart. A log driver other than `json-file` or `local` is left alone, with a notice in the run output.
 - Backups run nightly. Each user's ADE state and agent logins go to `backup_dir`, and the newest `host_backup_keep` archives per user are kept.
 
 ## Offboarding
@@ -100,11 +101,11 @@ Set the user's `state: absent` and apply `--tags user`. The role then:
 
 1. Stops `user@<uid>.service`, disables lingering and kills the user's remaining processes.
 2. Releases the user's worktrees with `hades gc --owner <name>`.
-3. Archives the home to `backup_dir/<name>-offboard-<YYYYMMDDTHHMMSS>.tar.gz`. Every run archives again under its own time stamp. Offboard archives are never pruned, and a fresh dev home is about 2 GB because of asdf and npm.
+3. Archives the home to `backup_dir/<name>-offboard-<YYYYMMDDTHHMMSS>.tar.gz`. Every run archives again under its own time stamp. Offboard archives are never pruned, and a fresh dev home is about 2 GB because of asdf and npm. The user's nightly archives, `<name>-YYYY-MM-DD.tar.gz`, are not pruned either: delete them by hand.
 4. Removes the per-uid drop-in directories and reloads systemd.
 5. Deletes the account and its home last, so the next run finishes an interrupted one.
 
-The reference host's throwaway dev user was offboarded this way. Its `state: absent` entry stays in the inventory, so re-runs stay idempotent and `verify --tags offboard` keeps a subject.
+Keep the `state: absent` entry: `verify --tags offboard` expects it.
 
 `state: absent` applies only to accounts hades created. The run fails for an existing account that is not in group `hades` or whose uid differs from the inventory. An absent login that does not exist is a no-op, but `verify --tags offboard` expects an archive for every absent entry, so remove entries for logins that never existed.
 
@@ -116,12 +117,12 @@ The reference host's throwaway dev user was offboarded this way. Its `state: abs
 |---|---|---|
 | `preflight` | preflight rejects the bad fixtures in `tests/inventories/` and accepts the valid one; no inventory literal appears in the roles or playbooks | 4 s |
 | `host` | registry, host config, sudoers rule, kernel settings, `hades.slice`, set-property caps still effective, CPU governor | 144 s |
-| `isolation` | the rule table is loaded at boot; a throwaway non-dev account is refused while root and ssh still connect | 44 s |
+| `isolation` | the rule table is loaded at boot; a non-dev account (`nobody`) is refused on the dev ports while root and ssh still connect | 44 s |
 | `ops` | gc and backup timers, a backup run, `hades-status`, journald and Docker log caps, Chrome headless with its sandbox | 137 s |
 | `postgres` | dev cluster on loopback in `hades.slice`, `pg_hba.conf`, credentials, wrong password refused | 26 s |
 | `services` | containers running in `hades.slice` on loopback, no dev user in group docker, RabbitMQ and LocalStack answer | 26 s |
 | `ingress` | Caddy on loopback only, API on its unix socket, catch-all 404, gated paths 403 without the Access header; cloudflared when a token is set | 48 s |
-| `user` | accounts, lingering, resource policy, login toolchain, no sudo, `hades doctor` | 58 s |
+| `user` | accounts, lingering, resource policy, login toolchain, no sudo, blocked ports refused, `hades doctor` | 58 s |
 | `ade` | each ADE's unit and listeners, Paseo's password, Orca's port in the input chain, no stale units | 44 s |
 | `offboard` | absent users gone and archived, GPG keys exported | 17 s |
 | `protected` | floor, caps and private homes | 60 s |
@@ -132,12 +133,10 @@ The `acceptance` check runs only with `-e acceptance_user=<a throwaway dev user>
 1. It commits the project and adds a worktree.
 2. It runs `hades up`.
 3. It checks the `hades ls` entry, both site files, Caddy routing to the worktree port, the dev database and loopback isolation, and that `hades doctor` passes.
-4. It runs `hades down` and checks that the sites, the port claim and the database are gone.
+4. It runs `hades down` and checks that the host name answers 404 and the sites, the port claim and the database are gone.
 5. It runs `hades gc` as root.
 
 It cleans up after itself even when a check fails.
-
-The reference host has had no throwaway dev user since its offboarding, so its verify runs now skip `acceptance`.
 
 `-e reboot_test=true` reboots the host after the other checks and repeats the `host`, `isolation`, `postgres`, `services`, `ingress` and `ade` checks. It has not been exercised on the reference host.
 
@@ -146,4 +145,6 @@ The reference host has had no throwaway dev user since its offboarding, so its v
 - Hosts whose sshd uses `AllowUsers` need a drop-in that lists the dev users. This is not automated.
 - A changed open-files limit reaches an already running user manager only after it restarts.
 - A partly downloaded Chrome for Testing sticks behind its `creates:` guard. Remove `browsers/` under `chrome_root` and run again.
+- On a host that had no Postgres, the role sets `create_main_cluster = false` in `/etc/postgresql-common/createcluster.d/hades.conf`, so no package creates a `<major>/main` cluster there.
+- The design's load test (acceptance 5) is not implemented. The resource numbers are the design's starting values.
 - `hades-status` embeds the dev Postgres password. That password is readable by every local user anyway, by design of the dev cluster.
