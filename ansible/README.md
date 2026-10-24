@@ -1,11 +1,9 @@
 # quotedo.hades
 
-An Ansible collection that turns an Ubuntu or Debian x86_64 host into a multi-user dev server for hades. Inventory, secrets, interactive steps, offboarding and the verify tags are in [docs/server.md](../docs/server.md).
+The Ansible collection that turns an Ubuntu host into a hades dev server. Everything an operator needs is in [docs/server.md](../docs/server.md); what developers see is in [docs/developer.md](../docs/developer.md).
 
 ```sh
 ansible-playbook -i inventory.yml playbooks/preflight.yml
-ansible-playbook -i inventory.yml playbooks/site.yml --tags host --skip-tags cloudflared   # then postgres, services, ingress, user, protected, vpn
-ansible-playbook -i inventory.yml playbooks/verify.yml --skip-tags cloudflared
+ansible-playbook -i inventory.yml playbooks/site.yml --tags host   # then postgres, services, ingress, user, protected, vpn
+ansible-playbook -i inventory.yml playbooks/verify.yml --tags host  # per tag
 ```
-
-Drop `--skip-tags cloudflared` once `CF_ACCOUNT_ID` and `CF_API_TOKEN` are exported.

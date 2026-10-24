@@ -1,47 +1,86 @@
-# hades
+# Hades
 
-Hades is a Go CLI that sets up and tears down a git worktree for parallel development: a port, a URL, databases, an environment file, secrets and MCP wiring. ADE worktree hooks (Paseo, Orca, worktrunk) call it, and so can you from a shell.
+A dev server for agentic development, and the CLI that runs on it.
 
-It ships as two binaries: `hades`, and `hades-port`, a small entry point for Paseo's port hook.
+Several developers share one Linux box. Each has their own account, their own agentic development
+environment (ADE: [Paseo](https://getpaseo.com) or [Orca](https://github.com/stablyai/orca)) running as
+a daemon, and their own git worktrees. Every worktree an agent opens gets, automatically, its own
+port, databases, environment file and a public URL behind a login. The CLI, `hades`, is what the
+ADE's worktree hooks call to make that happen; it also works alone on a laptop.
 
-## Install
+## How it works
 
-Download the archive for your platform from GitHub Releases and put `hades` and `hades-port` on `PATH`, or:
-
-```sh
-go install github.com/quotedo/hades/cmd/...@latest
+```mermaid
+flowchart LR
+  laptop["Developer laptop<br/>Paseo or Orca app, browser"]
+  cf["Cloudflare Access + Tunnel<br/>login by email PIN"]
+  laptop -- "SSH or Tailscale" --> ade
+  laptop -- "https://LABEL.DOMAIN" --> cf
+  cf --> caddy
+  subgraph server["Dev server (one account per developer)"]
+    ade["ADE daemon<br/>Paseo or Orca, per user"]
+    cli["hades up / hades down<br/>worktree hooks"]
+    reg[("Registry<br/>ports, sites, manifests")]
+    pg[("Dev Postgres<br/>databases per worktree")]
+    caddy["Caddy<br/>one site per worktree"]
+    app["Worktree app<br/>on its own port"]
+    store["Shared tool store<br/>Node, Erlang, Elixir, Python, Go, agent CLIs"]
+    ade --> cli
+    cli --> reg
+    cli --> pg
+    cli --> caddy
+    caddy --> app
+    app -.-> store
+  end
 ```
 
-darwin/arm64 and linux/amd64 are first class; linux/arm64 and darwin/amd64 are built but untested. Details in [docs/install.md](docs/install.md).
+| Piece | What it does |
+|---|---|
+| `hades` CLI | Gives a git worktree a port, a label, databases, `.env.worktree`/`.envrc`, a Caddy site, MCP wiring; takes them away on `down`. Called by ADE hooks or by hand. |
+| Ansible collection `quotedo.hades` | Turns an Ubuntu box into the server: accounts, ADE daemons, the tool store, dev Postgres, RabbitMQ and LocalStack, Caddy, Cloudflare tunnel and Access, loopback isolation, backups, optional intranet VPN. |
 
 ## Quick start
 
+### Developer on an existing server
+
+1. Get an account from the server's administrator (your SSH public key, your email for the login page).
+2. Add the box to your laptop's `~/.ssh/config` with `ForwardAgent yes`, and accept the Tailscale share if the box uses one.
+3. Connect your ADE: Paseo Desktop "Remote SSH" with the password the administrator gives you, or read Orca's pairing URL from `journalctl --user -u orca.service` on the box.
+4. Clone your project on the box and open a worktree from the ADE. The hook runs `hades up`; the app is at `https://<project>-<branch>.<domain>` after you log in with your email.
+5. `hades ls`, `hades status`, `hades env` show what you have; closing the worktree runs `hades down`.
+
+Details: [Developer guide](docs/developer.md).
+
+### Operator setting up a server
+
+1. Install Ansible (`ansible-core` 2.16+) and the collection's requirements; copy `ansible/inventory.example.yml` to a private inventory and fill in the domain, tools, users and the pre-existing workloads to protect.
+2. Export the secrets from a private `.env` (Cloudflare account id and API token; the VPN config if used).
+3. `ansible-playbook -i inventory.yml playbooks/preflight.yml`, then `site.yml` one tag group at a time, then `verify.yml`.
+4. Set the administrator's sudo password, run `tailscale up` if Orca or Tailscale sharing is wanted, hand each developer their Paseo password.
+
+Details: [Server reference](docs/server.md).
+
+### CLI alone on a laptop
+
 ```sh
-cd your-repo
-hades init          # writes hades.toml and ADE hook files, updates .gitignore
-git add -A && git commit -m "add hades"
+go install github.com/quotedo/hades/cmd/...@latest   # or download a release
+cd your-repo && hades init && git add -A && git commit -m "add hades"
 ```
 
-Create a worktree through your ADE; its hook runs `hades up`. Then:
-
-```sh
-hades ls            # worktrees known on this machine
-```
-
-`hades down` (run by the ADE's teardown hook) removes what `up` created. `hades doctor` reports what is misconfigured.
+Open a worktree from your ADE; `hades up` runs on your laptop's Postgres with a local port and no URL.
+Details: [CLI reference](docs/cli.md).
 
 ## Documentation
 
-- [Install](docs/install.md)
-- [Configuration](docs/configuration.md): host config, `hades.toml`, what `up` writes
-- [ADE integration](docs/ades.md): Paseo, Orca, worktrunk hooks
-- Design: [hades CLI](docs/superpowers/specs/2026-10-23-hades-cli-design.md) and [server](docs/superpowers/specs/2026-10-23-hades-server-design.md)
+- [Developer guide](docs/developer.md): using a hades server day to day.
+- [Server reference](docs/server.md): inventory, secrets, apply, verify, onboarding, offboarding, upgrades.
+- [CLI reference](docs/cli.md): commands, `hades.toml`, host config, ADE hooks, environment variables.
+- Design records: [CLI](docs/superpowers/specs/2026-10-23-hades-cli-design.md), [server v1](docs/superpowers/specs/2026-10-23-hades-server-design.md), [server v2](docs/superpowers/specs/2026-10-24-hades-server-v2-design.md).
 
-## Safety rules
+## Guarantees
 
-- Hades never drops a database, releases a port, removes a site or deletes a vhost that the manifest it is acting on does not list.
-- It never acts on another user's manifest, except `gc` as root on vanished worktrees.
-- It never modifies tracked files other than the MCP configs, and never commits, pushes or changes branches.
-- `up` rolls back what it claimed in the current run on failure, and nothing claimed earlier.
-- `down` is best effort and exits 0 unless `--strict`; each skipped step is printed.
-- Host credentials reach project commands only as the documented environment variables and are written nowhere but the two env files in the worktree.
+- `hades` never drops a database, releases a port, removes a site or deletes a vhost that the manifest it acts on does not list, and never acts on another user's manifest (except `gc` as root, on vanished worktrees).
+- It modifies no tracked file other than the MCP configs, and never commits, pushes or changes branches.
+- `up` rolls back what it claimed in the failing run, nothing older. `down` is best effort and exits 0 unless `--strict`.
+- Credentials reach project commands only as documented environment variables, written nowhere but the two env files in the worktree.
+- On the server: nobody but the one administrator has sudo; developers cannot install software; every secret the playbooks handle travels over stdin, never through a file on the controller or a command line.
