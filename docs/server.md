@@ -38,8 +38,19 @@ ansible-playbook -i inventory.yml playbooks/verify.yml --skip-tags cloudflared
 ```
 
 - Run `preflight.yml` first on a new inventory; it changes nothing.
-- On a slow link, apply `site.yml` one tag at a time, in order: `host`, `postgres`, `services`, `ingress`, `user`, `protected`. The loopback isolation rules are recomputed after every tagged run.
+- On the reference host a full `site.yml` exceeds a 10-minute command timeout, so it is applied one tag group at a time, in order: `host`, `postgres`, `services`, `ingress`, `user`, `protected`. The loopback isolation rules are recomputed after every tagged run.
 - From a site repository, install the collection with `ansible-galaxy collection install git+https://github.com/quotedo/hades.git#/ansible/` and wrap `quotedo.hades.site` and `quotedo.hades.verify` with `import_playbook`.
+
+Apply times on the reference host with nothing to change:
+
+| Tag group | Seconds | With `ANSIBLE_PIPELINING=True` |
+|---|---|---|
+| `host` | 279 | 82 |
+| `postgres` | 78 | 23 |
+| `services` | 66 | 22 |
+| `ingress` (`--skip-tags cloudflared`) | 73 | 24 |
+| `user` | 203 (one dev user) | 100 (two dev users) |
+| `protected` | 140 | 41 |
 
 ## Interactive steps, in order
 
@@ -93,6 +104,8 @@ Set the user's `state: absent` and apply `--tags user`. The role then:
 4. Removes the per-uid drop-in directories and reloads systemd.
 5. Deletes the account and its home last, so the next run finishes an interrupted one.
 
+The reference host's throwaway dev user was offboarded this way. Its `state: absent` entry stays in the inventory, so re-runs stay idempotent and `verify --tags offboard` keeps a subject.
+
 `state: absent` applies only to accounts hades created. The run fails for an existing account that is not in group `hades` or whose uid differs from the inventory. An absent login that does not exist is a no-op, but `verify --tags offboard` expects an archive for every absent entry, so remove entries for logins that never existed.
 
 ## Verify
@@ -102,17 +115,17 @@ Set the user's `state: absent` and apply `--tags user`. The role then:
 | Tag | Proves | Time on the reference host |
 |---|---|---|
 | `preflight` | preflight rejects the bad fixtures in `tests/inventories/` and accepts the valid one; no inventory literal appears in the roles or playbooks | 4 s |
-| `host` | registry, host config, sudoers rule, kernel settings, `hades.slice`, set-property caps still effective, CPU governor | 232 s |
-| `isolation` | the rule table is loaded at boot; a throwaway non-dev account is refused while root and ssh still connect | 70 s |
-| `ops` | gc and backup timers, a backup run, `hades-status`, journald and Docker log caps, Chrome headless with its sandbox | 182 s |
-| `postgres` | dev cluster on loopback in `hades.slice`, `pg_hba.conf`, credentials, wrong password refused | 42 s |
-| `services` | containers running in `hades.slice` on loopback, no dev user in group docker, RabbitMQ and LocalStack answer | 43 s |
-| `ingress` | Caddy on loopback only, API on its unix socket, catch-all 404, gated paths 403 without the Access header; cloudflared when a token is set | 78 s |
-| `user` | accounts, lingering, resource policy, login toolchain, no sudo, `hades doctor` | 95 s |
-| `ade` | each ADE's unit and listeners, Paseo's password, Orca's port in the input chain, no stale units | 70 s |
-| `offboard` | absent users gone and archived, GPG keys exported | 18 s |
-| `protected` | floor, caps and private homes | 97 s |
-| `acceptance` | the sample project end to end, described below | 184 s |
+| `host` | registry, host config, sudoers rule, kernel settings, `hades.slice`, set-property caps still effective, CPU governor | 144 s |
+| `isolation` | the rule table is loaded at boot; a throwaway non-dev account is refused while root and ssh still connect | 44 s |
+| `ops` | gc and backup timers, a backup run, `hades-status`, journald and Docker log caps, Chrome headless with its sandbox | 137 s |
+| `postgres` | dev cluster on loopback in `hades.slice`, `pg_hba.conf`, credentials, wrong password refused | 26 s |
+| `services` | containers running in `hades.slice` on loopback, no dev user in group docker, RabbitMQ and LocalStack answer | 26 s |
+| `ingress` | Caddy on loopback only, API on its unix socket, catch-all 404, gated paths 403 without the Access header; cloudflared when a token is set | 48 s |
+| `user` | accounts, lingering, resource policy, login toolchain, no sudo, `hades doctor` | 58 s |
+| `ade` | each ADE's unit and listeners, Paseo's password, Orca's port in the input chain, no stale units | 44 s |
+| `offboard` | absent users gone and archived, GPG keys exported | 17 s |
+| `protected` | floor, caps and private homes | 60 s |
+| `acceptance` | the sample project end to end, described below | 118 s |
 
 The `acceptance` check runs only with `-e acceptance_user=<a throwaway dev user>` and is skipped otherwise. It works in that user's home with the sample project in `tests/sample-project/`:
 
@@ -123,6 +136,8 @@ The `acceptance` check runs only with `-e acceptance_user=<a throwaway dev user>
 5. It runs `hades gc` as root.
 
 It cleans up after itself even when a check fails.
+
+The reference host has had no throwaway dev user since its offboarding, so its verify runs now skip `acceptance`.
 
 `-e reboot_test=true` reboots the host after the other checks and repeats the `host`, `isolation`, `postgres`, `services`, `ingress` and `ade` checks. It has not been exercised on the reference host.
 
