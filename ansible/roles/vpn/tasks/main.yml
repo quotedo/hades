@@ -20,7 +20,6 @@
     quiet: true
   vars:
     vpn_conf: "{{ lookup('ansible.builtin.env', vpn_conf_env) if vpn_conf_env else '' }}"
-  no_log: true
 
 # ppa:amnezia/ppa, signed by the key whose fingerprint Launchpad publishes for it. The keyserver
 # refuses HEAD, so get_url cannot preview it in check mode; this module fetches with GET.
@@ -64,13 +63,13 @@
   register: vpn_conf_write
   changed_when: "'changed' in vpn_conf_write.stdout"
   no_log: true
-  notify: awg restart
 
-# In check mode on a fresh host the unit template is not installed yet.
-- name: Enable and start the tunnel
+# A changed config applies at start only. In check mode on a fresh host the unit template is not
+# installed yet.
+- name: Enable and start the tunnel, restarting it after a config change
   ansible.builtin.systemd_service:
     name: awg-quick@intranet.service
     enabled: true
-    state: started
+    state: "{{ 'restarted' if vpn_conf_write is changed else 'started' }}"
     daemon_reload: true
   when: not (ansible_check_mode and vpn_ppa is changed)

@@ -1,8 +1,0 @@
----
-# A changed config applies at start only. In check mode the unit may not exist yet.
-- name: Restart the tunnel
-  ansible.builtin.systemd_service:
-    name: awg-quick@intranet.service
-    state: restarted
-  when: not ansible_check_mode
-  listen: awg restart

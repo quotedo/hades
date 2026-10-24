@@ -11,10 +11,6 @@
     fail_msg: "awg-quick@intranet is {{ vpn_test_unit.status.ActiveState | default('missing') }}, expected active"
     quiet: true
 
-- name: Show the intranet interface
-  ansible.builtin.command: ip -o link show intranet
-  changed_when: false
-
 # Every routing table, so a full tunnel's policy-routing table counts too.
 - name: Read the default routes
   ansible.builtin.shell: ip -4 route show table all default; ip -6 route show table all default
