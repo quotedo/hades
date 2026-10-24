@@ -29,6 +29,7 @@
       exec "$HOME/.local/opt/orca/orca.AppImage" --appimage-extract-and-run "$@"
     dest: "{{ user_home }}/.local/bin/orca-ide"
     mode: "0755"
+  register: user_orca_wrapper
 
 - name: Write the Orca unit
   ansible.builtin.template:
@@ -45,6 +46,6 @@
     scope: user
     enabled: true
     daemon_reload: "{{ user_orca_unit is changed }}"
-    state: "{{ 'restarted' if [user_orca_download, user_orca_unit] | select('changed') | list else 'started' }}"
+    state: "{{ 'restarted' if [user_orca_download, user_orca_wrapper, user_orca_unit] | select('changed') | list else 'started' }}"
   # In check mode a new unit is not written yet, so systemd cannot find it.
   when: not (ansible_check_mode and user_orca_unit is changed)

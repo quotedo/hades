@@ -61,6 +61,6 @@
       - "'Logins collide' in preflight_colliding.stdout"
       - "'[j-smith, jsmith]' in preflight_colliding.stdout"
       - "'Present dev_users share a uid: 3001 [alice, bob]' in preflight_duplicate_uids.stdout"
-      - "'alice list orca, which pairs over Tailscale' in preflight_orca_without_tailscale.stdout"
+      - "'orca is listed by: alice — it pairs over Tailscale' in preflight_orca_without_tailscale.stdout"
     quiet: true
   run_once: true

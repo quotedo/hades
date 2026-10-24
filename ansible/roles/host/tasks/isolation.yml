@@ -78,7 +78,7 @@
     # Orca binds every address; the input chain keeps these to loopback and Tailscale.
     host_isolation_orca_ports: >-
       {%- set out = [] -%}
-      {%- for u in dev_users if (u.state | default('present')) == 'present' and 'orca' in u.ades | default([]) -%}
+      {%- for u in dev_users if (u.state | default('present')) == 'present' and 'orca' in u.ades | default([]) and u.orca_port is defined -%}
       {%- set _ = out.append(u.orca_port | int) -%}
       {%- endfor -%}
       {{ out | unique | sort }}

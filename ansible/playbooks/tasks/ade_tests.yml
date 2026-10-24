@@ -28,21 +28,18 @@
   loop_control:
     label: "{{ item.0.name }} {{ item.1 }}"
 
-# Paseo's node process renames itself "Paseo Daemon", so ownership is matched on uid and cgroup.
+# Every listener line must show the ADE's address and port, the user's uid and the user's unit
+# cgroup (ss prints them in that order). Paseo's node process renames itself "Paseo Daemon", so
+# the process name is not matched; Orca binds every address.
 - name: Assert each listed ADE runs enabled, from its user's unit, on its address only
   ansible.builtin.assert:
     that:
       - "'ActiveState=active' in ade_test_unit.results[i].stdout_lines"
       - "'UnitFileState=enabled' in ade_test_unit.results[i].stdout_lines"
       - ade_test_listeners | length > 0
-      - ade_test_listeners | reject('search', '\\s' ~ (ade_test_address | regex_escape) ~ ':' ~ item.0[item.1 ~ '_port'] ~ '\\s') | list == []
-      - ade_test_listeners | reject('search', '\\buid:' ~ item.0.uid ~ '\\b') | list == []
-      - ade_test_listeners | reject('search', '/user@' ~ item.0.uid ~ '\\.service/app\\.slice/' ~ item.1 ~ '\\.service\\b') | list == []
-      - >-
-        item.1 != 'orca' or item.0.orca_port in (ade_test_orca_ports.stdout | from_json).nftables
-        | map(attribute='set', default={}) | map(attribute='elem', default=[]) | flatten
+      - ade_test_listeners | select('search', ade_test_line) | list | length == ade_test_listeners | length
     fail_msg: |-
-      {{ item.0.name }} {{ item.1 }}: {{ ade_test_unit.results[i].stdout_lines | join(', ') }}
+      {{ item.0.name }} {{ item.1 }}: {{ ade_test_unit.results[i].stdout_lines | join(', ') }} {{ ade_test_unit.results[i].stderr }}
       expected listeners on {{ ade_test_address }}:{{ item.0[item.1 ~ '_port'] }} from uid {{ item.0.uid }}'s {{ item.1 }}.service:
       {{ ade_test_listeners | join('\n') or 'none' }}
     quiet: true
@@ -53,6 +50,19 @@
   vars:
     ade_test_listeners: "{{ ade_test_ss.results[i].stdout_lines }}"
     ade_test_address: "{{ host_loopback_address if item.1 == 'paseo' else '0.0.0.0' }}"
+    ade_test_line: >-
+      {{ '\s' ~ (ade_test_address | regex_escape) ~ ':' ~ item.0[item.1 ~ '_port'] ~ '\s.*\buid:' ~ item.0.uid
+         ~ '\b.*/user@' ~ item.0.uid ~ '\.service/app\.slice/' ~ item.1 ~ '\.service\b' }}
+
+- name: Assert each Orca port is in the hades table's orca_ports set
+  ansible.builtin.assert:
+    that:
+      - item.orca_port in (ade_test_orca_ports.stdout | from_json).nftables | map(attribute='set', default={}) | map(attribute='elem', default=[]) | flatten
+    fail_msg: "{{ item.name }}'s orca_port {{ item.orca_port }} is not in set inet hades orca_ports"
+    quiet: true
+  loop: "{{ user_present | selectattr('ades', 'defined') | selectattr('ades', 'contains', 'orca') }}"
+  loop_control:
+    label: "{{ item.name }}"
 
 # One curl for both status codes; uri would need a request each.
 - name: Request Paseo's health and, without a token, its agents # noqa: command-instead-of-module

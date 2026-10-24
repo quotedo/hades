@@ -8,6 +8,7 @@ Description={{ ade | capitalize }} for {{ user.name }}
 Environment=PATH=%h/.local/bin:%h/.asdf/shims:%h/.asdf/bin{% for path in hades_tool_paths %}:{{ path }}{% endfor %}:/usr/local/bin:/usr/bin:/bin
 Environment="ERL_FLAGS={{ erl_flags }}" CHROME_PATH={{ chrome_root }}/chrome
 {% if ade == 'paseo' %}
+Environment=PASEO_LISTEN={{ host_loopback_address }}:{{ user.paseo_port }} PASEO_RELAY_ENABLED=false
 EnvironmentFile=%h/.config/hades/paseo.env
 ExecStart=%h/.asdf/shims/paseo daemon run
 {% else %}
