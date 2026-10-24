@@ -1,7 +1,13 @@
 ---
-# One present dev user (loop variable `user`). Task 9 adds its per-user files here.
+# One present dev user (loop variable `user`).
 - name: Account, resource policy and shell environment
   ansible.builtin.import_tasks: account.yml
+
+- name: GPG key
+  ansible.builtin.import_tasks: gpg.yml
+  when: user.gpg_key | default(false)
+  vars:
+    user_gpg_uid: "{{ user.name }}+{{ inventory_hostname }}@{{ hades_domain }}"
 
 - name: Toolchain, agent CLIs and ADE daemons, as the user
   become: true
@@ -31,3 +37,6 @@
     - name: Orca
       ansible.builtin.import_tasks: ade_orca.yml
       when: "'orca' in user.ades | default([])"
+
+    - name: Repositories
+      ansible.builtin.import_tasks: repos.yml

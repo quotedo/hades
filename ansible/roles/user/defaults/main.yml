@@ -7,6 +7,7 @@
 # Each user is combined onto {'state': 'present'}, so one without state counts as present.
 user_present: >-
   {{ [{'state': 'present'}] | product(dev_users | default([])) | map('combine') | selectattr('state', 'eq', 'present') | list }}
+user_absent: "{{ dev_users | default([]) | selectattr('state', 'defined') | selectattr('state', 'eq', 'absent') | list }}"
 # Homes are <user_home_base>/<name>.
 user_home_base: /home
 

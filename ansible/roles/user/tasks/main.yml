@@ -56,18 +56,29 @@
   ansible.builtin.getent:
     database: passwd
 
-# The user module would otherwise renumber and regroup an existing (protected) account.
+# The user module would otherwise renumber and regroup, or delete, an existing (protected) account.
 - name: Assert no dev user name belongs to an account with another uid
   ansible.builtin.assert:
     that:
       - item.name not in ansible_facts.getent_passwd or ansible_facts.getent_passwd[item.name][1] | int == item.uid
     fail_msg: >-
       dev_users {{ item.name }} has uid {{ item.uid }}, but the host's account {{ item.name }} has uid
-      {{ ansible_facts.getent_passwd[item.name][1] | default('') }}; hades does not take over an existing account
+      {{ ansible_facts.getent_passwd[item.name][1] | default('') }}; hades does not take over or delete an existing account
     quiet: true
-  loop: "{{ user_present }}"
+  loop: "{{ user_present + user_absent }}"
   loop_control:
     label: "{{ item.name }}"
+
+# An absent user without an account is skipped.
+- name: Offboard each absent dev user
+  ansible.builtin.include_tasks: offboard.yml
+  when: user.name in ansible_facts.getent_passwd
+  loop: "{{ user_absent }}"
+  loop_control:
+    loop_var: user
+    label: "{{ user.name }}"
+  vars:
+    user_uid: "{{ ansible_facts.getent_passwd[user.name][1] }}"
 
 # In check mode a new account does not exist yet, so nothing can run as it.
 - name: Set up each present dev user

@@ -56,3 +56,7 @@
     - name: ADE daemon tests
       ansible.builtin.import_tasks: tasks/ade_tests.yml
       tags: [ade]
+
+    - name: Offboarding and GPG key tests
+      ansible.builtin.import_tasks: tasks/offboard_tests.yml
+      tags: [offboard]

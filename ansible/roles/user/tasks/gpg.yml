@@ -1,0 +1,50 @@
+---
+# One present dev user with gpg_key: true (loop variable `user`): a key pair without a passphrase,
+# so `git secret reveal` runs unattended, and its public key for a project's key holder to
+# `git secret tell`.
+- name: GPG key pair, as the user
+  become: true
+  become_user: "{{ user.name }}"
+  block:
+    - name: Look for the user's GPG key
+      ansible.builtin.command: gpg --list-keys {{ user_gpg_uid }}
+      register: user_gpg_key
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Generate the user's GPG key, once
+      ansible.builtin.command:
+        argv: [gpg, --batch, --pinentry-mode, loopback, --passphrase, "", --quick-gen-key, "{{ user_gpg_uid }}", default, default, never]
+      changed_when: true
+      when: user_gpg_key.rc != 0
+
+    - name: Export the user's public key
+      ansible.builtin.command: gpg --armor --export {{ user_gpg_uid }}
+      register: user_gpg_public
+      changed_when: false
+      check_mode: false
+
+- name: Create the public key directory
+  ansible.builtin.file:
+    path: "{{ hades_config_dir }}/keys"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# In check mode a key that is not generated yet cannot be exported.
+- name: Write the user's public key
+  ansible.builtin.copy:
+    content: "{{ user_gpg_public.stdout }}\n"
+    dest: "{{ hades_config_dir }}/keys/{{ user.name }}.asc"
+    owner: root
+    group: root
+    mode: "0644"
+  register: user_gpg_file
+  when: not ansible_check_mode or user_gpg_key.rc == 0
+
+- name: Show the user's public key
+  ansible.builtin.debug:
+    msg: "{{ user.name }}'s public key, for `git secret tell`, in {{ hades_config_dir }}/keys/{{ user.name }}.asc:\n{{ user_gpg_public.stdout }}"
+  when: user_gpg_file is changed and not ansible_check_mode

@@ -1,0 +1,78 @@
+---
+# Per absent dev user: the account is gone, nothing in the registry belongs to its uid, its
+# per-uid drop-in directories are gone, and its home was archived once. Per present dev user with
+# gpg_key: true: one key pair, exported.
+- name: Read the passwd entries
+  ansible.builtin.getent:
+    database: passwd
+
+- name: Find what each absent dev user's uid left in the registry and systemd
+  ansible.builtin.command:
+    argv: [find, "{{ hades_registry_root }}/manifests", "{{ hades_registry_root }}/ports", /etc/systemd/system, -mindepth, "1", -maxdepth, "1",
+           "(", -uid, "{{ item.uid }}", -o, -name, "user-{{ item.uid }}.slice.d", -o, -name, "user@{{ item.uid }}.service.d", ")"]
+  become: true
+  register: offboard_test_registry
+  changed_when: false
+  loop: "{{ user_absent }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Find each absent dev user's offboard archives
+  ansible.builtin.find:
+    paths: "{{ backup_dir }}"
+    patterns: "{{ item.name }}-offboard-*.tar.gz"
+  become: true
+  register: offboard_test_archives
+  loop: "{{ user_absent }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Assert each absent dev user is gone, left nothing behind and was archived once
+  ansible.builtin.assert:
+    that:
+      - item.name not in ansible_facts.getent_passwd
+      - offboard_test_registry.results[i].stdout_lines == []
+      - offboard_test_archives.results[i].matched == 1
+    fail_msg: >-
+      {{ item.name }}: account {{ 'exists' if item.name in ansible_facts.getent_passwd else 'gone' }};
+      left behind by uid {{ item.uid }}: {{ offboard_test_registry.results[i].stdout_lines | join(', ') or 'none' }};
+      archives: {{ offboard_test_archives.results[i].files | map(attribute='path') | join(', ') or 'none' }} (want one)
+    quiet: true
+  loop: "{{ user_absent }}"
+  loop_control:
+    index_var: i
+    label: "{{ item.name }}"
+
+- name: List each GPG user's keys
+  ansible.builtin.command: gpg --list-keys --with-colons {{ item.name }}+{{ inventory_hostname }}@{{ hades_domain }}
+  become: true
+  become_user: "{{ item.name }}"
+  register: offboard_test_gpg
+  changed_when: false
+  failed_when: false
+  loop: "{{ user_present | selectattr('gpg_key', 'defined') | selectattr('gpg_key') }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Stat each GPG user's exported public key
+  ansible.builtin.stat:
+    path: "{{ hades_config_dir }}/keys/{{ item.name }}.asc"
+  register: offboard_test_gpg_export
+  loop: "{{ user_present | selectattr('gpg_key', 'defined') | selectattr('gpg_key') }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Assert each GPG user has one key pair and its public key is exported
+  ansible.builtin.assert:
+    that:
+      - offboard_test_gpg.results[i].stdout_lines | select('match', '^pub:') | list | length == 1
+      - offboard_test_gpg_export.results[i].stat.exists
+    fail_msg: >-
+      {{ item.name }}: {{ offboard_test_gpg.results[i].stdout_lines | select('match', '^pub:') | list | length }} keys
+      (want 1) {{ offboard_test_gpg.results[i].stderr }}; {{ hades_config_dir }}/keys/{{ item.name }}.asc
+      {{ 'exists' if offboard_test_gpg_export.results[i].stat.exists else 'is missing' }}
+    quiet: true
+  loop: "{{ user_present | selectattr('gpg_key', 'defined') | selectattr('gpg_key') }}"
+  loop_control:
+    index_var: i
+    label: "{{ item.name }}"
