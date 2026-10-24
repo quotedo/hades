@@ -38,11 +38,17 @@ for user in $members; do
     continue
   fi
 
+  # Leftovers of an interrupted run; the prune below never matches them.
+  find "$backup_dir" -maxdepth 1 -type f \
+    -name "$user-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].tar.gz.tmp" -delete
+
   out="$backup_dir/$user-$today.tar.gz"
-  # GNU tar exits 1 when a file changed while it was read; the archive is still usable.
+  # tar runs as the user, so a symlinked directory in their home cannot pull in files only root
+  # may read; root writes the stream into the root-only backup directory. GNU tar exits 1 when a
+  # file changed while it was read; the archive is still usable.
   rc=0
-  tar --create --gzip --file "$out.tmp" --directory "$home" \
-    --warning=no-file-changed --exclude='.paseo/*.log' -- "${present[@]}" || rc=$?
+  runuser -u "$user" -- tar --create --gzip --file - --directory "$home" \
+    --warning=no-file-changed --exclude='.paseo/*.log' -- "${present[@]}" >"$out.tmp" || rc=$?
   if [ "$rc" -gt 1 ]; then
     echo "hades-backup: $user: tar failed with exit $rc" >&2
     rm -f -- "$out.tmp"

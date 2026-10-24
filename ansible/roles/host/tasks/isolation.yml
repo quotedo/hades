@@ -22,10 +22,21 @@
       - (protected | default({})).blocked_ports | default([]) is not string
       - dev_services is sequence
       - dev_services is not string
+      - host_isolation_port_inputs | map('string') | reject('match', '^[0-9]+$') | list | length == 0
+      - host_isolation_port_inputs | map('int') | select('gt', 65535) | list | length == 0
+      - host_isolation_port_inputs | map('int') | select('lt', 1) | list | length == 0
     fail_msg: >-
-      dev_users and dev_services must be lists, hades_port_range a "<first>-<last>" string and
-      protected.blocked_ports, when set, a list of ports
+      dev_users and dev_services must be lists, hades_port_range a "<first>-<last>" string,
+      protected.blocked_ports, when set, a list of ports, and every port isolation consumes an
+      integer from 1 to 65535: {{ host_isolation_port_inputs | join(', ') }}
     quiet: true
+  vars:
+    host_isolation_port_inputs: >-
+      {{ [dev_pg_port, caddy_port, rabbitmq_amqp_port, rabbitmq_management_port, rabbitmq_mqtt_port,
+          localstack_port, redis_port]
+         + (dev_users | default([]) | selectattr('paseo_port', 'defined') | map(attribute='paseo_port') | list)
+         + (dev_users | default([]) | selectattr('orca_port', 'defined') | map(attribute='orca_port') | list)
+         + ((protected | default({})).blocked_ports | default([]) | list) }}
 
 - name: Read the local accounts
   ansible.builtin.getent:
@@ -99,10 +110,12 @@
 - name: Apply the isolation rules
   ansible.builtin.meta: flush_handlers
 
-# In check mode a unit file that is about to be written does not exist yet.
+# A changed unit file is restarted so its new commands take effect (a window of milliseconds);
+# a rules-only change is applied by the atomic reload above. In check mode a unit file that is
+# about to be written does not exist yet.
 - name: Enable and start the isolation unit
   ansible.builtin.systemd_service:
     name: hades-nftables.service
     enabled: true
-    state: started
+    state: "{{ 'restarted' if host_isolation_unit is changed else 'started' }}"
   when: not (ansible_check_mode and host_isolation_unit is changed)

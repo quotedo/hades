@@ -93,7 +93,11 @@ if is_root; then
 else
   echo "largest homes (partial: unreadable directories are not counted without root):"
 fi
-getent passwd | awk -F: '$3 >= 1000 && $3 < 65534 { print $6 }' | sort -u |
+uid_min=$(awk '$1 == "UID_MIN" { print $2 }' /etc/login.defs 2>/dev/null)
+uid_max=$(awk '$1 == "UID_MAX" { print $2 }' /etc/login.defs 2>/dev/null)
+getent passwd |
+  awk -F: -v min="${uid_min:-{{ host_uid_min | int }}}" -v max="${uid_max:-{{ host_uid_max | int }}}" \
+    '$3 >= min && $3 <= max { print $6 }' | sort -u |
   while IFS= read -r home; do
     [ -d "$home" ] && printf '%s\0' "$home"
   done |

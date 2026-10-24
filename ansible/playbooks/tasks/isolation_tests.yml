@@ -35,14 +35,14 @@
       and {{ host_test_nft_unit.status.ActiveState | default('missing') }}
     quiet: true
 
-# Nothing in the dev port set may be listening yet, and `nc -z` cannot tell a reject from a
-# closed port, so the test listens on the first port of the range itself, as root.
+# `nc -z` cannot tell a reject from a closed port, so the test runs its own root listener on a
+# port of the range that nothing listens on and no worktree has claimed.
 - name: Probe loopback isolation as a throwaway non-dev account
   become: true
   vars:
     host_test_probe_user: hades-probe
     host_test_probe_unit: hades-probe-listener.service
-    host_test_probe_port: "{{ (hades_port_range | string | split('-'))[0] }}"
+    host_test_probe_port: "{{ host_test_probe_pick.stdout }}"
   block:
     - name: Assert the probe account is not a dev user
       ansible.builtin.assert:
@@ -51,11 +51,29 @@
         fail_msg: "{{ host_test_probe_user }} is a dev user; the probe needs an account outside the allowed set"
         quiet: true
 
-    - name: Assert nothing listens on the probe port
-      ansible.builtin.command: ss -Hltn "sport = :{{ host_test_probe_port }}"
-      register: host_test_probe_busy
+    - name: Pick a free, unclaimed port of the range
+      ansible.builtin.shell: |
+        set -o pipefail
+        for port in $(seq {{ (hades_port_range | split('-'))[0] | int }} {{ (hades_port_range | split('-'))[1] | int }}); do
+          claim={{ (hades_registry_root ~ '/ports') | quote }}/$port
+          if [ -e "$claim" ] || [ -L "$claim" ]; then continue; fi
+          if [ -n "$(ss -Hltn "sport = :$port")" ]; then continue; fi
+          echo "$port"
+          exit 0
+        done
+        exit 1
+      args:
+        executable: /bin/bash
+      register: host_test_probe_pick
       changed_when: false
-      failed_when: host_test_probe_busy.stdout | length > 0
+      failed_when: false
+
+    - name: Assert a probe port was found
+      ansible.builtin.assert:
+        that:
+          - host_test_probe_pick.rc == 0
+        fail_msg: "every port of {{ hades_port_range }} is listening or claimed; the probe has no port to listen on"
+        quiet: true
 
     - name: Create the probe account
       ansible.builtin.user:
@@ -68,35 +86,37 @@
     - name: Start a root listener on the probe port
       ansible.builtin.command: >-
         systemd-run --unit={{ host_test_probe_unit }} --collect
-        nc -dlk 127.0.0.1 {{ host_test_probe_port }}
+        nc -dlk {{ host_loopback_address }} {{ host_test_probe_port }}
       changed_when: true
 
     - name: Wait for the listener
       ansible.builtin.wait_for:
-        host: 127.0.0.1
+        host: "{{ host_loopback_address }}"
         port: "{{ host_test_probe_port | int }}"
         timeout: 10
 
+    # Vacuous until the postgres role runs: nothing listens on dev_pg_port before that, so the
+    # listener probe below carries the real check.
     - name: Connect to the dev Postgres port as the probe account
-      ansible.builtin.command: runuser -u {{ host_test_probe_user }} -- nc -z -w 3 127.0.0.1 {{ dev_pg_port }}
+      ansible.builtin.command: runuser -u {{ host_test_probe_user }} -- nc -z -w 3 {{ dev_pg_host }} {{ dev_pg_port }}
       register: host_test_probe_pg
       changed_when: false
       failed_when: false
 
     - name: Connect to the listener as the probe account
-      ansible.builtin.command: runuser -u {{ host_test_probe_user }} -- nc -z -w 3 127.0.0.1 {{ host_test_probe_port }}
+      ansible.builtin.command: runuser -u {{ host_test_probe_user }} -- nc -z -w 3 {{ host_loopback_address }} {{ host_test_probe_port }}
       register: host_test_probe_dev
       changed_when: false
       failed_when: false
 
     - name: Connect to the listener as root
-      ansible.builtin.command: nc -z -w 3 127.0.0.1 {{ host_test_probe_port }}
+      ansible.builtin.command: nc -z -w 3 {{ host_loopback_address }} {{ host_test_probe_port }}
       register: host_test_probe_root
       changed_when: false
       failed_when: false
 
     - name: Connect to ssh as the probe account
-      ansible.builtin.command: runuser -u {{ host_test_probe_user }} -- nc -z -w 3 127.0.0.1 22
+      ansible.builtin.command: runuser -u {{ host_test_probe_user }} -- nc -z -w 3 {{ host_loopback_address }} {{ host_test_ssh_port }}
       register: host_test_probe_ssh
       changed_when: false
       failed_when: false

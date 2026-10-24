@@ -1,3 +1,4 @@
+---
 - name: Read the gc and backup timers
   ansible.builtin.systemd_service:
     name: "{{ item }}"
@@ -186,20 +187,22 @@
         prefix: hades-chrome-test.
       register: host_test_chrome_tmp
 
-    - name: Hand the scratch directory to nobody
+    - name: Hand the scratch directory to the unprivileged account
       ansible.builtin.file:
         path: "{{ host_test_chrome_tmp.path }}"
-        owner: nobody
+        owner: "{{ host_test_unprivileged_user }}"
         mode: "0700"
 
-    - name: Dump about:blank with Chrome as nobody, sandbox enabled
+    - name: Dump about:blank with Chrome as the unprivileged account, sandbox enabled
       ansible.builtin.command:
         argv:
           - timeout
+          - -k
+          - "5"
           - "60"
           - runuser
           - -u
-          - nobody
+          - "{{ host_test_unprivileged_user }}"
           - --
           - env
           - HOME={{ host_test_chrome_tmp.path }}
@@ -210,21 +213,28 @@
           - --user-data-dir={{ host_test_chrome_tmp.path }}/profile
           - --dump-dom
           - about:blank
-      register: host_test_chrome_nobody
+      register: host_test_chrome_unpriv
       changed_when: false
       failed_when: false
 
-    - name: Assert Chrome renders a page as nobody with its sandbox
+    - name: Assert Chrome renders a page as the unprivileged account with its sandbox
       ansible.builtin.assert:
         that:
-          - host_test_chrome_nobody.rc == 0
-          - "'<html' in host_test_chrome_nobody.stdout"
+          - host_test_chrome_unpriv.rc == 0
+          - "'<html' in host_test_chrome_unpriv.stdout"
         fail_msg: >-
-          Chrome as nobody exited {{ host_test_chrome_nobody.rc }}:
-          {{ host_test_chrome_nobody.stderr_lines | default([]) | select('search', 'sandbox|namespace|FATAL') | list | join(' | ') }}
+          Chrome as {{ host_test_unprivileged_user }} exited {{ host_test_chrome_unpriv.rc }}:
+          {{ host_test_chrome_unpriv.stderr_lines | default([]) | select('search', 'sandbox|namespace|FATAL') | list | join(' | ') }}
         quiet: true
 
   always:
+    # timeout signals runuser only; Chrome's zygote and renderers may outlive it.
+    - name: Stop Chrome processes left by the test
+      ansible.builtin.command: pkill -u {{ host_test_unprivileged_user }} -f {{ host_test_chrome_tmp.path }}
+      changed_when: false
+      failed_when: false
+      when: host_test_chrome_tmp.path is defined
+
     - name: Remove the scratch directory
       ansible.builtin.file:
         path: "{{ host_test_chrome_tmp.path }}"

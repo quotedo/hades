@@ -7,6 +7,9 @@
     name: "{{ host_chrome_packages }}"
     state: present
     install_recommends: false
+  # Keeps Ubuntu's needrestart from restarting services (Docker, Postgres) after an install.
+  environment:
+    NEEDRESTART_SUSPEND: "1"
 
 - name: Create the apt keyring directory
   ansible.builtin.file:
@@ -69,6 +72,8 @@
     name: nodejs
     state: present
     update_cache: "{{ host_nodesource_key is changed or host_nodesource_repo is changed or host_nodesource_pin is changed or host_node_wrong }}"
+  environment:
+    NEEDRESTART_SUSPEND: "1"
   vars:
     host_node_wrong: "{{ host_node_before.rc != 0 or host_node_before.stdout is not match('v' ~ node_major ~ '\\.') }}"
 
@@ -194,3 +199,25 @@
   when:
     - host_apparmor_parser | length > 0
     - host_apparmor_dir.stat.isdir | default(false)
+
+- name: Load a changed AppArmor profile
+  ansible.builtin.meta: flush_handlers
+
+# Repairs a load that failed on an earlier run, when the file itself no longer changes.
+- name: Read the loaded AppArmor profiles
+  ansible.builtin.slurp:
+    src: /sys/kernel/security/apparmor/profiles
+  register: host_apparmor_loaded
+  failed_when: false
+  when:
+    - host_apparmor_parser | length > 0
+    - host_apparmor_dir.stat.isdir | default(false)
+
+- name: Load the Chrome for Testing AppArmor profile when the kernel lacks it
+  ansible.builtin.command: "{{ host_apparmor_parser }} -r -T -W /etc/apparmor.d/chrome-for-testing"
+  changed_when: true
+  when:
+    - host_apparmor_parser | length > 0
+    - host_apparmor_dir.stat.isdir | default(false)
+    - host_apparmor_loaded.content is defined
+    - (host_apparmor_loaded.content | b64decode).splitlines() | select('match', '^chrome-for-testing ') | list | length == 0

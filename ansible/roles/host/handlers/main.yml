@@ -24,13 +24,15 @@
     state: restarted
   listen: journald restart
 
-# Only where Docker is installed; on a fresh host the services role installs it later and it
-# reads the merged daemon.json when it first starts.
+# Only when the operator opted in (docker_restart_on_change) and Docker is installed. On a fresh
+# host the services role installs Docker later and it reads the merged daemon.json at first start.
 - name: Restart Docker
   ansible.builtin.systemd_service:
     name: docker.service
     state: restarted
-  when: host_dockerd.stat.exists | default(false)
+  when:
+    - docker_restart_on_change | bool
+    - host_dockerd.stat.exists | default(false)
   listen: docker restart
 
 # Loads (or replaces) the one Chrome for Testing profile and refreshes its cache entry.

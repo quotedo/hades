@@ -68,10 +68,21 @@ host_gc_on_calendar: weekly
 journald_system_max_use: 2G # noqa: var-naming[no-role-prefix]
 docker_log_max_size: 50m # noqa: var-naming[no-role-prefix]
 docker_log_max_file: 3 # noqa: var-naming[no-role-prefix]
+# The host role never restarts a running Docker on its own: protected containers may run there,
+# and log options only affect containers created after a restart anyway.
+docker_restart_on_change: false # noqa: var-naming[no-role-prefix]
+# Fallbacks for hades-status when /etc/login.defs has no UID_MIN/UID_MAX.
+host_uid_min: 1000
+host_uid_max: 60000
 
 # Loopback isolation (design 6.12): service accounts allowed to reach the dev port set, when
 # they exist on the host. Their uids are resolved at run time.
 host_isolation_service_accounts: [caddy, cloudflared, hades-postgres]
+
+# Verify playbook: addresses and accounts the tests use.
+host_loopback_address: 127.0.0.1
+host_test_ssh_port: "{{ ansible_port | default(22) }}"
+host_test_unprivileged_user: nobody
 
 # Resource policy (design 6.2): starting values for a 128 GB box, override per host.
 # The per-user values (dev_user_*, default_limit_nofile) are applied by the user role.

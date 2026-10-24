@@ -41,9 +41,10 @@ table inet hades {
 
 	# Connection attempts only (SYN without ACK), and only to an address of this host
 	# (loopback, bridges and public addresses alike), so outbound traffic to other hosts and
-	# replies on established connections are never touched.
+	# replies on established connections are never touched. Priority mangle (-150) runs before
+	# nat output (-100), so a DNAT to a container cannot hide the local destination.
 	chain output {
-		type filter hook output priority filter; policy accept;
+		type filter hook output priority mangle; policy accept;
 		tcp flags & (fin | syn | rst | ack) == syn tcp dport @dev_ports meta skuid != @allowed_uids fib daddr type local counter reject with tcp reset
 		tcp flags & (fin | syn | rst | ack) == syn tcp dport @blocked_ports meta skuid @dev_uids fib daddr type local counter reject with tcp reset
 	}
