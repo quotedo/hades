@@ -11,6 +11,10 @@ dev_servers:
       # Cloudflare Access admits every present dev user's email plus these emails or @domains.
       access_allow: []
       dev_services: [rabbitmq, localstack]
+      tailscale_enabled: false  # true when a dev user lists orca
+      vpn_enabled: false
+      vpn_conf_env: AMNEZIA_WG_CONF_BOX  # the environment variable holding this host's AmneziaWG config
+      vpn_probe: ""  # "<IP>:<PORT>", one intranet TCP endpoint verify must reach
       # Exact versions; the first of each tool is the box default. Erlang before Elixir.
       tools:
         node: ["24.22.1"]

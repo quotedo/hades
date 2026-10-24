@@ -119,7 +119,7 @@ A host that must reach the intranet runs one AmneziaWG tunnel, `intranet`.
 The role adds the vendor PPA `ppa:amnezia/ppa` and installs the running kernel's headers, `amneziawg` (a DKMS kernel module) and `amneziawg-tools`. It writes the config to `/etc/amnezia/amneziawg/intranet.conf` (root, 0600) and enables `awg-quick@intranet`. A changed config restarts the tunnel.
 
 - The tunnel is host-wide: every account on the box, agents included, reaches the intranet. Identity on the intranet comes from each developer's own credentials.
-- `verify.yml --tags vpn` checks that the unit is active, the `intranet` interface exists, the default route does not use it, the last handshake is under 180 seconds old, DKMS lists `amneziawg` as installed for the running kernel, and `vpn_probe` answers. `hades-status` prints the handshake age.
+- `verify.yml --tags vpn` checks that the unit is active, the `intranet` interface exists, the default route does not use it, the last handshake is under 180 seconds old, DKMS lists `amneziawg` as installed for the running kernel, and `vpn_probe` answers. `sudo hades-status` prints the handshake age.
 - DKMS builds the module only for kernels whose headers are installed. After rebooting into a new kernel, apply `--tags vpn` and run `verify.yml --tags vpn`; verify fails while the module is missing.
 - Rollback: `sudo systemctl disable --now awg-quick@intranet`, `sudo apt remove amneziawg amneziawg-tools`, and set `vpn_enabled: false`. The role never removes packages.
 

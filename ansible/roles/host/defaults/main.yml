@@ -27,6 +27,12 @@ dev_services: [] # noqa: var-naming[no-role-prefix]
 access_allow: [] # noqa: var-naming[no-role-prefix]
 access_session: 720h # noqa: var-naming[no-role-prefix]
 
+# Intranet VPN (vpn role): vpn_conf_env names the operator's environment variable holding the
+# host's AmneziaWG config; vpn_probe ("<host>:<port>") is one intranet TCP endpoint verify reaches.
+vpn_enabled: false # noqa: var-naming[no-role-prefix]
+vpn_conf_env: "" # noqa: var-naming[no-role-prefix]
+vpn_probe: "" # noqa: var-naming[no-role-prefix]
+
 # Caddy (installed by the ingress role)
 caddy_port: 8090 # noqa: var-naming[no-role-prefix]
 caddy_config: /etc/caddy/Caddyfile # noqa: var-naming[no-role-prefix]

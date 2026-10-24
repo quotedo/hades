@@ -75,6 +75,11 @@
       tags: [protected]
       when: protected is defined
 
+    - name: VPN tests
+      ansible.builtin.import_tasks: tasks/vpn_tests.yml
+      tags: [vpn]
+      when: vpn_enabled
+
     # Opt-in: it writes into acceptance_user's home, so only a throwaway dev user.
     - name: Acceptance tests
       ansible.builtin.import_tasks: tasks/acceptance_tests.yml

@@ -118,3 +118,27 @@
       loop: "{{ tools | default({}) | dict2items }}"
       loop_control:
         label: "{{ item.key }}"
+
+    # The vpn role reads the config from the environment variable vpn_conf_env names. It installs
+    # no resolvconf, so a DNS line would fail the tunnel, and a full tunnel would take the default
+    # route. no_log: the config holds the host's private key.
+    - name: Assert the VPN config variable is named and set
+      ansible.builtin.assert:
+        that:
+          - vpn_conf_env | default('') | length > 0
+          - lookup('ansible.builtin.env', vpn_conf_env) | length > 0
+        fail_msg: vpn_enabled needs vpn_conf_env naming an exported environment variable that holds the AmneziaWG config
+        quiet: true
+      when: vpn_enabled | default(false) | bool
+
+    - name: Assert the VPN config is a split tunnel without DNS
+      ansible.builtin.assert:
+        that:
+          - hades_vpn_conf is not search('(?i)AllowedIPs\\s*=.*(0\\.0\\.0\\.0/0|::/0)')
+          - hades_vpn_conf is not search('(?im)^\\s*DNS\\s*=')
+        fail_msg: "{{ vpn_conf_env }} must list only intranet subnets in AllowedIPs (no 0.0.0.0/0 or ::/0) and have no DNS line"
+        quiet: true
+      vars:
+        hades_vpn_conf: "{{ lookup('ansible.builtin.env', vpn_conf_env) }}"
+      no_log: true
+      when: vpn_enabled | default(false) | bool

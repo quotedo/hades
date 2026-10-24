@@ -27,6 +27,7 @@
     - { role: ingress, tags: [ingress] }
     - { role: user, tags: [user] }
     - { role: protected, tags: [protected], when: protected is defined }
+    - { role: vpn, tags: [vpn], when: vpn_enabled }
   tasks:
     # The rule set is derived from every role's outputs (dev users and their ports, service
     # accounts, shared services), so it is recomputed after any tagged run, including tags added
