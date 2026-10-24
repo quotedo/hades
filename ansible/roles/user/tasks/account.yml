@@ -76,3 +76,9 @@
   ansible.builtin.command: loginctl enable-linger {{ user.name }}
   args:
     creates: /var/lib/systemd/linger/{{ user.name }}
+
+# Type=notify: this returns once the user manager and its bus are up, so `systemctl --user` works.
+- name: Start the user manager
+  ansible.builtin.systemd_service:
+    name: user@{{ user.uid }}.service
+    state: started

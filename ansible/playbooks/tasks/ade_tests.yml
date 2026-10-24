@@ -1,13 +1,13 @@
 ---
 # Per present dev user and listed ADE. Root may reach every dev port through loopback isolation,
-# so the probes run as root. ade_test_pairs is every (user, ADE) the inventory lists.
-- name: Read the Tailscale address Orca pairs on
-  ansible.builtin.command: tailscale ip -4
-  register: ade_test_tailscale_ip
+# so the probes run as root. Orca binds every address; the hades table's input chain limits its
+# ports (set orca_ports) to loopback and Tailscale.
+- name: Read the Orca ports the hades table guards
+  ansible.builtin.command: nft -j list set inet hades orca_ports
+  become: true
+  register: ade_test_orca_ports
   changed_when: false
-  when: ade_test_pairs | map(attribute='1') is contains('orca')
-  vars:
-    ade_test_pairs: "{{ user_present | subelements('ades', skip_missing=True) }}"
+  when: user_present | map(attribute='ades', default=[]) | flatten is contains('orca')
 
 - name: Read each listed ADE unit's state
   ansible.builtin.command: systemctl --user -M {{ item.0.name }}@ show {{ item.1 }}.service -p ActiveState -p UnitFileState # noqa: command-instead-of-module
@@ -38,6 +38,9 @@
       - ade_test_listeners | reject('search', '\\s' ~ (ade_test_address | regex_escape) ~ ':' ~ item.0[item.1 ~ '_port'] ~ '\\s') | list == []
       - ade_test_listeners | reject('search', '\\buid:' ~ item.0.uid ~ '\\b') | list == []
       - ade_test_listeners | reject('search', '/user@' ~ item.0.uid ~ '\\.service/app\\.slice/' ~ item.1 ~ '\\.service\\b') | list == []
+      - >-
+        item.1 != 'orca' or item.0.orca_port in (ade_test_orca_ports.stdout | from_json).nftables
+        | map(attribute='set', default={}) | map(attribute='elem', default=[]) | flatten
     fail_msg: |-
       {{ item.0.name }} {{ item.1 }}: {{ ade_test_unit.results[i].stdout_lines | join(', ') }}
       expected listeners on {{ ade_test_address }}:{{ item.0[item.1 ~ '_port'] }} from uid {{ item.0.uid }}'s {{ item.1 }}.service:
@@ -49,7 +52,7 @@
     label: "{{ item.0.name }} {{ item.1 }}"
   vars:
     ade_test_listeners: "{{ ade_test_ss.results[i].stdout_lines }}"
-    ade_test_address: "{{ host_loopback_address if item.1 == 'paseo' else ade_test_tailscale_ip.stdout }}"
+    ade_test_address: "{{ host_loopback_address if item.1 == 'paseo' else '0.0.0.0' }}"
 
 # One curl for both status codes; uri would need a request each.
 - name: Request Paseo's health and, without a token, its agents # noqa: command-instead-of-module

@@ -29,6 +29,14 @@ table inet hades {
 		elements = { {{ host_isolation_dev_ports | join(', ') }} }
 	}
 
+	# the Orca servers' ports; Orca binds every address and has no option to narrow it
+	set orca_ports {
+		type inet_service
+{% if host_isolation_orca_ports | length > 0 %}
+		elements = { {{ host_isolation_orca_ports | join(', ') }} }
+{% endif %}
+	}
+
 	# protected workloads the dev users must not reach (protected.blocked_ports)
 	set blocked_ports {
 		type inet_service
@@ -47,5 +55,11 @@ table inet hades {
 		type filter hook output priority mangle; policy accept;
 		tcp flags & (fin | syn | rst | ack) == syn tcp dport @dev_ports meta skuid != @allowed_uids fib daddr type local counter reject with tcp reset
 		tcp flags & (fin | syn | rst | ack) == syn tcp dport @blocked_ports meta skuid @dev_uids fib daddr type local counter reject with tcp reset
+	}
+
+	# Orca is reachable over loopback and Tailscale only, whatever else the host firewall allows.
+	chain input {
+		type filter hook input priority filter; policy accept;
+		tcp flags & (fin | syn | rst | ack) == syn tcp dport @orca_ports iifname != { "lo", "tailscale0" } counter reject with tcp reset
 	}
 }

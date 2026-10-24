@@ -74,7 +74,14 @@
       {%- set _ = out.append(u[key] | int) -%}
       {%- endfor -%}
       {%- endfor -%}
-      {{ out | map('string') | unique | list }}
+      {{ out | map('string') | unique | sort }}
+    # Orca binds every address; the input chain keeps these to loopback and Tailscale.
+    host_isolation_orca_ports: >-
+      {%- set out = [] -%}
+      {%- for u in dev_users if (u.state | default('present')) == 'present' and 'orca' in u.ades | default([]) -%}
+      {%- set _ = out.append(u.orca_port | int) -%}
+      {%- endfor -%}
+      {{ out | unique | sort }}
     host_isolation_blocked_ports: >-
       {{ (protected | default({})).blocked_ports | default([]) | map('int') | unique | sort }}
 
