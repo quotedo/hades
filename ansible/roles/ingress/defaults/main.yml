@@ -13,3 +13,7 @@ tailscale_enabled: >- # noqa: var-naming[no-role-prefix]
      | flatten is contains('orca') }}
 # Verify playbook: nothing listens on this port; the gate answers before Caddy dials it.
 ingress_test_probe_port: 65000
+# Verify playbook: Caddy's default API port, which must stay closed, and the account the caddy
+# package creates and runs Caddy as.
+ingress_test_caddy_tcp_api_port: 2019
+ingress_test_caddy_account: caddy
