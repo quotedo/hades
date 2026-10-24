@@ -3,6 +3,11 @@
 - name: Preflight
   hosts: dev_servers
   gather_facts: false
+  vars:
+    # Each user is combined onto {'state': 'present', 'ades': []}, so one without state counts as
+    # present.
+    hades_present_users: >-
+      {{ [{'state': 'present', 'ades': []}] | product(dev_users | default([])) | map('combine') | selectattr('state', 'eq', 'present') | list }}
   tasks:
     - name: Assert hades_domain is a non-empty string
       ansible.builtin.assert:
@@ -45,24 +50,18 @@
       loop_control:
         label: "{{ item.name | default('<unnamed>') }}"
 
-    - name: Group present logins by alphanumeric projection
-      ansible.builtin.set_fact:
-        hades_login_groups: >-
-          {%- set ns = namespace(groups={}) -%}
-          {%- for u in dev_users if (u.state | default('present')) == 'present' -%}
-          {%- set key = u.name | regex_replace('[^a-z0-9]', '') -%}
-          {%- set _ = ns.groups.update({key: ns.groups.get(key, []) + [u.name]}) -%}
-          {%- endfor -%}
-          {{ ns.groups }}
-
     - name: Assert alphanumeric projections of present logins are unique
       ansible.builtin.assert:
         that:
-          - hades_login_groups.values() | map('length') | select('gt', 1) | list | length == 0
+          - hades_keys | unique | length == hades_keys | length
         fail_msg: >-
           Logins collide after dropping non-alphanumerics:
-          {% for g in hades_login_groups.values() if g | length > 1 %}[{{ g | join(', ') }}] {% endfor %}
+          {% for key in hades_keys | unique if hades_keys.count(key) > 1 %}[{{ hades_names | zip(hades_keys)
+             | selectattr('1', 'eq', key) | map(attribute='0') | join(', ') }}] {% endfor %}
         quiet: true
+      vars:
+        hades_names: "{{ hades_present_users | map(attribute='name') | list }}"
+        hades_keys: "{{ hades_names | map('regex_replace', '[^a-z0-9]', '') | list }}"
 
     - name: Assert uids of present dev users are unique
       ansible.builtin.assert:
@@ -73,10 +72,6 @@
           {% for uid, users in hades_present_users | groupby('uid')
              if users | length > 1 %}{{ uid }} [{{ users | map(attribute='name') | join(', ') }}] {% endfor %}
         quiet: true
-      vars:
-        # Each user is combined onto {'state': 'present'}, so one without state counts as present.
-        hades_present_users: >-
-          {{ [{'state': 'present'}] | product(dev_users) | map('combine') | selectattr('state', 'eq', 'present') | list }}
 
     # Orca's pairing address must be one clients dial privately, so Orca comes with Tailscale.
     # Unset, tailscale_enabled defaults to true when a present user lists orca (ingress role).
@@ -87,8 +82,4 @@
         fail_msg: "orca is listed by: {{ hades_orca_users | join(', ') }} — it pairs over Tailscale: set tailscale_enabled: true"
         quiet: true
       vars:
-        # Each user is combined onto {'state': 'present', 'ades': []}, so one without state
-        # counts as present.
-        hades_orca_users: >-
-          {{ [{'state': 'present', 'ades': []}] | product(dev_users) | map('combine') | selectattr('state', 'eq', 'present')
-             | selectattr('ades', 'contains', 'orca') | map(attribute='name') | list }}
+        hades_orca_users: "{{ hades_present_users | selectattr('ades', 'contains', 'orca') | map(attribute='name') | list }}"

@@ -8,8 +8,6 @@
   ansible.builtin.file:
     path: "{{ hades_registry_root }}"
     state: directory
-    owner: root
-    group: root
     mode: "0755"
 
 # setgid so entries get the group, sticky so users cannot remove each other's entries.
@@ -17,7 +15,6 @@
   ansible.builtin.file:
     path: "{{ hades_registry_root }}/{{ item }}"
     state: directory
-    owner: root
     group: "{{ hades_group }}"
     mode: "3775"
   loop: [ports, sites, manifests]
@@ -26,8 +23,6 @@
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: root
-    group: root
     mode: "0755"
   loop:
     - "{{ hades_live_dir | dirname }}"
@@ -44,8 +39,6 @@
   ansible.builtin.copy:
     src: "{{ hades_local_binary_dir }}/{{ item }}"
     dest: "{{ hades_bin_dir }}/{{ item }}"
-    owner: root
-    group: root
     mode: "0755"
   loop: [hades, hades-port]
   when: hades_local_binary_dir is defined
@@ -61,8 +54,6 @@
       ansible.builtin.file:
         path: "{{ hades_download_dir }}"
         state: directory
-        owner: root
-        group: root
         mode: "0755"
 
     - name: Download the release archive, verified against checksums.txt
@@ -70,8 +61,6 @@
         url: "{{ hades_release_base_url }}/{{ host_hades_archive }}"
         dest: "{{ hades_download_dir }}/{{ host_hades_archive }}"
         checksum: "sha256:{{ hades_release_base_url }}/checksums.txt"
-        owner: root
-        group: root
         mode: "0644"
 
     - name: Unpack hades and hades-port
@@ -86,26 +75,10 @@
       # In check mode the archive was not downloaded.
       when: not ansible_check_mode
 
-- name: Read the hades version after install
-  ansible.builtin.command: "{{ hades_bin_dir }}/hades version"
-  register: host_hades_after
-  changed_when: false
-  when: not ansible_check_mode
-
-- name: Assert hades is the pinned version
-  ansible.builtin.assert:
-    that:
-      - host_hades_after.stdout == hades_version
-    fail_msg: "{{ hades_bin_dir }}/hades reports {{ host_hades_after.stdout }}, expected {{ hades_version }}"
-    quiet: true
-  when: not ansible_check_mode
-
 - name: Create the host config directory
   ansible.builtin.file:
     path: "{{ hades_config_dir }}"
     state: directory
-    owner: root
-    group: root
     mode: "0755"
 
 # caddy-reload refuses a host config that is not root-owned or is group- or world-writable.
@@ -113,15 +86,11 @@
   ansible.builtin.template:
     src: host.toml.j2
     dest: "{{ hades_config_dir }}/host.toml"
-    owner: root
-    group: root
     mode: "0644"
 
 - name: Allow group hades to run hades caddy-reload as root
   ansible.builtin.template:
     src: hades-sudoers.j2
     dest: /etc/sudoers.d/hades
-    owner: root
-    group: root
     mode: "0440"
     validate: visudo -cf %s

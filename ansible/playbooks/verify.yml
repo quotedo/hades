@@ -18,6 +18,7 @@
     - { role: services, tags: [never], when: false }
     - { role: ingress, tags: [never], when: false }
     - { role: user, tags: [never], when: false }
+    - { role: protected, tags: [never], when: false }
   tasks:
     - name: Preflight tests
       ansible.builtin.import_tasks: tasks/preflight_tests.yml

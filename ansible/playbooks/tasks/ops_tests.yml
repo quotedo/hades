@@ -67,10 +67,6 @@
     fail_msg: "hades-status exited {{ host_test_status.rc }}: {{ host_test_status.stderr | default('') }}"
     quiet: true
 
-- name: Show hades-status
-  ansible.builtin.debug:
-    var: host_test_status.stdout_lines
-
 - name: Read the journald drop-in
   ansible.builtin.slurp:
     src: /etc/systemd/journald.conf.d/hades.conf
@@ -83,16 +79,6 @@
       - ('SystemMaxUse=' ~ journald_system_max_use) in (host_test_journald.content | default('') | b64decode).splitlines()
     fail_msg: "/etc/systemd/journald.conf.d/hades.conf must set SystemMaxUse={{ journald_system_max_use }}"
     quiet: true
-
-- name: Read the journal disk usage
-  ansible.builtin.command: journalctl --disk-usage
-  become: true
-  register: host_test_journal_usage
-  changed_when: false
-
-- name: Show the journal disk usage (informational)
-  ansible.builtin.debug:
-    msg: "{{ host_test_journal_usage.stdout }} (cap {{ journald_system_max_use }})"
 
 - name: Stat the Docker daemon config
   ansible.builtin.stat:

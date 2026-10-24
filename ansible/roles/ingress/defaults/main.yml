@@ -7,14 +7,5 @@ ingress_loopback_address: 127.0.0.1
 # `systemctl reload caddy` runs `caddy reload`, which needs Caddy's API. A unix socket that
 # Caddy creates mode 0200 for its own account keeps local users from rewriting the config.
 ingress_caddy_api_socket: /var/lib/caddy/api.sock
-# Orca pairs over Tailscale. The name is the one the collection documents. Each user is combined
-# onto {'state': 'present'}, so one without state counts as present.
-tailscale_enabled: >- # noqa: var-naming[no-role-prefix]
-  {{ [{'state': 'present'}] | product(dev_users | default([])) | map('combine') | rejectattr('state', 'eq', 'absent')
-     | map(attribute='ades', default=[]) | flatten is contains('orca') }}
-# Verify playbook: a port nothing listens on, so a request the gate lets through gets 502.
-ingress_test_probe_port: 65000
-# Verify playbook: Caddy's default API port, which must stay closed, and the account the caddy
-# package creates and runs Caddy as.
-ingress_test_caddy_tcp_api_port: 2019
-ingress_test_caddy_account: caddy
+# Orca pairs over Tailscale. The name is the one the collection documents.
+tailscale_enabled: "{{ user_present | map(attribute='ades', default=[]) | flatten is contains('orca') }}" # noqa: var-naming[no-role-prefix]

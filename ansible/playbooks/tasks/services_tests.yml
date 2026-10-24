@@ -79,11 +79,7 @@
     fail_msg: "dev users in group docker: {{ services_test_docker_devs | join(', ') }}"
     quiet: true
   vars:
-    services_test_docker_members: "{{ ansible_facts.getent_group.docker[2].split(',') }}"
-    # Each entry is combined onto {'state': 'present'}, so one without state counts as present.
-    services_test_docker_devs: >-
-      {{ [{'state': 'present'}] | product(dev_users) | map('combine') | rejectattr('state', 'eq', 'absent')
-         | map(attribute='name') | intersect(services_test_docker_members) }}
+    services_test_docker_devs: "{{ user_present | map(attribute='name') | intersect(ansible_facts.getent_group.docker[2].split(',')) }}"
 
 # As root: loopback isolation lets only root, dev users and service accounts reach the ports.
 # Retried while the broker or LocalStack is still starting.

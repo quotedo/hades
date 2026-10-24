@@ -13,7 +13,6 @@ postgres_listen_addresses: [127.0.0.1, "::1"]
 
 # conf.d/hades-dev.conf. Throwaway dev data: durability is traded for speed.
 postgres_settings:
-  listen_addresses: "{{ postgres_listen_addresses | join(',') }}"
   # Sized for a 128 GB box; must stay well under hades_slice_memory_max.
   shared_buffers: 8GB
   work_mem: 16MB

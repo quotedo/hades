@@ -37,20 +37,12 @@
 
 # `nc -z` cannot tell a reject from a closed port, so the test runs its own root listener on a
 # port of the range that nothing listens on and no worktree has claimed.
-- name: Probe loopback isolation as a throwaway non-dev account
+- name: Probe loopback isolation as a non-dev account
   become: true
   vars:
-    host_test_probe_user: hades-probe
     host_test_probe_unit: hades-probe-listener.service
     host_test_probe_port: "{{ host_test_probe_pick.stdout }}"
   block:
-    - name: Assert the probe account is not a dev user
-      ansible.builtin.assert:
-        that:
-          - host_test_probe_user not in (dev_users | default([]) | map(attribute='name'))
-        fail_msg: "{{ host_test_probe_user }} is a dev user; the probe needs an account outside the allowed set"
-        quiet: true
-
     - name: Pick a free, unclaimed port of the range
       ansible.builtin.shell: |
         set -o pipefail
@@ -75,14 +67,6 @@
         fail_msg: "every port of {{ hades_port_range }} is listening or claimed; the probe has no port to listen on"
         quiet: true
 
-    - name: Create the probe account
-      ansible.builtin.user:
-        name: "{{ host_test_probe_user }}"
-        system: true
-        create_home: false
-        home: /nonexistent
-        shell: /usr/sbin/nologin
-
     - name: Start a root listener on the probe port
       ansible.builtin.command: >-
         systemd-run --unit={{ host_test_probe_unit }} --collect
@@ -98,13 +82,13 @@
     # Vacuous until the postgres role runs: nothing listens on dev_pg_port before that, so the
     # listener probe below carries the real check.
     - name: Connect to the dev Postgres port as the probe account
-      ansible.builtin.command: runuser -u {{ host_test_probe_user }} -- nc -z -w 3 {{ dev_pg_host }} {{ dev_pg_port }}
+      ansible.builtin.command: runuser -u {{ host_test_unprivileged_user }} -- nc -z -w 3 {{ dev_pg_host }} {{ dev_pg_port }}
       register: host_test_probe_pg
       changed_when: false
       failed_when: false
 
     - name: Connect to the listener as the probe account
-      ansible.builtin.command: runuser -u {{ host_test_probe_user }} -- nc -z -w 3 {{ host_loopback_address }} {{ host_test_probe_port }}
+      ansible.builtin.command: runuser -u {{ host_test_unprivileged_user }} -- nc -z -w 3 {{ host_loopback_address }} {{ host_test_probe_port }}
       register: host_test_probe_dev
       changed_when: false
       failed_when: false
@@ -116,7 +100,7 @@
       failed_when: false
 
     - name: Connect to ssh as the probe account
-      ansible.builtin.command: runuser -u {{ host_test_probe_user }} -- nc -z -w 3 {{ host_loopback_address }} {{ host_test_ssh_port }}
+      ansible.builtin.command: runuser -u {{ host_test_unprivileged_user }} -- nc -z -w 3 {{ host_loopback_address }} {{ host_test_ssh_port }}
       register: host_test_probe_ssh
       changed_when: false
       failed_when: false
@@ -140,8 +124,3 @@
         name: "{{ host_test_probe_unit }}"
         state: stopped
       failed_when: false
-
-    - name: Remove the probe account
-      ansible.builtin.user:
-        name: "{{ host_test_probe_user }}"
-        state: absent

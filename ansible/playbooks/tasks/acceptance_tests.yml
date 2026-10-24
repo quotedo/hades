@@ -112,20 +112,12 @@
       register: acceptance_dbs_up
       changed_when: false
 
-    - name: Create the probe account
-      ansible.builtin.user:
-        name: hades-probe
-        system: true
-        create_home: false
-        home: /nonexistent
-        shell: /usr/sbin/nologin
-
     - name: Connect to the worktree port as the probe account and as the user
       ansible.builtin.command: runuser -u {{ item }} -- nc -z -w 3 {{ ingress_loopback_address }} {{ acceptance_port }}
       register: acceptance_nc
       changed_when: false
       failed_when: false
-      loop: [hades-probe, "{{ acceptance_user }}"]
+      loop: ["{{ host_test_unprivileged_user }}", "{{ acceptance_user }}"]
 
     - name: Run hades doctor as the user
       ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'hades doctor'
@@ -188,11 +180,6 @@
         name: hades-acceptance-http.service
         state: stopped
       failed_when: false
-
-    - name: Remove the probe account
-      ansible.builtin.user:
-        name: hades-probe
-        state: absent
 
     - name: Release whatever the worktree still holds
       ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ acceptance_wt }} && hades down'

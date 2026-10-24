@@ -29,8 +29,6 @@
   ansible.builtin.file:
     path: "{{ hades_config_dir }}/keys"
     state: directory
-    owner: root
-    group: root
     mode: "0755"
 
 # In check mode a key that is not generated yet cannot be exported.
@@ -38,8 +36,6 @@
   ansible.builtin.copy:
     content: "{{ user_gpg_public.stdout }}\n"
     dest: "{{ hades_config_dir }}/keys/{{ user.name }}.asc"
-    owner: root
-    group: root
     mode: "0644"
   register: user_gpg_file
   when: not ansible_check_mode or user_gpg_key.rc == 0

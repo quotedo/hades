@@ -35,8 +35,6 @@
   ansible.builtin.template:
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
-    owner: root
-    group: root
     mode: "0644"
   loop:
     - { src: user-slice-dropin.conf.j2, dest: "/etc/systemd/system/user-{{ user.uid }}.slice.d/{{ hades_user_slice_dropin_name }}" }

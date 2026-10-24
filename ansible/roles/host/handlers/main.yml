@@ -34,10 +34,3 @@
     - docker_restart_on_change | bool
     - host_dockerd.stat.exists | default(false)
   listen: docker restart
-
-# Loads (or replaces) the one Chrome for Testing profile and refreshes its cache entry.
-- name: Load the Chrome for Testing AppArmor profile
-  ansible.builtin.command: "{{ host_apparmor_parser }} -r -T -W /etc/apparmor.d/chrome-for-testing"
-  changed_when: true
-  when: not ansible_check_mode
-  listen: chrome apparmor load

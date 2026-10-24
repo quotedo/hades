@@ -3,8 +3,6 @@
   ansible.builtin.get_url:
     url: https://pkgs.tailscale.com/stable/{{ ansible_facts.distribution | lower }}/{{ ansible_facts.distribution_release }}.noarmor.gpg
     dest: /etc/apt/keyrings/tailscale.gpg
-    owner: root
-    group: root
     mode: "0644"
 
 - name: Add the Tailscale repository
@@ -17,8 +15,6 @@
       Components: main
       Signed-By: /etc/apt/keyrings/tailscale.gpg
     dest: /etc/apt/sources.list.d/tailscale.sources
-    owner: root
-    group: root
     mode: "0644"
   register: ingress_tailscale_repo
 

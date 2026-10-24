@@ -33,8 +33,6 @@
       ansible.builtin.get_url:
         url: https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}/gpg
         dest: /etc/apt/keyrings/docker.asc
-        owner: root
-        group: root
         mode: "0644"
 
     - name: Write the Docker source
@@ -47,8 +45,6 @@
           Components: stable
           Signed-By: /etc/apt/keyrings/docker.asc
         dest: /etc/apt/sources.list.d/docker.sources
-        owner: root
-        group: root
         mode: "0644"
 
     - name: Install Docker CE
@@ -64,16 +60,12 @@
   ansible.builtin.file:
     path: "{{ services_dir }}"
     state: directory
-    owner: root
-    group: root
     mode: "0755"
 
 - name: Write the compose project and its unit
   ansible.builtin.template:
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
-    owner: root
-    group: root
     mode: "{{ item.mode }}"
   loop:
     - { src: docker-compose.yml.j2, dest: "{{ services_dir }}/docker-compose.yml", mode: "0644" }

@@ -3,7 +3,5 @@
   ansible.builtin.template:
     src: hades.slice.j2
     dest: /etc/systemd/system/hades.slice
-    owner: root
-    group: root
     mode: "0644"
   notify: daemon-reload

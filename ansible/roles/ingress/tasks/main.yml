@@ -31,8 +31,6 @@
   ansible.builtin.template:
     src: ingress.md.j2
     dest: "{{ hades_config_dir }}/ingress.md"
-    owner: root
-    group: root
     mode: "0644"
 
 - name: Tailscale

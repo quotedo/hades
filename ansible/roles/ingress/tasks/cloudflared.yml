@@ -12,8 +12,6 @@
   ansible.builtin.get_url:
     url: https://pkg.cloudflare.com/cloudflare-main.gpg
     dest: /etc/apt/keyrings/cloudflare-main.gpg
-    owner: root
-    group: root
     mode: "0644"
 
 # Cloudflare publishes the one suite `any` for every release.
@@ -27,8 +25,6 @@
       Components: main
       Signed-By: /etc/apt/keyrings/cloudflare-main.gpg
     dest: /etc/apt/sources.list.d/cloudflared.sources
-    owner: root
-    group: root
     mode: "0644"
   register: ingress_cloudflared_repo
 
@@ -46,8 +42,6 @@
   ansible.builtin.file:
     path: /etc/cloudflared
     state: directory
-    owner: root
-    group: root
     mode: "0700"
 
 # The unit reads it with --token-file, so the token is in no world-readable file and no process
@@ -56,8 +50,6 @@
   ansible.builtin.copy:
     content: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_TUNNEL_TOKEN') }}"
     dest: /etc/cloudflared/token
-    owner: root
-    group: root
     mode: "0600"
   no_log: true
   notify: cloudflared restart
@@ -66,8 +58,6 @@
   ansible.builtin.template:
     src: cloudflared.service.j2
     dest: /etc/systemd/system/cloudflared.service
-    owner: root
-    group: root
     mode: "0644"
   register: ingress_cloudflared_unit
   notify: cloudflared restart

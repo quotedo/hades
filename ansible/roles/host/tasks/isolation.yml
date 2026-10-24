@@ -8,6 +8,33 @@
 #
 # nftables `meta skgid` sees only the socket creator's primary gid, and dev users keep a private
 # primary group (hades is supplementary), so "group hades" is matched as an explicit uid set.
+- name: Read the local accounts
+  ansible.builtin.getent:
+    database: passwd
+
+# Accounts that do not exist yet (caddy, cloudflared and hades-postgres before their roles have
+# run) are left out, so the rule set changes once when they appear.
+- name: Compute the uid and port sets
+  ansible.builtin.set_fact:
+    host_isolation_dev_uids: "{{ user_present | map(attribute='uid') | map('int') | unique | sort }}"
+    host_isolation_service_uids: >-
+      {{ host_isolation_service_accounts | select('in', ansible_facts.getent_passwd)
+         | map('extract', ansible_facts.getent_passwd) | map(attribute=1) | map('int') | sort }}
+    host_isolation_dev_ports: >-
+      {{ ([hades_port_range, dev_pg_port, caddy_port]
+          + ([rabbitmq_amqp_port, rabbitmq_management_port, rabbitmq_mqtt_port] if 'rabbitmq' in dev_services else [])
+          + ([localstack_port] if 'localstack' in dev_services else [])
+          + ([redis_port] if 'redis' in dev_services else [])
+          + (user_present | selectattr('paseo_port', 'defined') | map(attribute='paseo_port') | list)
+          + (user_present | selectattr('orca_port', 'defined') | map(attribute='orca_port') | list))
+         | map('string') | unique | sort }}
+    # Orca binds every address; the input chain keeps these to loopback and Tailscale.
+    host_isolation_orca_ports: >-
+      {{ user_present | selectattr('ades', 'defined') | selectattr('ades', 'contains', 'orca')
+         | selectattr('orca_port', 'defined') | map(attribute='orca_port') | map('int') | unique | sort }}
+    host_isolation_blocked_ports: >-
+      {{ (protected | default({})).blocked_ports | default([]) | map('int') | unique | sort }}
+
 - name: Assert the variables loopback isolation consumes
   ansible.builtin.assert:
     that:
@@ -22,83 +49,27 @@
       - (protected | default({})).blocked_ports | default([]) is not string
       - dev_services is sequence
       - dev_services is not string
-      - host_isolation_port_inputs | map('string') | reject('match', '^[0-9]+$') | list | length == 0
-      - host_isolation_port_inputs | map('int') | select('gt', 65535) | list | length == 0
-      - host_isolation_port_inputs | map('int') | select('lt', 1) | list | length == 0
+      - host_isolation_ports | reject('match', '^[0-9]+$') | list | length == 0
+      - host_isolation_ports | map('int') | select('gt', 65535) | list | length == 0
+      - host_isolation_ports | map('int') | select('lt', 1) | list | length == 0
     fail_msg: >-
       dev_users and dev_services must be lists, hades_port_range a "<first>-<last>" string,
       protected.blocked_ports, when set, a list of ports, and every port isolation consumes an
-      integer from 1 to 65535: {{ host_isolation_port_inputs | join(', ') }}
+      integer from 1 to 65535: {{ host_isolation_ports | join(', ') }}
     quiet: true
   vars:
-    host_isolation_port_inputs: >-
-      {{ [dev_pg_port, caddy_port, rabbitmq_amqp_port, rabbitmq_management_port, rabbitmq_mqtt_port,
-          localstack_port, redis_port]
-         + (dev_users | default([]) | selectattr('paseo_port', 'defined') | map(attribute='paseo_port') | list)
-         + (dev_users | default([]) | selectattr('orca_port', 'defined') | map(attribute='orca_port') | list)
-         + ((protected | default({})).blocked_ports | default([]) | list) }}
-
-- name: Read the local accounts
-  ansible.builtin.getent:
-    database: passwd
-
-# Accounts that do not exist yet (caddy, cloudflared and hades-postgres before their roles have
-# run) are left out, so the rule set changes once when they appear.
-- name: Compute the uid and port sets
-  ansible.builtin.set_fact:
-    host_isolation_dev_uids: >-
-      {%- set out = [] -%}
-      {%- for u in dev_users if (u.state | default('present')) == 'present' -%}
-      {%- set _ = out.append(u.uid | int) -%}
-      {%- endfor -%}
-      {{ out | unique | sort }}
-    host_isolation_service_uids: >-
-      {%- set out = [] -%}
-      {%- for name in host_isolation_service_accounts if name in ansible_facts.getent_passwd -%}
-      {%- set _ = out.append(ansible_facts.getent_passwd[name][1] | int) -%}
-      {%- endfor -%}
-      {{ out | unique | sort }}
-    host_isolation_dev_ports: >-
-      {%- set out = [hades_port_range, dev_pg_port | int, caddy_port | int] -%}
-      {%- if 'rabbitmq' in dev_services -%}
-      {%- set _ = out.extend([rabbitmq_amqp_port | int, rabbitmq_management_port | int, rabbitmq_mqtt_port | int]) -%}
-      {%- endif -%}
-      {%- if 'localstack' in dev_services -%}
-      {%- set _ = out.append(localstack_port | int) -%}
-      {%- endif -%}
-      {%- if 'redis' in dev_services -%}
-      {%- set _ = out.append(redis_port | int) -%}
-      {%- endif -%}
-      {%- for u in dev_users if (u.state | default('present')) == 'present' -%}
-      {%- for key in ['paseo_port', 'orca_port'] if u[key] is defined -%}
-      {%- set _ = out.append(u[key] | int) -%}
-      {%- endfor -%}
-      {%- endfor -%}
-      {{ out | map('string') | unique | sort }}
-    # Orca binds every address; the input chain keeps these to loopback and Tailscale.
-    host_isolation_orca_ports: >-
-      {%- set out = [] -%}
-      {%- for u in dev_users if (u.state | default('present')) == 'present' and 'orca' in u.ades | default([]) and u.orca_port is defined -%}
-      {%- set _ = out.append(u.orca_port | int) -%}
-      {%- endfor -%}
-      {{ out | unique | sort }}
-    host_isolation_blocked_ports: >-
-      {{ (protected | default({})).blocked_ports | default([]) | map('int') | unique | sort }}
+    host_isolation_ports: "{{ host_isolation_dev_ports | reject('eq', hades_port_range) | list + host_isolation_blocked_ports | map('string') | list }}"
 
 - name: Create /etc/nftables.d
   ansible.builtin.file:
     path: /etc/nftables.d
     state: directory
-    owner: root
-    group: root
     mode: "0755"
 
 - name: Write the isolation rules
   ansible.builtin.template:
     src: hades-isolation.nft.j2
     dest: /etc/nftables.d/hades.nft
-    owner: root
-    group: root
     mode: "0644"
     validate: nft -c -f %s
   notify: hades-nftables reload
@@ -107,8 +78,6 @@
   ansible.builtin.template:
     src: hades-nftables.service.j2
     dest: /etc/systemd/system/hades-nftables.service
-    owner: root
-    group: root
     mode: "0644"
   register: host_isolation_unit
   notify: daemon-reload

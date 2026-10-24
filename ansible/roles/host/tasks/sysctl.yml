@@ -3,8 +3,6 @@
   ansible.builtin.template:
     src: sysctl-hades.conf.j2
     dest: /etc/sysctl.d/90-hades.conf
-    owner: root
-    group: root
     mode: "0644"
   notify: sysctl reload
 
@@ -20,8 +18,6 @@
       ansible.builtin.template:
         src: hades-governor.service.j2
         dest: /etc/systemd/system/hades-governor.service
-        owner: root
-        group: root
         mode: "0644"
       register: host_governor_unit
       notify: daemon-reload

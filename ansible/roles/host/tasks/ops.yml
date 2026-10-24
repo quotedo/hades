@@ -5,16 +5,12 @@
   ansible.builtin.file:
     path: "{{ backup_dir }}"
     state: directory
-    owner: root
-    group: root
     mode: "0700"
 
 - name: Install hades-backup and hades-status
   ansible.builtin.template:
     src: "{{ item }}.sh.j2"
     dest: "{{ hades_bin_dir }}/{{ item }}"
-    owner: root
-    group: root
     mode: "0755"
   loop: [hades-backup, hades-status]
 
@@ -22,8 +18,6 @@
   ansible.builtin.template:
     src: "{{ item }}.j2"
     dest: /etc/systemd/system/{{ item }}
-    owner: root
-    group: root
     mode: "0644"
   loop:
     - hades-gc.service
@@ -49,16 +43,12 @@
   ansible.builtin.file:
     path: /etc/systemd/journald.conf.d
     state: directory
-    owner: root
-    group: root
     mode: "0755"
 
 - name: Cap the journal size
   ansible.builtin.template:
     src: journald-hades.conf.j2
     dest: /etc/systemd/journald.conf.d/hades.conf
-    owner: root
-    group: root
     mode: "0644"
   notify: journald restart
 
@@ -87,8 +77,6 @@
   ansible.builtin.file:
     path: /etc/docker
     state: directory
-    owner: root
-    group: root
     mode: "0755"
   when: not host_docker_conf_stat.stat.exists
 
@@ -116,8 +104,6 @@
   ansible.builtin.copy:
     content: "{{ host_docker_merged | to_nice_json(indent=2) }}\n"
     dest: /etc/docker/daemon.json
-    owner: root
-    group: root
     mode: "0644"
   when: host_docker_merged != host_docker_current
   register: host_docker_written
@@ -138,6 +124,4 @@
   ansible.builtin.template:
     src: profile-hades.sh.j2
     dest: /etc/profile.d/hades.sh
-    owner: root
-    group: root
     mode: "0644"

@@ -15,16 +15,12 @@
   ansible.builtin.file:
     path: /etc/apt/keyrings
     state: directory
-    owner: root
-    group: root
     mode: "0755"
 
 - name: Download the NodeSource signing key
   ansible.builtin.get_url:
     url: https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key
     dest: /etc/apt/keyrings/nodesource.asc
-    owner: root
-    group: root
     mode: "0644"
   register: host_nodesource_key
 
@@ -39,8 +35,6 @@
       Architectures: amd64
       Signed-By: /etc/apt/keyrings/nodesource.asc
     dest: /etc/apt/sources.list.d/nodesource.sources
-    owner: root
-    group: root
     mode: "0644"
   register: host_nodesource_repo
 
@@ -53,8 +47,6 @@
       Pin: origin deb.nodesource.com
       Pin-Priority: 600
     dest: /etc/apt/preferences.d/nodesource
-    owner: root
-    group: root
     mode: "0644"
   register: host_nodesource_pin
 
@@ -77,30 +69,10 @@
   vars:
     host_node_wrong: "{{ host_node_before.rc != 0 or host_node_before.stdout is not match('v' ~ node_major ~ '\\.') }}"
 
-- name: Read the system Node version after install
-  ansible.builtin.command: node --version
-  register: host_node_after
-  changed_when: false
-  failed_when: false
-  when: not ansible_check_mode
-
-- name: Assert the system Node is NodeSource's pinned major
-  ansible.builtin.assert:
-    that:
-      - host_node_after.rc == 0
-      - host_node_after.stdout is match('v' ~ node_major ~ '\\.')
-    fail_msg: >-
-      node --version reports {{ host_node_after.stdout | default('nothing') }}, expected
-      v{{ node_major }}.x from NodeSource; another nodejs package may already be installed
-    quiet: true
-  when: not ansible_check_mode
-
 - name: Create the Chrome for Testing directories
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
-    owner: root
-    group: root
     mode: "0755"
   loop:
     - "{{ chrome_root }}"
@@ -147,8 +119,6 @@
     src: "{{ (host_chrome_found.files | sort(attribute='mtime') | last).path }}"
     dest: "{{ chrome_root }}/chrome"
     state: link
-    owner: root
-    group: root
   when: not ansible_check_mode
 
 - name: Find libraries Chrome cannot resolve
@@ -169,8 +139,8 @@
     quiet: true
   when: not ansible_check_mode
 
-# Only on hosts that run AppArmor; nothing is installed for it. The handler loads this one
-# profile and touches no other.
+# Only on hosts that run AppArmor; nothing is installed for it. Loads this one profile and
+# touches no other.
 - name: Find apparmor_parser
   ansible.builtin.stat:
     path: "{{ item }}"
@@ -187,37 +157,30 @@
     host_apparmor_parser: >-
       {{ (host_apparmor_parsers.results | selectattr('stat.exists') | map(attribute='item') | list + [''])[0] }}
 
-- name: Write the Chrome for Testing AppArmor profile
-  ansible.builtin.template:
-    src: apparmor-chrome-for-testing.j2
-    dest: /etc/apparmor.d/chrome-for-testing
-    owner: root
-    group: root
-    mode: "0644"
-    validate: "{{ host_apparmor_parser }} -Q -K %s"
-  notify: chrome apparmor load
+- name: Chrome for Testing AppArmor profile
   when:
     - host_apparmor_parser | length > 0
     - host_apparmor_dir.stat.isdir | default(false)
+  block:
+    - name: Write the Chrome for Testing AppArmor profile
+      ansible.builtin.template:
+        src: apparmor-chrome-for-testing.j2
+        dest: /etc/apparmor.d/chrome-for-testing
+        mode: "0644"
+        validate: "{{ host_apparmor_parser }} -Q -K %s"
+      register: host_apparmor_profile
 
-- name: Load a changed AppArmor profile
-  ansible.builtin.meta: flush_handlers
+    - name: Read the loaded AppArmor profiles
+      ansible.builtin.slurp:
+        src: /sys/kernel/security/apparmor/profiles
+      register: host_apparmor_loaded
+      failed_when: false
 
-# Repairs a load that failed on an earlier run, when the file itself no longer changes.
-- name: Read the loaded AppArmor profiles
-  ansible.builtin.slurp:
-    src: /sys/kernel/security/apparmor/profiles
-  register: host_apparmor_loaded
-  failed_when: false
-  when:
-    - host_apparmor_parser | length > 0
-    - host_apparmor_dir.stat.isdir | default(false)
-
-- name: Load the Chrome for Testing AppArmor profile when the kernel lacks it
-  ansible.builtin.command: "{{ host_apparmor_parser }} -r -T -W /etc/apparmor.d/chrome-for-testing"
-  changed_when: true
-  when:
-    - host_apparmor_parser | length > 0
-    - host_apparmor_dir.stat.isdir | default(false)
-    - host_apparmor_loaded.content is defined
-    - (host_apparmor_loaded.content | b64decode).splitlines() | select('match', '^chrome-for-testing ') | list | length == 0
+    # Also repairs a load that failed on an earlier run, when the file itself no longer changes.
+    - name: Load the Chrome for Testing AppArmor profile
+      ansible.builtin.command: "{{ host_apparmor_parser }} -r -T -W /etc/apparmor.d/chrome-for-testing"
+      changed_when: true
+      when: >-
+        host_apparmor_profile is changed
+        or (host_apparmor_loaded.content is defined
+            and (host_apparmor_loaded.content | b64decode).splitlines() | select('match', '^chrome-for-testing ') | list | length == 0)

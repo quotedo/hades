@@ -33,9 +33,9 @@
       - ingress_test_port_lines | length > 0
       - ingress_test_port_lines | reject('search', ingress_test_bind) | list | length == 0
       - ingress_test_ss.stdout_lines | select('search', '"caddy"') | reject('search', ingress_test_bind) | list | length == 0
-      - ingress_test_ss.stdout_lines | select('search', ':' ~ ingress_test_caddy_tcp_api_port ~ ' ') | list | length == 0
+      - ingress_test_ss.stdout_lines | select('search', ':2019 ') | list | length == 0
     fail_msg: >-
-      listeners: {{ ingress_test_ss.stdout_lines | select('search', ':(' ~ caddy_port ~ '|' ~ ingress_test_caddy_tcp_api_port ~ ') |"caddy"')
+      listeners: {{ ingress_test_ss.stdout_lines | select('search', ':(' ~ caddy_port ~ '|2019) |"caddy"')
                     | join(' | ') or 'none' }}
     quiet: true
   vars:
@@ -52,10 +52,10 @@
   ansible.builtin.assert:
     that:
       - ingress_test_api_socket.stat.issock | default(false)
-      - ingress_test_api_socket.stat.pw_name == ingress_test_caddy_account
+      - ingress_test_api_socket.stat.pw_name == 'caddy'
       - ingress_test_api_socket.stat.mode == '0200'
     fail_msg: >-
-      {{ ingress_caddy_api_socket }} must be a socket owned by {{ ingress_test_caddy_account }} with mode 0200, got
+      {{ ingress_caddy_api_socket }} must be a socket owned by caddy with mode 0200, got
       {{ ingress_test_api_socket.stat.pw_name | default('nothing') }} {{ ingress_test_api_socket.stat.mode | default('') }}
     quiet: true
 
@@ -72,10 +72,8 @@
   block:
     - name: Write the probe site
       ansible.builtin.copy:
-        content: "import worktree probe.{{ hades_domain }} {{ ingress_test_probe_port }}\n"
+        content: "import worktree probe.{{ hades_domain }} 65000\n"
         dest: "{{ hades_live_dir }}/probe.caddy"
-        owner: root
-        group: root
         mode: "0644"
 
     - name: Reload Caddy with the probe site

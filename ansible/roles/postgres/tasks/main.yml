@@ -40,8 +40,6 @@
       ansible.builtin.get_url:
         url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
         dest: /etc/apt/keyrings/pgdg.asc
-        owner: root
-        group: root
         mode: "0644"
 
     - name: Write the PGDG source
@@ -54,8 +52,6 @@
           Components: main
           Signed-By: /etc/apt/keyrings/pgdg.asc
         dest: /etc/apt/sources.list.d/pgdg.sources
-        owner: root
-        group: root
         mode: "0644"
       register: postgres_pgdg
 
@@ -73,8 +69,6 @@
       ansible.builtin.file:
         path: /etc/postgresql-common/createcluster.d
         state: directory
-        owner: root
-        group: root
         mode: "0755"
 
     - name: Disable the default main cluster
@@ -83,8 +77,6 @@
           # Managed by Ansible (hades postgres role): only the dev cluster runs here.
           create_main_cluster = false
         dest: /etc/postgresql-common/createcluster.d/hades.conf
-        owner: root
-        group: root
         mode: "0644"
 
 # contrib ships inside postgresql-N; the community.postgresql modules need python3-psycopg2.
@@ -136,16 +128,12 @@
   ansible.builtin.file:
     path: /etc/systemd/system/postgresql@{{ dev_pg_major }}-{{ dev_pg_cluster }}.service.d
     state: directory
-    owner: root
-    group: root
     mode: "0755"
 
 - name: Put the dev cluster into hades.slice
   ansible.builtin.template:
     src: postgresql-slice.conf.j2
     dest: /etc/systemd/system/postgresql@{{ dev_pg_major }}-{{ dev_pg_cluster }}.service.d/hades.conf
-    owner: root
-    group: root
     mode: "0644"
   notify: postgres restart
 

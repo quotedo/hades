@@ -4,8 +4,6 @@
   ansible.builtin.get_url:
     url: https://cli.github.com/packages/githubcli-archive-keyring.gpg
     dest: /etc/apt/keyrings/githubcli.gpg
-    owner: root
-    group: root
     mode: "0644"
   register: user_gh_key
 
@@ -20,8 +18,6 @@
       Architectures: amd64
       Signed-By: /etc/apt/keyrings/githubcli.gpg
     dest: /etc/apt/sources.list.d/github-cli.sources
-    owner: root
-    group: root
     mode: "0644"
   register: user_gh_repo
 

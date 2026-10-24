@@ -3,35 +3,24 @@
   ansible.builtin.getent:
     database: passwd
 
-# Capped logins become their user-<uid>.slice.
-- name: List the capped units
-  ansible.builtin.set_fact:
-    protected_capped: >-
-      {{ protected.capped_users | map('extract', ansible_facts.getent_passwd) | map(attribute='1')
-         | map('regex_replace', '^(.+)$', 'user-\1.slice') | list + protected.capped_units }}
-
 - name: Create the drop-in directories
   ansible.builtin.file:
     path: "/etc/systemd/system/{{ item }}.d"
     state: directory
-    owner: root
-    group: root
     mode: "0755"
-  loop: "{{ (['system.slice', 'user.slice'] if protected.floor else []) + protected_capped }}"
+  loop: "{{ (['system.slice', 'user.slice'] if protected.floor | default(false) else []) + protected_capped }}"
 
 - name: Write the floor
   ansible.builtin.copy:
     dest: "/etc/systemd/system/{{ item.dest }}"
     content: "[Slice]\n{{ item.settings }}\n"
-    owner: root
-    group: root
     mode: "0644"
   loop:
     - { dest: system.slice.d/50-hades-floor.conf, settings: "MemoryLow={{ protected_system_memory_low }}\nCPUWeight={{ protected_system_cpu_weight }}" }
     - { dest: user.slice.d/50-hades.conf, settings: "CPUWeight={{ protected_user_slice_cpu_weight }}" }
   loop_control:
     label: "{{ item.dest }}"
-  when: protected.floor
+  when: protected.floor | default(false)
   notify: daemon-reload
 
 # Named 20-* so an operator's `systemctl set-property` caps (50-*.conf in system.control) still win.
@@ -42,8 +31,6 @@
       [{{ item.split('.') | last | capitalize }}]
       CPUWeight={{ capped_cpu_weight }}
       MemoryMax={{ capped_memory_max }}
-    owner: root
-    group: root
     mode: "0644"
   loop: "{{ protected_capped }}"
   notify: daemon-reload
@@ -52,4 +39,4 @@
   ansible.builtin.file:
     path: "{{ ansible_facts.getent_passwd[item][4] }}"
     mode: "0750"
-  loop: "{{ protected.private_homes }}"
+  loop: "{{ protected.private_homes | default([]) }}"

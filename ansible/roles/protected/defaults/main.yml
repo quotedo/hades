@@ -1,0 +1,5 @@
+---
+# Capped logins become their user-<uid>.slice. Reads the passwd facts gathered before use.
+protected_capped: >-
+  {{ protected.capped_users | default([]) | map('extract', ansible_facts.getent_passwd) | map(attribute='1')
+     | map('regex_replace', '^(.+)$', 'user-\1.slice') | list + protected.capped_units | default([]) }}
