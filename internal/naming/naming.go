@@ -131,7 +131,7 @@ func render(tmpl string, v Vars) (string, error) {
 
 // Suffix builds a database suffix "_<user>_<name>". The user part keeps only
 // lower-case letters and digits, so the first "_"-delimited segment of a
-// suffix is always the owner's login: "roman-feature" with "x" and "roman"
+// suffix is always the owner's login: "alice-feature" with "x" and "alice"
 // with "feature/x" cannot collide. In the name, lower-case letters, digits
 // and "_" are kept, "-" becomes "_", and everything else is dropped. A result
 // longer than 32 bytes (counting the "_" below) keeps its first 22 bytes and

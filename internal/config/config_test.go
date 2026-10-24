@@ -106,7 +106,7 @@ func TestLoadProjectExample(t *testing.T) {
 	wt := t.TempDir()
 	os.WriteFile(filepath.Join(wt, "hades.toml"), data, 0o644)
 	p, _, err := LoadProject(wt, wt)
-	if err != nil || p.Project != "jarl" || p.Env["JARL_ENDPOINT"] != "{{host}}" || !p.Services.RabbitMQ.Vhost || p.Databases[0] != "gym_nation" {
+	if err != nil || p.Project != "shop" || p.Env["SHOP_ENDPOINT"] != "{{host}}" || !p.Services.RabbitMQ.Vhost || p.Databases[0] != "shop" {
 		t.Fatalf("%+v %v", p, err)
 	}
 }

@@ -20,7 +20,7 @@ import (
 
 func TestDownRemovesEverythingItOwns(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
-	d.PG.(*fakePG).names = []string{"demo_dev_roman_feature_x", "demo_test_roman_feature_x1", "demo_dev_roman_other"}
+	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x", "demo_test_alice_feature_x1", "demo_dev_alice_other"}
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	res, err := Down(context.Background(), d, c, false)
 	if err != nil {
@@ -31,7 +31,7 @@ func TestDownRemovesEverythingItOwns(t *testing.T) {
 			t.Fatalf("%+v", r)
 		}
 	}
-	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_roman_feature_x", "demo_test_roman_feature_x1"}) {
+	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_alice_feature_x", "demo_test_alice_feature_x1"}) {
 		t.Fatal(got)
 	}
 	if all, _, _ := d.Reg.All(); len(all) != 0 {
@@ -67,9 +67,9 @@ func TestDownUsesManifestBasesNotCurrentConfig(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	os.WriteFile(filepath.Join(c.Worktree, "hades.toml"), []byte("databases = [\"other\"]\n"), 0o644)
-	d.PG.(*fakePG).names = []string{"demo_dev_roman_feature_x", "other_dev_roman_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x", "other_dev_alice_feature_x"}
 	Down(context.Background(), d, c, false)
-	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_roman_feature_x"}) {
+	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_alice_feature_x"}) {
 		t.Fatal(got)
 	}
 }
@@ -78,7 +78,7 @@ func TestDownBestEffortAndStrict(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	d.PG.(*fakePG).failDrop = true
-	d.PG.(*fakePG).names = []string{"demo_dev_roman_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x"}
 	var log bytes.Buffer
 	d.Log = &log
 	res, err := Down(context.Background(), d, c, false)
@@ -115,14 +115,14 @@ func TestDownBestEffortAndStrict(t *testing.T) {
 func TestGCReleasesVanishedWorktreesAndOwner(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
-	d2, c2 := newServerDepsSharing(t, d, "phoenix", "roman") // second worktree, same registry and user
+	d2, c2 := newServerDepsSharing(t, d, "phoenix", "alice") // second worktree, same registry and user
 	Up(context.Background(), d2, c2, UpOptions{SkipSetup: true})
 	os.RemoveAll(c.Worktree)
 	rep, _ := GC(context.Background(), d, "", false)
 	if len(rep.Released) != 1 || rep.Released[0] != "demo-feature-x" {
 		t.Fatalf("%+v", rep)
 	}
-	rep, _ = GC(context.Background(), d, "roman", false)
+	rep, _ = GC(context.Background(), d, "alice", false)
 	if len(rep.Released) != 1 {
 		t.Fatalf("%+v", rep)
 	}
@@ -135,7 +135,7 @@ func TestGCReleasesVanishedWorktreesAndOwner(t *testing.T) {
 func TestGCOwnerSelectsByFileOwner(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	mustUp(t, d, c)
-	d2, c2 := newServerDepsSharing(t, d, "phoenix", "other") // user field "other", file owned by roman
+	d2, c2 := newServerDepsSharing(t, d, "phoenix", "other") // user field "other", file owned by alice
 	mustUp(t, d2, c2)
 	rep, err := GC(context.Background(), d, "other", false)
 	if err != nil || len(rep.Released) != 0 || len(rep.Errors) != 0 {
@@ -147,9 +147,9 @@ func TestGCOwnerSelectsByFileOwner(t *testing.T) {
 	if _, err := GC(context.Background(), d, "nobody", false); err == nil || !strings.Contains(err.Error(), "nobody") {
 		t.Fatal(err)
 	}
-	// roman's run selects both files roman owns, and then verification
+	// alice's run selects both files alice owns, and then verification
 	// refuses the one whose suffix was computed for "other".
-	rep, err = GC(context.Background(), d, "roman", false)
+	rep, err = GC(context.Background(), d, "alice", false)
 	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 1 || !strings.Contains(rep.Errors[0].Error(), "refusing ") {
 		t.Fatalf("%+v %v", rep, err)
 	}
@@ -324,16 +324,16 @@ func TestDownNeverDropsOtherWorktreesDatabases(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	mustUp(t, d, c)
 	d.PG.(*fakePG).names = []string{
-		"demo_dev_roman_feature_x",
-		"demo_test_roman_feature_x2",   // this worktree's MIX_TEST_PARTITION=2
-		"demo_dev_roman_feature_x1_",   // roman's worktree feature/x1
-		"demo_dev_bob_roman_feature_x", // bob's worktree roman-feature-x
-		"demoapp_dev_roman_feature_x",  // another project
+		"demo_dev_alice_feature_x",
+		"demo_test_alice_feature_x2",   // this worktree's MIX_TEST_PARTITION=2
+		"demo_dev_alice_feature_x1_",   // alice's worktree feature/x1
+		"demo_dev_bob_alice_feature_x", // bob's worktree alice-feature-x
+		"demoapp_dev_alice_feature_x",  // another project
 	}
 	if _, err := Down(context.Background(), d, c, true); err != nil {
 		t.Fatal(err)
 	}
-	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_roman_feature_x", "demo_test_roman_feature_x2"}) {
+	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_alice_feature_x", "demo_test_alice_feature_x2"}) {
 		t.Fatal(got)
 	}
 }
@@ -417,7 +417,7 @@ func TestGCDryRunChangesNothing(t *testing.T) {
 func TestGCReloadsCaddyOnceForSeveralSites(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	mustUp(t, d, c)
-	d2, c2 := newServerDepsSharing(t, d, "phoenix", "roman")
+	d2, c2 := newServerDepsSharing(t, d, "phoenix", "alice")
 	mustUp(t, d2, c2)
 	for _, wt := range []string{c.Worktree, c2.Worktree} {
 		if err := os.RemoveAll(wt); err != nil {
@@ -463,9 +463,9 @@ func TestGCRemovesStalePortLinks(t *testing.T) {
 func TestGCReportsStepErrorsAndCarriesOn(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	mustUp(t, d, c)
-	d2, c2 := newServerDepsSharing(t, d, "phoenix", "roman")
+	d2, c2 := newServerDepsSharing(t, d, "phoenix", "alice")
 	mustUp(t, d2, c2)
-	d.PG.(*fakePG).names = []string{"demo_dev_roman_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x"}
 	d.PG.(*fakePG).failDrop = true
 	for _, wt := range []string{c.Worktree, c2.Worktree} {
 		if err := os.RemoveAll(wt); err != nil {
@@ -493,7 +493,7 @@ func TestGCReportsStepErrorsAndCarriesOn(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 0 {
 		t.Fatalf("retry: %+v %v", rep, err)
 	}
-	if !reflect.DeepEqual(d.PG.(*fakePG).dropped, []string{"demo_dev_roman_feature_x"}) {
+	if !reflect.DeepEqual(d.PG.(*fakePG).dropped, []string{"demo_dev_alice_feature_x"}) {
 		t.Fatal(d.PG.(*fakePG).dropped)
 	}
 }

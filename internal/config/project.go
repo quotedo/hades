@@ -23,7 +23,7 @@ type Project struct {
 	Web       *bool
 	Setup     []string
 	Teardown  []string
-	Databases []string // base names before the worktree suffix, e.g. gym_nation_dev; default <app>_dev, <app>_test
+	Databases []string // base names before the worktree suffix, e.g. shop_dev; default <app>_dev, <app>_test
 	Env       map[string]string
 	Services  Services
 	MCP       MCP

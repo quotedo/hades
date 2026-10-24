@@ -7,6 +7,8 @@ dev_servers:
       ansible_user: <SUDO_USER>
       hades_domain: <DOMAIN>
       hades_label_template: !unsafe '{{project}}-{{name}}'
+      # hades_version: "0.1.0"  # a published release; until one exists, build the CLI for linux/amd64 and name the directory:
+      # hades_local_binary_dir: /path/to/dist/linux_amd64
       # Cloudflare Access admits every present dev user's email plus these emails or @domains.
       access_allow: []
       dev_services: [rabbitmq, localstack]
@@ -24,6 +26,7 @@ dev_servers:
         kubectl: ["1.33.13"]
         gh: ["2.103.1"]
       host_extra_packages: []
+      # hex_repos: [{name: acme, url: https://hex.example.com, key_env: HEX_REPO_KEY, fingerprint_env: HEX_REPO_FINGERPRINT}]
       protected:
         floor: true
         capped_users: []

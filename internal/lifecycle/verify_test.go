@@ -54,13 +54,13 @@ func TestGCRefusesForgedClaims(t *testing.T) {
 	rmq := &fakeRabbit{}
 	d.Rabbit = rmq
 	mustUp(t, d, c) // the victim: demo-feature-x, still alive
-	victimDBs := []string{"demo_dev_roman_feature_x", "demo_dev_bob_feature_x"}
+	victimDBs := []string{"demo_dev_alice_feature_x", "demo_dev_bob_feature_x"}
 	d.PG.(*fakePG).names = victimDBs
 
 	gone := filepath.Join(t.TempDir(), "gone")
-	forgedVhost := plant(t, d, "evil1.toml", fmt.Sprintf("label = \"evil1\"\nname = \"feature/x\"\ndb_suffix = \"_roman_feature_x\"\nvhost = \"demo-feature-x\"\nworktree = %q\n", gone))
+	forgedVhost := plant(t, d, "evil1.toml", fmt.Sprintf("label = \"evil1\"\nname = \"feature/x\"\ndb_suffix = \"_alice_feature_x\"\nvhost = \"demo-feature-x\"\nworktree = %q\n", gone))
 	forgedSuffix := plant(t, d, "evil2.toml", fmt.Sprintf("label = \"evil2\"\nname = \"feature/x\"\ndb_suffix = \"_bob_feature_x\"\ndb_bases = [\"demo_dev\"]\nworktree = %q\n", gone))
-	plant(t, d, "evil3.toml", fmt.Sprintf("label = \"demo-feature-x\"\nname = \"feature/x\"\ndb_suffix = \"_roman_feature_x\"\ndb_bases = [\"demo_dev\"]\nworktree = %q\n", gone))
+	plant(t, d, "evil3.toml", fmt.Sprintf("label = \"demo-feature-x\"\nname = \"feature/x\"\ndb_suffix = \"_alice_feature_x\"\ndb_bases = [\"demo_dev\"]\nworktree = %q\n", gone))
 
 	rep, err := GC(context.Background(), d, "", false)
 	if err != nil {
@@ -155,7 +155,7 @@ func TestGarbageAndSymlinkedManifestsDoNotStopUpOrDown(t *testing.T) {
 func TestForeignManifestForMyWorktreeIsIgnored(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	mustUp(t, d, c)
-	// Seen from uid 999, the manifest roman's file holds is someone else's:
+	// Seen from uid 999, the manifest alice's file holds is someone else's:
 	// up derives the label, finds it taken, and down finds nothing of its own.
 	d.User.UID = 999
 	if _, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true}); err == nil {
@@ -254,7 +254,7 @@ func TestGCRefusesUnresolvableOwner(t *testing.T) {
 func TestKeptManifestPortReuseConverges(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	mustUp(t, d, c)
-	d.PG.(*fakePG).names = []string{"demo_dev_roman_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x"}
 	d.PG.(*fakePG).failDrop = true
 	if err := os.RemoveAll(c.Worktree); err != nil {
 		t.Fatal(err)
@@ -266,7 +266,7 @@ func TestKeptManifestPortReuseConverges(t *testing.T) {
 	if err != nil || kept.Port != 0 || !reflect.DeepEqual(kept.DBBases, []string{"demo_dev", "demo_test"}) || kept.OwnerUID() != os.Getuid() {
 		t.Fatalf("kept manifest %+v %v", kept, err)
 	}
-	d2, c2 := newServerDepsSharing(t, d, "phoenix", "roman")
+	d2, c2 := newServerDepsSharing(t, d, "phoenix", "alice")
 	mustUp(t, d2, c2)
 	if owner, _ := d.Reg.PortOwner(4100); owner != c2.Worktree {
 		t.Fatalf("port 4100 -> %s", owner)
@@ -311,7 +311,7 @@ func TestGCStalePortOfAnotherWorktreeIsASkip(t *testing.T) {
 func TestUpAfterKeptManifest(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	mustUp(t, d, c)
-	d.PG.(*fakePG).names = []string{"demo_dev_roman_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x"}
 	d.PG.(*fakePG).failDrop = true
 	if _, err := Down(context.Background(), d, c, false); err != nil {
 		t.Fatal(err)
