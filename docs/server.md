@@ -86,7 +86,7 @@ A developer opens a worktree URL, enters their email and types the PIN Cloudflar
 
 - `admin: true` on a dev user puts the account in group `sudo`. Dropping the flag removes sudo on the next `--tags user` apply.
 - sudo asks for the user's password, so an agent running as the administrator cannot escalate. After the first apply the operator sets it once: `sudo passwd <name>` on the host.
-- sshd must allow agent forwarding (`AllowAgentForwarding yes`, the default) and, while any user is an administrator, refuse password logins (`PasswordAuthentication no`). Otherwise the `user` tag stops. Set both in an sshd drop-in yourself; the role never edits `/etc/ssh`.
+- sshd must allow agent forwarding (`AllowAgentForwarding yes`, the default) and, while any user is an administrator, refuse password logins (`PasswordAuthentication no` and `KbdInteractiveAuthentication no`). Otherwise the `user` tag stops. Set them in an sshd drop-in yourself; the role never edits `/etc/ssh`.
 - The administrator can read every home.
 
 ## Tools
@@ -169,7 +169,7 @@ For each developer, a tailnet admin shares the machine from the Tailscale admin 
 
 Each listed ADE runs as a user unit, `~/.config/systemd/user/<ade>.service`, under the user's lingering manager. The role starts `user@<uid>.service` right after enabling lingering, so the first user unit never races the user bus.
 
-- Paseo, Orca and the agent CLIs are installed once in the store, at `paseo_version`, `orca_version` and the versions in `agent_clis`. A changed version plus `--tags host,user` moves every user and restarts their units. Users cannot update them.
+- Paseo, Orca and the agent CLIs are installed once in the store, at `paseo_version` and `orca_version`. Pin `@<version>` in `agent_clis` to move everyone; an unpinned entry is installed once at the latest and left alone. A changed version plus `--tags host,user` moves every user and restarts their units. Users cannot update them.
 - **Paseo** listens on loopback only. The listen address, relay setting and `PASEO_PASSWORD` come from the unit and its 0600 environment file. Hades writes no Paseo config file.
 - **Orca** binds every address and has no option to narrow it. The `input` chain of `table inet hades` rejects its ports on every interface except `lo` and `tailscale0`.
 - Orca serves headless on orcad, so there is no Xvfb.
@@ -263,4 +263,5 @@ It cleans up after itself even when a check fails.
 1. In each dev home, remove `~/.asdf`, `~/.tool-versions`, `~/.local/opt/orca`, `~/.local/bin/hades-ade-update` and `~/.local/bin/orca-ide`. The roles never delete inside a home. A leftover `~/.tool-versions` pins a Node the store lacks, and verify's toolchain check fails on it.
 2. Apply `--tags host,user`.
 3. Replace the v1 tunnel token in the environment with `CF_ACCOUNT_ID` and `CF_API_TOKEN`, then apply `--tags ingress`. Rename the v1 tunnel to `hades-<inventory host name>` first; otherwise the role creates a new tunnel and stops on the wildcard record that points to the old one.
-4. The roles never remove these host leftovers; delete them by hand if wanted: NodeSource's `nodejs` package, `/etc/apt/sources.list.d/nodesource.sources`, `/etc/apt/keyrings/nodesource.asc`, `/etc/apt/preferences.d/nodesource`, `/var/cache/hades/npm` and `/etc/hades/ingress.md`. The leftover `/usr/bin/node` is harmless, because mise never falls through to it.
+4. The roles never remove these host leftovers; delete them by hand if wanted: `/etc/apt/sources.list.d/nodesource.sources`, `/etc/apt/keyrings/nodesource.asc`, `/etc/apt/preferences.d/nodesource`, `/var/cache/hades/npm` and `/etc/hades/ingress.md`.
+5. Remove NodeSource's `nodejs` package too (`sudo apt remove nodejs`): a shell without the login profile finds its `/usr/bin/node` before the store. Verify covers the login shell and the ADE units; ssh commands get the store through `~/.bashrc`.

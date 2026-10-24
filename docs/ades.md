@@ -62,10 +62,12 @@ Hades finds the worktree and name from flags, then Paseo's `PASEO_*` variables, 
 
 ## PATH in hooks
 
-Paseo and Orca run hooks in `bash` without profile files, so `PATH` is bare and tools managed by asdf or installed in the home directory are not found. For every command it runs for the project (setup and teardown steps), hades prepends these directories, when they exist, in this order:
+Paseo and Orca run hooks in `bash` without profile files, so `PATH` is bare and tools managed by asdf or mise or installed in the home directory are not found. For every command it runs for the project (setup and teardown steps), hades prepends these directories, when they exist, in this order:
 
 1. `~/.asdf/shims`
-2. `~/.local/bin`
-3. the host config's `tool_paths`
+2. `~/.local/share/mise/shims`
+3. `/usr/local/share/mise/shims`, the server's shared tool store
+4. `~/.local/bin`
+5. the host config's `tool_paths`
 
-The rest of `PATH` is kept. On a laptop there is no host config, so only the first two apply.
+The rest of `PATH` is kept. On a laptop there is no host config, so only the first four apply.

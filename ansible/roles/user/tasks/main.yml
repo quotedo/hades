@@ -81,12 +81,13 @@
   ansible.builtin.assert:
     that:
       - "'allowagentforwarding yes' in user_sshd.stdout_lines"
-      - "'passwordauthentication no' in user_sshd.stdout_lines
+      - "('passwordauthentication no' in user_sshd.stdout_lines and 'kbdinteractiveauthentication no' in user_sshd.stdout_lines)
         or user_present | selectattr('admin', 'defined') | selectattr('admin') | list | length == 0"
     fail_msg: >-
       sshd must allow agent forwarding and, with an admin: true dev user, refuse password logins:
-      set AllowAgentForwarding yes and PasswordAuthentication no in an sshd drop-in yourself
-      (sshd -T: {{ user_sshd.stdout_lines | select('match', '^(allowagentforwarding|passwordauthentication) ') | join(', ') }})
+      set AllowAgentForwarding yes, PasswordAuthentication no and KbdInteractiveAuthentication no in
+      an sshd drop-in yourself
+      (sshd -T: {{ user_sshd.stdout_lines | select('match', '^(allowagentforwarding|passwordauthentication|kbdinteractiveauthentication) ') | join(', ') }})
     quiet: true
 
 # In check mode a new account does not exist yet, so nothing can run as it.
