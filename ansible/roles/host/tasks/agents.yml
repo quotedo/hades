@@ -38,11 +38,6 @@
       changed_when: true
       when: host_npm_missing | length > 0
 
-    # Read by the user role: every paseo.service restarts after a Paseo (re)install.
-    - name: Record whether Paseo was installed in this run
-      ansible.builtin.set_fact:
-        host_paseo_changed: "{{ host_npm_missing | select('match', '@getpaseo/cli@') | list | length > 0 }}"
-
 - name: Orca
   when: host_orca_wanted
   block:
@@ -61,23 +56,16 @@
 
     - name: Download Orca
       ansible.builtin.get_url:
-        url: "{{ orca_releases_url }}/download/v{{ orca_version }}/orca-linux.AppImage"
+        url: https://github.com/stablyai/orca/releases/download/v{{ orca_version }}/orca-linux.AppImage
         dest: "{{ orca_root }}/orca-{{ orca_version }}.AppImage"
         mode: "0755"
-
-    - name: Link orca.AppImage to the pinned version
-      ansible.builtin.file:
-        src: "{{ orca_root }}/orca-{{ orca_version }}.AppImage"
-        dest: "{{ orca_root }}/orca.AppImage"
-        state: link
-        force: true
 
     # --appimage-extract-and-run unpacks to a temporary directory instead of mounting, so no FUSE.
     - name: Write the orca-ide wrapper
       ansible.builtin.copy:
         content: |
           #!/bin/sh
-          exec {{ orca_root }}/orca.AppImage --appimage-extract-and-run "$@"
+          exec {{ orca_root }}/orca-{{ orca_version }}.AppImage --appimage-extract-and-run "$@"
         dest: /usr/local/bin/orca-ide
         mode: "0755"
 

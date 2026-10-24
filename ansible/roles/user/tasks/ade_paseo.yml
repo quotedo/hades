@@ -33,7 +33,6 @@
     scope: user
     enabled: true
     daemon_reload: "{{ user_paseo_unit is changed }}"
-    # host_paseo_changed: the host role (re)installed Paseo in this run; undefined under --tags user.
-    state: "{{ 'restarted' if [user_paseo_password, user_paseo_unit] | select('changed') | list or host_paseo_changed | default(false) else 'started' }}"
+    state: "{{ 'restarted' if [user_paseo_password, user_paseo_unit] | select('changed') | list else 'started' }}"
   # In check mode a new unit is not written yet, so systemd cannot find it.
   when: not (ansible_check_mode and user_paseo_unit is changed)

@@ -7,7 +7,6 @@ dev_servers:
       ansible_user: <SUDO_USER>
       hades_domain: <DOMAIN>
       hades_label_template: !unsafe '{{project}}-{{name}}'
-      cloudflare_team_domain: <TEAM>.cloudflareaccess.com
       # Cloudflare Access admits every present dev user's email plus these emails or @domains.
       access_allow: []
       dev_services: [rabbitmq, localstack]

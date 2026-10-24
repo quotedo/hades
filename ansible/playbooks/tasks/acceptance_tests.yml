@@ -1,14 +1,14 @@
 ---
 # End to end as acceptance_user, a throwaway dev user given with -e: the sample project gets a
 # worktree, `hades up` and `hades down`, checked through the registry, Caddy, the dev Postgres
-# and loopback isolation. A second worktree pinning a Node version missing from the store must
-# fail `hades up` with mise's not-installed error.
+# and loopback isolation. After `hades down`, the worktree pins a Node version missing from the
+# store, and `hades up` must fail with mise's not-installed error.
 - name: Read the user's passwd entry
   ansible.builtin.getent:
     database: passwd
     key: "{{ acceptance_user }}"
 
-# Before the block: its clean-up deletes ~/sample, ~/sample-wt and ~/sample-bad in this user's home.
+# Before the block: its clean-up deletes ~/sample and ~/sample-wt in this user's home.
 - name: Assert the user is a present dev user
   ansible.builtin.assert:
     that:
@@ -21,7 +21,6 @@
   vars:
     acceptance_repo: "{{ ansible_facts.getent_passwd[acceptance_user][4] }}/sample"
     acceptance_wt: "{{ acceptance_repo }}-wt"
-    acceptance_bad: "{{ acceptance_repo }}-bad"
     acceptance_entry: "{{ acceptance_ls.stdout | from_json | selectattr('Worktree', 'eq', acceptance_wt) | first | default({}) }}"
     acceptance_port: "{{ acceptance_entry.Port }}"
     acceptance_db: sample_dev{{ acceptance_entry.DBSuffix }}
@@ -184,14 +183,10 @@
           {{ acceptance_db if acceptance_db in acceptance_dbs_down.stdout_lines else '' }}
         quiet: true
 
-    - name: Add a worktree for a Node version missing from the store
-      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ acceptance_repo }} && git worktree add -q {{ acceptance_bad }} -b feature/bad'
-      changed_when: true
-
-    # The sample's setup never runs node, so this worktree's own hades.toml does.
+    # The sample's setup never runs node, so this hades.toml does.
     - name: Pin node 1.0.0 and run node in setup
       ansible.builtin.copy:
-        dest: "{{ acceptance_bad }}/{{ item.name }}"
+        dest: "{{ acceptance_wt }}/{{ item.name }}"
         content: "{{ item.content }}"
         owner: "{{ acceptance_user }}"
         group: "{{ acceptance_user }}"
@@ -203,13 +198,13 @@
         label: "{{ item.name }}"
 
     - name: Run hades up in the worktree pinning node 1.0.0
-      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ acceptance_bad }} && hades up --ade shell'
+      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ acceptance_wt }} && hades up --ade shell'
       register: acceptance_bad_up
       changed_when: true
       failed_when: false
 
     - name: List the user's Node versions there
-      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ acceptance_bad }} && mise ls --json node'
+      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ acceptance_wt }} && mise ls --json node'
       register: acceptance_bad_node
       changed_when: false
 
@@ -232,19 +227,15 @@
         state: stopped
       failed_when: false
 
-    - name: Release whatever the worktrees still hold
-      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ item }} && hades down'
+    - name: Release whatever the worktree still holds
+      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ acceptance_wt }} && hades down'
       changed_when: false
       failed_when: false
-      loop:
-        - "{{ acceptance_wt }}"
-        - "{{ acceptance_bad }}"
 
-    - name: Remove the sample project and the worktrees
+    - name: Remove the sample project and the worktree
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
       loop:
         - "{{ acceptance_repo }}"
         - "{{ acceptance_wt }}"
-        - "{{ acceptance_bad }}"

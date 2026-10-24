@@ -7,12 +7,6 @@
   changed_when: false
   check_mode: false
 
-# The unit records the link's target, so a new orca_version rewrites the unit and restarts Orca.
-- name: Read the Orca version link
-  ansible.builtin.stat:
-    path: "{{ orca_root }}/orca.AppImage"
-  register: user_orca_link
-
 - name: Write the Orca unit
   ansible.builtin.template:
     src: ade.service.j2

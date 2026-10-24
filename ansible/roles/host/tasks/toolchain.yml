@@ -24,54 +24,40 @@
     mode: "0644"
 
 # State comes from `mise ls --json`, never from directories: a failed install leaves no record,
-# so the next run tries it again. mise also lists versions a config requests but nobody
-# installed, and root's own installs: only installed records under the store count.
-- name: Install and prune the tool versions
-  vars:
-    host_tools_listed: >-
-      {%- set out = [] -%}
-      {%- for tool, versions in tools.items() -%}
-      {%- for v in versions -%}
-      {%- set _ = out.append(tool ~ '@' ~ v) -%}
-      {%- endfor -%}
-      {%- endfor -%}
-      {{ out }}
-    host_tools_installed: >-
-      {%- set out = [] -%}
-      {%- for tool, records in (host_tools_ls.stdout | default('{}') | from_json).items() -%}
-      {%- for r in records if r.installed and r.install_path.startswith(mise_store ~ '/installs/') -%}
-      {%- set _ = out.append(tool ~ '@' ~ r.version) -%}
-      {%- endfor -%}
-      {%- endfor -%}
-      {{ out }}
-  block:
-    - name: Read the tool installs
-      ansible.builtin.command: mise ls --json
-      register: host_tools_ls
-      changed_when: false
-      check_mode: false
-      when: not (ansible_check_mode and host_mise_binary is changed)
+# so the next run tries it again (host_tools_listed and host_tools_installed: host defaults).
+- name: Read the tool installs
+  ansible.builtin.command: mise ls --json
+  register: host_tools_ls
+  changed_when: false
+  check_mode: false
+  when: not (ansible_check_mode and host_mise_binary is changed)
 
-    # Every listed version in one command, in inventory order: installed ones are skipped, and an
-    # Elixir build finds the Erlang listed before it.
-    - name: Install the listed tool versions
-      ansible.builtin.command:
-        argv: "{{ ['mise', 'install', '--system'] + host_tools_listed }}"
-      environment:
-        KERL_CONFIGURE_OPTIONS: "{{ kerl_configure_options }}"
-        MISE_YES: "1"
-      register: host_tools_install
-      changed_when: true
-      when: host_tools_listed | difference(host_tools_installed) | length > 0
+# Every listed version in one command, in inventory order: installed ones are skipped, and an
+# Elixir build finds the Erlang listed before it.
+- name: Install the listed tool versions
+  ansible.builtin.command:
+    argv: "{{ ['mise', 'install', '--system'] + host_tools_listed }}"
+  environment:
+    KERL_CONFIGURE_OPTIONS: "{{ kerl_configure_options }}"
+    MISE_YES: "1"
+  register: host_tools_install
+  changed_when: true
+  when: host_tools_listed | difference(host_tools_installed) | length > 0
 
-    - name: Remove unlisted tool versions
-      ansible.builtin.command:
-        argv: "{{ ['mise', 'uninstall'] + host_tools_installed | difference(host_tools_listed) }}"
-      changed_when: true
-      when: host_tools_installed | difference(host_tools_listed) | length > 0
+- name: Remove unlisted tool versions
+  ansible.builtin.command:
+    argv: "{{ ['mise', 'uninstall'] + host_tools_installed | difference(host_tools_listed) }}"
+  changed_when: true
+  when: host_tools_installed | difference(host_tools_listed) | length > 0
 
-    # install --system creates no shims; uninstall removes its own.
-    - name: Create the shims # noqa: no-handler
-      ansible.builtin.command: mise reshim --system
-      changed_when: true
-      when: host_tools_install is changed
+- name: Stat the shims directory
+  ansible.builtin.stat:
+    path: "{{ mise_shims }}"
+  register: host_tools_shims
+
+# install --system creates no shims; uninstall removes its own. A missing directory means a run
+# stopped between the install and this step.
+- name: Create the shims
+  ansible.builtin.command: mise reshim --system
+  changed_when: true
+  when: host_tools_install is changed or not host_tools_shims.stat.exists

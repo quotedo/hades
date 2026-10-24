@@ -34,7 +34,9 @@
         service: http://{{ ingress_loopback_address }}:{{ caddy_port }}
       - service: http_status:404
     ingress_cf_zone_url: "{{ ingress_cloudflare_api }}/zones/{{ ingress_cf_zones.json.result[0].id | default('') }}"
-    ingress_cf_app: "{{ ingress_cf_apps.json.result | selectattr('domain', 'eq', '*.' ~ hades_domain) | first | default({}) }}"
+    ingress_cf_app: >-
+      {{ ingress_cf_apps.json.result | selectattr('domain', 'eq', '*.' ~ hades_domain) | first
+         | default(ingress_cf_app_new.json.result | default({})) }}
     ingress_cf_policy: "{{ ingress_cf_app.policies | default([]) | first | default({}) }}"
   block:
     - name: Read the tunnel
@@ -144,10 +146,7 @@
           session_duration: "{{ access_session }}"
           app_launcher_visible: false
           auto_redirect_to_identity: true
-          policies:
-            - name: team
-              decision: allow
-              include: "{{ ingress_access_include }}"
+      register: ingress_cf_app_new
       changed_when: true
       when: ingress_cf_app == {}
 

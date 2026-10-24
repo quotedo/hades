@@ -1,15 +1,7 @@
 ---
-# The toolchain is the host's shared store; only the per-user Hex state is set up here. Without
-# Elixir in the store, mix is missing and this is skipped.
-- name: Check for mix
-  ansible.builtin.command: mix --version
-  register: user_mix
-  changed_when: false
-  failed_when: false
-  check_mode: false
-
+# The toolchain is the host's shared store; only the per-user Hex state is set up here.
 - name: Hex, rebar and the private Hex repositories
-  when: user_mix.rc == 0
+  when: "'elixir' in tools"
   block:
     - name: Install Hex and rebar
       ansible.builtin.shell: mix local.hex --force && mix local.rebar --force

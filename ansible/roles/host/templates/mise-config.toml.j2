@@ -1,7 +1,7 @@
 # {{ ansible_managed }}
 [tools]
-{% for tool, version in host_tools_default.items() %}
-"{{ tool }}" = "{{ version }}"
+{% for tool, versions in tools.items() %}
+"{{ tool }}" = "{{ versions[0] }}"
 {% endfor %}
 
 [settings]

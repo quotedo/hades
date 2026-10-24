@@ -21,7 +21,7 @@ Start from `ansible/inventory.example.yml`. Per host:
 
 - `hades_domain`: worktree sites are `https://<label>.<domain>`. `hades_label_template` is a YAML `!unsafe` string so Ansible never expands the CLI's placeholders.
 - `dev_services`: any of `rabbitmq`, `localstack`, `redis`; empty means no shared-services stack.
-- `tools` and `host_extra_packages` ([Tools](#tools), [Software requests](#software-requests)); `cloudflare_team_domain` and `access_allow` ([Cloudflare](#cloudflare)); `tailscale_enabled` ([Tailscale](#tailscale)); `vpn_enabled`, `vpn_conf_env` and `vpn_probe` ([VPN](#vpn)).
+- `tools` and `host_extra_packages` ([Tools](#tools), [Software requests](#software-requests)); `access_allow` ([Cloudflare](#cloudflare)); `tailscale_enabled` ([Tailscale](#tailscale)); `vpn_enabled`, `vpn_conf_env` and `vpn_probe` ([VPN](#vpn)).
 - `dev_users`: `name`, `uid`, `state` (`present` or `absent`), `admin`, `email`, `ssh_keys`, `ades` (`paseo`, `orca`), `paseo_port`, `orca_port`, `gpg_key`, `repos`. Logins must stay unique after dropping every character outside `[a-z0-9]`.
 - `protected`, for workloads that were on the host before hades:
   - `floor`: guarantees `system.slice` memory and CPU weight, and gives `user.slice` a CPU weight.
@@ -65,7 +65,7 @@ Apply times on the reference host with nothing to change:
 
 ## Cloudflare
 
-Once per Cloudflare account, enable Zero Trust (the free plan works) with One-time PIN as its login method. Set `cloudflare_team_domain` to its team domain, `<team>.cloudflareaccess.com`; verify expects the edge to redirect there. `hades_domain` must be a zone of that account, not a subdomain of one.
+Once per Cloudflare account, enable Zero Trust (the free plan works) with One-time PIN as its login method. `hades_domain` must be a zone of that account, not a subdomain of one.
 
 1. Export `CF_ACCOUNT_ID` and `CF_API_TOKEN`. The token needs the permissions listed in `.env.example`.
 2. Give every present dev user an `email`: the address they log in with. Preflight requires it while `CF_API_TOKEN` is set.
@@ -97,8 +97,7 @@ The host role installs every version listed in `tools` with mise into one root-o
 - Versions are exact and quoted, with at least two numeric parts: `"28.5"`, `"1.20.4-otp-29"`. Preflight rejects a bare major.
 - The first version of each tool is the box default. List more versions of a tool for projects whose `.tool-versions` pin them. List `erlang` before `elixir`.
 - The store is exactly the list: an apply removes versions no longer listed. Keep an old version listed until every project has moved off it.
-- `mise ls --json` shows each version; the installed ones have `"installed": true` and an `install_path` under the store.
-- A project that asks for a version the store lacks fails with mise's `Tool not installed for shim: <tool>`. Ask the administrator to add the version. mise never installs on demand and never falls through to a system binary of the same name: `/etc/mise/config.toml` turns off `auto_install` and `not_found_system_fallback`.
+- A project that asks for a version the store lacks fails with mise's `Tool not installed for shim: <tool>`.
 - `MIX_HOME` is per user (`~/.mix`), set in the login environment and the ADE units, because mise's Elixir would otherwise point it into the read-only store. Anything that runs `mix` with an environment of its own, such as a cron job or `sudo -u`, must set `MIX_HOME` and `MIX_ARCHIVES` too.
 - To upgrade, change the version and apply `--tags host,user`. A new default Node reinstalls the agent CLIs and Paseo under it and restarts every `paseo.service`.
 
@@ -153,7 +152,7 @@ The box provides `kubectl` through `tools`, never credentials.
 
 The box runs one `tailscaled` in the administrator's tailnet. Set `tailscale_enabled: true` (implied when a present user lists `orca`), apply `--tags ingress`, and run `sudo tailscale up` on the host once.
 
-For each developer, a tailnet admin shares the machine from the Tailscale admin console with the developer's Tailscale account. Accepting tells the sharer the developer's email. The developer then sees the box in their own tailnet at its one Tailscale address. Nobody else in their tailnet sees it, and the box cannot open connections into their tailnet. At offboarding, revoke the share in the admin console.
+For each developer, a tailnet admin shares the machine from the Tailscale admin console with the developer's Tailscale account. The developer then sees the box in their own tailnet at its one Tailscale address. At offboarding, revoke the share in the admin console.
 
 ## Interactive steps, in order
 
@@ -210,9 +209,7 @@ The `--tags ingress` apply removes the user's email from the Access allow-list. 
 - Remove their GitHub access.
 - Revoke their Tailscale share.
 
-Keep the `state: absent` entry: `verify --tags offboard` expects it.
-
-`state: absent` applies only to accounts hades created. The run fails for an existing account that is not in group `hades` or whose uid differs from the inventory. An absent login that does not exist is a no-op, but `verify --tags offboard` expects an archive for every absent entry, so remove entries for logins that never existed.
+Keep the `state: absent` entry, because `verify --tags offboard` expects an archive for every absent entry; remove entries for logins that never existed. `state: absent` applies only to accounts hades created: the run fails for an existing account that is not in group `hades` or whose uid differs from the inventory.
 
 ## Encryption
 
@@ -245,7 +242,7 @@ The `acceptance` check runs only with `-e acceptance_user=<a throwaway dev user>
 3. It checks the `hades ls` entry, both site files, Caddy routing to the worktree port, the dev database and loopback isolation, and that `hades doctor` passes.
 4. It runs `hades down` and checks that the host name redirects to the apex again and the sites, the port claim and the database are gone.
 5. It runs `hades gc` as root.
-6. A second worktree pins a version the store lacks; `hades up` must fail with mise's not-installed error and install nothing.
+6. The same worktree then pins a version the store lacks; `hades up` must fail with mise's not-installed error and install nothing.
 
 It cleans up after itself even when a check fails.
 

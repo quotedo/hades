@@ -213,34 +213,15 @@
 - name: Read the tool installs
   ansible.builtin.command: mise ls --json
   become: true
-  register: host_test_mise_ls
+  register: host_tools_ls
   changed_when: false
 
-# mise also lists versions a config requests but nobody installed, and root's own installs: only
-# installed records under the store count.
 - name: Assert the store holds exactly the tools versions
   ansible.builtin.assert:
     that:
-      - host_test_installed | sort == host_test_listed | sort
-    fail_msg: "the store holds {{ host_test_installed | sort }}, tools lists {{ host_test_listed | sort }}"
+      - host_tools_installed | sort == host_tools_listed | sort
+    fail_msg: "the store holds {{ host_tools_installed | sort }}, tools lists {{ host_tools_listed | sort }}"
     quiet: true
-  vars:
-    host_test_installed: >-
-      {%- set out = [] -%}
-      {%- for tool, records in (host_test_mise_ls.stdout | from_json).items() -%}
-      {%- for r in records if r.installed and r.install_path.startswith(mise_store ~ '/installs/') -%}
-      {%- set _ = out.append(tool ~ '@' ~ r.version) -%}
-      {%- endfor -%}
-      {%- endfor -%}
-      {{ out }}
-    host_test_listed: >-
-      {%- set out = [] -%}
-      {%- for tool, versions in tools.items() -%}
-      {%- for v in versions -%}
-      {%- set _ = out.append(tool ~ '@' ~ v) -%}
-      {%- endfor -%}
-      {%- endfor -%}
-      {{ out }}
 
 - name: Stat the shims directory
   ansible.builtin.stat:
@@ -295,15 +276,14 @@
 - name: Stat Orca and its wrapper
   ansible.builtin.stat:
     path: "{{ item }}"
-  loop: ["{{ orca_root }}/orca.AppImage", /usr/local/bin/orca-ide]
+  loop: ["{{ orca_root }}/orca-{{ orca_version }}.AppImage", /usr/local/bin/orca-ide]
   register: host_test_orca
   when: host_orca_wanted
 
 - name: Assert Orca is the pinned version and its wrapper is executable
   ansible.builtin.assert:
     that:
-      - (host_test_orca.results[0].stat.lnk_target | default('')).endswith('/orca-' ~ orca_version ~ '.AppImage')
-      - host_test_orca.results[1].stat.mode | default('') == '0755'
-    fail_msg: "{{ orca_root }}/orca.AppImage must link to orca-{{ orca_version }}.AppImage and /usr/local/bin/orca-ide be mode 0755"
+      - host_test_orca.results | map(attribute='stat.mode', default='') | unique == ['0755']
+    fail_msg: "{{ orca_root }}/orca-{{ orca_version }}.AppImage and /usr/local/bin/orca-ide must exist with mode 0755"
     quiet: true
   when: host_orca_wanted

@@ -143,9 +143,19 @@
       become: false
       register: ingress_test_edge
 
+    - name: Read the Access organization
+      ansible.builtin.uri:
+        url: "{{ ingress_cloudflare_api }}/accounts/{{ lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') }}/access/organizations"
+        headers:
+          Authorization: Bearer {{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}
+      delegate_to: localhost
+      become: false
+      register: ingress_test_org
+      no_log: true
+
     - name: Assert Cloudflare Access redirects to the team domain
       ansible.builtin.assert:
-        that: ingress_test_edge.location.startswith('https://' ~ cloudflare_team_domain ~ '/')
+        that: ingress_test_edge.location.startswith('https://' ~ ingress_test_org.json.result.auth_domain ~ '/')
         fail_msg: "edge Location is {{ ingress_test_edge.location }}"
         quiet: true
 

@@ -63,7 +63,25 @@ mise_store: /usr/local/share/mise # noqa: var-naming[no-role-prefix]
 mise_shims: "{{ mise_store }}/shims" # noqa: var-naming[no-role-prefix]
 tools: # noqa: var-naming[no-role-prefix]
   node: ["24.22.1"]
-host_tools_default: "{{ dict(tools | zip(tools.values() | map('first'))) }}"
+# `tool@version` for every tools entry, and for every installed record under the store in
+# host_tools_ls (`mise ls --json`, registered by the role and by verify). mise also lists versions
+# a config requests but nobody installed, and root's own installs: neither counts.
+host_tools_listed: >-
+  {%- set out = [] -%}
+  {%- for tool, versions in tools.items() -%}
+  {%- for v in versions -%}
+  {%- set _ = out.append(tool ~ '@' ~ v) -%}
+  {%- endfor -%}
+  {%- endfor -%}
+  {{ out }}
+host_tools_installed: >-
+  {%- set out = [] -%}
+  {%- for tool, records in (host_tools_ls.stdout | default('{}') | from_json).items() -%}
+  {%- for r in records if r.installed and r.install_path.startswith(mise_store ~ '/installs/') -%}
+  {%- set _ = out.append(tool ~ '@' ~ r.version) -%}
+  {%- endfor -%}
+  {%- endfor -%}
+  {{ out }}
 kerl_configure_options: "--without-wx --without-javac --without-odbc" # noqa: var-naming[no-role-prefix]
 # apt packages a host adds on top of host_packages; never removed by the role.
 host_extra_packages: []
@@ -77,7 +95,6 @@ paseo_version: "0.12.0" # noqa: var-naming[no-role-prefix]
 # One Orca AppImage in orca_root with the /usr/local/bin/orca-ide wrapper, only while a present
 # dev user lists orca. orca_packages are the Electron libraries beyond host_chrome_packages.
 orca_version: "1.4.232" # noqa: var-naming[no-role-prefix]
-orca_releases_url: https://github.com/stablyai/orca/releases # noqa: var-naming[no-role-prefix]
 orca_root: /opt/orca # noqa: var-naming[no-role-prefix]
 orca_packages: [libnotify4, libsecret-1-0, libxss1, libxtst6, xdg-utils] # noqa: var-naming[no-role-prefix]
 host_orca_wanted: >-

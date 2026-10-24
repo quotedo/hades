@@ -46,12 +46,11 @@
         state: link
         force: true
 
-    # browsers/ is the v1 layout of @puppeteer/browsers.
     - name: Find other Chrome for Testing builds
       ansible.builtin.find:
         paths: "{{ chrome_root }}"
         file_type: directory
-        patterns: ['^[0-9.]+$', '^browsers$']
+        patterns: ['^[0-9.]+$']
         use_regex: true
         excludes: ['^{{ host_chrome_channel.version | regex_escape }}$']
       register: host_chrome_old

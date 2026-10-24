@@ -12,11 +12,9 @@
       - hades_live_dir is match('^/.+')
       - hades_config_dir is match('^/.+')
       - tailscale_enabled is boolean
-      - cloudflare_team_domain is not defined or (cloudflare_team_domain is string and cloudflare_team_domain | length > 0)
     fail_msg: >-
       hades_domain must be a non-empty string, caddy_port a port, caddy_config, hades_live_dir and
-      hades_config_dir absolute paths, tailscale_enabled a boolean and cloudflare_team_domain, when
-      set, a non-empty string
+      hades_config_dir absolute paths and tailscale_enabled a boolean
     quiet: true
 
 # First, so that a run without Cloudflare credentials stops before it changes anything.
