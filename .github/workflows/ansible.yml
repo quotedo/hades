@@ -18,5 +18,5 @@ jobs:
       - run: ansible-galaxy collection install -r ansible/requirements.yml
       - run: ansible-playbook --syntax-check -i ansible/inventory.example.yml ansible/playbooks/site.yml
       - run: ansible-playbook --syntax-check -i ansible/inventory.example.yml ansible/playbooks/verify.yml
-      - run: ansible-lint ansible/
+      - run: ansible-lint -c ansible/.ansible-lint ansible/
       - run: ansible/scripts/check-no-literals.sh ansible/inventory.example.yml
