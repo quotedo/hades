@@ -21,6 +21,17 @@
   changed_when: false
   failed_when: preflight_colliding.rc == 0
 
+- name: Preflight rejects present dev users sharing a uid
+  ansible.builtin.command:
+    cmd: >-
+      ansible-playbook -i {{ playbook_dir }}/../tests/inventories/duplicate-uids.yml
+      {{ playbook_dir }}/preflight.yml
+  delegate_to: localhost
+  run_once: true
+  register: preflight_duplicate_uids
+  changed_when: false
+  failed_when: preflight_duplicate_uids.rc == 0
+
 - name: Preflight accepts a valid inventory
   ansible.builtin.command:
     cmd: >-
@@ -38,5 +49,6 @@
       - "'hades_domain must be defined' in preflight_missing_domain.stdout"
       - "'Logins collide' in preflight_colliding.stdout"
       - "'[j-smith, jsmith]' in preflight_colliding.stdout"
+      - "'Present dev_users share a uid: 3001, 3001, 3002' in preflight_duplicate_uids.stdout"
     quiet: true
   run_once: true

@@ -1,0 +1,11 @@
+---
+dev_servers:
+  hosts:
+    box:
+      ansible_connection: local
+      hades_domain: valid.example.test
+      dev_users:
+        - { name: alice, uid: 3001 }
+        - { name: bob, uid: 3001, state: present }
+        - { name: carol, uid: 3002, state: absent }
+        - { name: dave, uid: 3002 }

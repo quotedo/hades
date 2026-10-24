@@ -1,0 +1,127 @@
+---
+# Per present dev user. The login checks go through `runuser -l`, so they see what a login sees:
+# ~/.profile, ~/.bashrc and /etc/profile.d. Not `sudo -i`: sudo-rs hands its command to the
+# login shell without quoting it.
+- name: Read the passwd entries
+  ansible.builtin.getent:
+    database: passwd
+
+- name: Read the groups
+  ansible.builtin.getent:
+    database: group
+
+- name: Read each dev user's linger setting
+  ansible.builtin.command: loginctl show-user {{ item.name }} -p Linger --value
+  register: user_test_linger
+  changed_when: false
+  failed_when: false
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Read each dev user's slice
+  ansible.builtin.systemd_service:
+    name: user-{{ item.uid }}.slice
+  register: user_test_slice
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Read each dev user's user manager unit
+  ansible.builtin.systemd_service:
+    name: user@{{ item.uid }}.service
+  register: user_test_manager
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# A manager property, which the systemd_service module does not read.
+- name: Read each user manager's DefaultLimitNOFILE
+  ansible.builtin.command: systemctl --user -M {{ item.name }}@ show -p DefaultLimitNOFILE --value # noqa: command-instead-of-module
+  become: true
+  register: user_test_user_conf
+  changed_when: false
+  failed_when: false
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Run the toolchain in each dev user's login shell
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -l
+      - "{{ item.name }}"
+      - -c
+      - >-
+        asdf --version && node --version && claude --version && codex --version
+        && direnv version && hades version
+        && printf 'ERL_FLAGS=%s\nCHROME_PATH=%s\n' "$ERL_FLAGS" "$CHROME_PATH"
+  become: true
+  register: user_test_login
+  changed_when: false
+  failed_when: false
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Try sudo as each dev user
+  ansible.builtin.command: runuser -u {{ item.name }} -- sudo -n true
+  become: true
+  register: user_test_sudo
+  changed_when: false
+  failed_when: false
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Run hades doctor as each dev user
+  ansible.builtin.command: runuser -l {{ item.name }} -c 'hades doctor'
+  become: true
+  register: user_test_doctor
+  changed_when: false
+  failed_when: false
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# hades doctor may fail only on postgres or rabbitmq until those roles have run (exit 0 in Task 12).
+- name: Assert each dev user's account, resource policy and login environment
+  ansible.builtin.assert:
+    that:
+      - user_test_pw[1] == item.uid | string
+      - user_test_pw[5] == '/bin/bash'
+      - hades_group in user_test_groups
+      - "'docker' not in user_test_groups"
+      - user_test_linger.results[i].stdout == 'yes'
+      - user_test_slice.results[i].status.MemoryHigh == dev_user_memory_high | human_to_bytes | string
+      - user_test_slice.results[i].status.MemoryMax == dev_user_memory_max | human_to_bytes | string
+      - user_test_slice.results[i].status.MemorySwapMax == dev_user_memory_swap_max | human_to_bytes | string
+      - user_test_slice.results[i].status.CPUWeight == dev_user_cpu_weight | string
+      - user_test_slice.results[i].status.TasksMax == dev_user_tasks_max | string
+      - user_test_manager.results[i].status.LimitNOFILE == default_limit_nofile | string
+      - user_test_user_conf.results[i].stdout == default_limit_nofile | string
+      - user_test_login.results[i].rc == 0
+      - ('ERL_FLAGS=' ~ erl_flags) in user_test_login.results[i].stdout_lines
+      - ('CHROME_PATH=' ~ chrome_root ~ '/chrome') in user_test_login.results[i].stdout_lines
+      - user_test_sudo.results[i].rc != 0
+      - user_test_doctor.results[i].stdout is search('^ok +host-config:', multiline=True)
+      - user_test_doctor.results[i].stdout_lines | select('match', '^FAIL ') | reject('match', '^FAIL (postgres|rabbitmq):') | list == []
+    fail_msg: |-
+      {{ item.name }}: passwd {{ user_test_pw | join(':') }}; groups {{ user_test_groups | join(',') }}
+      linger {{ user_test_linger.results[i].stdout }}; user@ LimitNOFILE {{ user_test_manager.results[i].status.LimitNOFILE }},
+      DefaultLimitNOFILE {{ user_test_user_conf.results[i].stdout }}
+      slice {{ user_test_slice.results[i].status | dict2items
+               | selectattr('key', 'in', ['MemoryHigh', 'MemoryMax', 'MemorySwapMax', 'CPUWeight', 'TasksMax']) | items2dict }}
+      login rc {{ user_test_login.results[i].rc }}: {{ (user_test_login.results[i].stdout_lines + user_test_login.results[i].stderr_lines) | join(' | ') }}
+      sudo -n true rc {{ user_test_sudo.results[i].rc }}
+      doctor: {{ user_test_doctor.results[i].stdout_lines | select('match', '^(FAIL|WARN) ') | join(' | ') or user_test_doctor.results[i].stderr }}
+    quiet: true
+  loop: "{{ user_present }}"
+  loop_control:
+    index_var: i
+    label: "{{ item.name }}"
+  vars:
+    user_test_pw: "{{ ansible_facts.getent_passwd[item.name] | default(['missing'] * 6) }}"
+    user_test_groups: >-
+      {{ ansible_facts.getent_group | dict2items | selectattr('value.2', 'search', '(^|,)' ~ item.name ~ '(,|$)') | map(attribute='key') | list }}

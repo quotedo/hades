@@ -1,0 +1,79 @@
+---
+# Installed once; remove ~/.asdf/bin/asdf to move to a newer asdf_version.
+- name: Install asdf
+  ansible.builtin.unarchive:
+    src: "{{ asdf_url }}"
+    remote_src: true
+    dest: "{{ user_home }}/.asdf/bin"
+    creates: "{{ user_home }}/.asdf/bin/asdf"
+
+- name: Add the asdf plugins
+  ansible.builtin.command: asdf plugin add {{ item }}
+  args:
+    creates: "{{ user_home }}/.asdf/plugins/{{ item }}"
+  loop: "{{ asdf_plugins }}"
+
+- name: Resolve the global versions
+  ansible.builtin.command: asdf latest {{ item.key }} {{ item.value }}
+  register: user_global_versions
+  changed_when: false
+  check_mode: false
+  loop: "{{ asdf_global_versions | dict2items }}"
+
+- name: Install the global versions
+  ansible.builtin.command: asdf install {{ item.item.key }} {{ item.stdout }}
+  args:
+    creates: "{{ user_home }}/.asdf/installs/{{ item.item.key }}/{{ item.stdout }}"
+  loop: "{{ user_global_versions.results }}"
+  loop_control:
+    label: "{{ item.item.key }} {{ item.stdout }}"
+
+- name: Set the global versions
+  ansible.builtin.lineinfile:
+    path: "{{ user_home }}/.tool-versions"
+    regexp: "^{{ item.item.key }} "
+    line: "{{ item.item.key }} {{ item.stdout }}"
+    create: true
+    mode: "0644"
+  loop: "{{ user_global_versions.results }}"
+  loop_control:
+    label: "{{ item.item.key }} {{ item.stdout }}"
+
+# Elixir comes with a project's .tool-versions; without a global one, mix is not on PATH yet.
+- name: Check for mix
+  ansible.builtin.command: mix --version
+  register: user_mix
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Hex, rebar and the private Hex repositories
+  when: user_mix.rc == 0
+  block:
+    - name: Install Hex and rebar
+      ansible.builtin.shell: mix local.hex --force && mix local.rebar --force
+      args:
+        creates: "{{ user_home }}/.mix/archives/hex-*"
+
+    - name: List the Hex repositories
+      ansible.builtin.command: mix hex.repo list
+      register: user_hex_repos
+      changed_when: false
+      check_mode: false
+
+    - name: Add the private Hex repositories
+      ansible.builtin.command:
+        argv:
+          - mix
+          - hex.repo
+          - add
+          - "{{ item.name }}"
+          - "{{ item.url }}"
+          - --auth-key
+          - "{{ lookup('env', item.key_env) }}"
+          - --fetch-public-key
+          - "{{ lookup('env', item.fingerprint_env) }}"
+      when: user_hex_repos.stdout is not search('^' ~ item.name ~ '\\s', multiline=True)
+      changed_when: true
+      no_log: true
+      loop: "{{ hex_repos }}"

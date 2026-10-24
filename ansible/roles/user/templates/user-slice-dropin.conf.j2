@@ -1,5 +1,6 @@
 # {{ ansible_managed }}
-# Defaults for every user-<uid>.slice; per-uid drop-ins sorting later override them.
+# Resource policy for {{ user.name }}. `systemctl set-property` values (50-*.conf) sort later
+# and win.
 [Slice]
 MemoryHigh={{ dev_user_memory_high }}
 MemoryMax={{ dev_user_memory_max }}

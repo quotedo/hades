@@ -63,3 +63,14 @@
           Logins collide after dropping non-alphanumerics:
           {% for g in hades_login_groups.values() if g | length > 1 %}[{{ g | join(', ') }}] {% endfor %}
         quiet: true
+
+    - name: Assert uids of present dev users are unique
+      ansible.builtin.assert:
+        that:
+          - hades_present_uids | unique | length == hades_present_uids | length
+        fail_msg: "Present dev_users share a uid: {{ hades_present_uids | sort | join(', ') }}"
+        quiet: true
+      vars:
+        # Each user is combined onto {'state': 'present'}, so one without state counts as present.
+        hades_present_uids: >-
+          {{ [{'state': 'present'}] | product(dev_users) | map('combine') | selectattr('state', 'eq', 'present') | map(attribute='uid') | list }}
