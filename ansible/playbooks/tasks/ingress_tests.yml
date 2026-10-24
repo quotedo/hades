@@ -89,6 +89,15 @@
         headers:
           Host: probe.{{ hades_domain }}
         status_code: 403
+
+    # Nothing listens on the probe port, so 502 means the gate let it through and Caddy dialled it.
+    - name: Assert a gated path with the Access header is proxied
+      ansible.builtin.uri:
+        url: http://{{ ingress_loopback_address }}:{{ caddy_port }}/dev/mailbox
+        headers:
+          Host: probe.{{ hades_domain }}
+          Cf-Access-Jwt-Assertion: probe
+        status_code: 502
   always:
     - name: Remove the probe site
       ansible.builtin.file:

@@ -80,9 +80,10 @@
     quiet: true
   vars:
     services_test_docker_members: "{{ ansible_facts.getent_group.docker[2].split(',') }}"
+    # Each entry is combined onto {'state': 'present'}, so one without state counts as present.
     services_test_docker_devs: >-
-      {{ dev_users | rejectattr('state', 'equalto', 'absent') | map(attribute='name')
-         | intersect(services_test_docker_members) }}
+      {{ [{'state': 'present'}] | product(dev_users) | map('combine') | rejectattr('state', 'eq', 'absent')
+         | map(attribute='name') | intersect(services_test_docker_members) }}
 
 # As root: loopback isolation lets only root, dev users and service accounts reach the ports.
 # Retried while the broker or LocalStack is still starting.
