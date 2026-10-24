@@ -14,9 +14,9 @@
   ansible.builtin.assert:
     that:
       - vpn_conf | length > 0
-      - vpn_conf is not search('(?i)AllowedIPs\\s*=.*(0\\.0\\.0\\.0/0|::/0)')
+      - vpn_conf is not search('(?i)AllowedIPs\\s*=.*(?<![\\w.:])(0\\.0\\.0\\.0/[01]|128\\.0\\.0\\.0/1|::/[01]|8000::/1)(?!\\d)')
       - vpn_conf is not search('(?im)^\\s*DNS\\s*=')
-    fail_msg: "{{ vpn_conf_env }} must hold the AmneziaWG config, AllowedIPs without 0.0.0.0/0 or ::/0, no DNS line"
+    fail_msg: "{{ vpn_conf_env }} must hold the AmneziaWG config, only intranet subnets in AllowedIPs, no DNS line"
     quiet: true
   vars:
     vpn_conf: "{{ lookup('ansible.builtin.env', vpn_conf_env) if vpn_conf_env else '' }}"

@@ -120,7 +120,7 @@ The role adds the vendor PPA `ppa:amnezia/ppa` and installs the running kernel's
 - The tunnel is host-wide: every account on the box, agents included, reaches the intranet. Identity on the intranet comes from each developer's own credentials.
 - `verify.yml --tags vpn` checks that the unit is active, the `intranet` interface exists, the default route does not use it, the last handshake is under 180 seconds old, DKMS lists `amneziawg` as installed for the running kernel, and `vpn_probe` answers. `sudo hades-status` prints the handshake age.
 - DKMS builds the module only for kernels whose headers are installed. After rebooting into a new kernel, apply `--tags vpn` and run `verify.yml --tags vpn`; verify fails while the module is missing.
-- Rollback: `sudo systemctl disable --now awg-quick@intranet`, `sudo apt remove amneziawg amneziawg-tools`, and set `vpn_enabled: false`. The role never removes packages.
+- Rollback: `sudo systemctl disable --now awg-quick@intranet`, `sudo apt remove amneziawg amneziawg-dkms amneziawg-tools dkms` plus the `linux-headers-*` packages the role added, delete `/etc/apt/sources.list.d/amnezia-ppa.sources` and `/etc/apt/keyrings/amnezia-ppa.asc`, and set `vpn_enabled: false`. `hades-status` keeps its `vpn:` section until `--tags host` runs again. The role never removes packages.
 
 ## Production access
 
