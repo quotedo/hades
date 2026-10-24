@@ -150,15 +150,24 @@
   changed_when: false
   when: host_test_chrome.stat.exists
 
-- name: Assert Chrome for Testing is executable and resolves every library
+- name: Read the Chrome for Testing index
+  ansible.builtin.uri:
+    url: https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json
+    return_content: true
+  register: host_test_chrome_index
+
+- name: Assert Chrome for Testing is the channel's version, executable and resolves every library
   ansible.builtin.assert:
     that:
       - host_test_chrome.stat.exists
       - host_test_chrome.stat.executable
       - host_test_chrome_version.rc == 0
+      - host_test_chrome_index.json.channels[chrome_channel | capitalize].version in host_test_chrome_version.stdout.split()
       - host_test_chrome_ldd.stdout == ''
     fail_msg: >-
-      {{ chrome_root }}/chrome must be executable and run;
+      {{ chrome_root }}/chrome must be executable, run and be the {{ chrome_channel }} version
+      {{ host_test_chrome_index.json.channels[chrome_channel | capitalize].version }};
+      {{ host_test_chrome_version.stdout | default('') }}
       {{ host_test_chrome_version.stderr | default('') }} {{ host_test_chrome_ldd.stdout | default('') }}
     quiet: true
 
@@ -226,17 +235,3 @@
         path: "{{ host_test_chrome_tmp.path }}"
         state: absent
       when: host_test_chrome_tmp.path is defined
-
-- name: Read the system Node version
-  ansible.builtin.command: node --version
-  register: host_test_node
-  changed_when: false
-  failed_when: false
-
-- name: Assert the system Node is the pinned major
-  ansible.builtin.assert:
-    that:
-      - host_test_node.rc == 0
-      - host_test_node.stdout is match('v' ~ node_major ~ '\\.')
-    fail_msg: "node --version reports {{ host_test_node.stdout | default('nothing') }}, expected v{{ node_major }}.x"
-    quiet: true

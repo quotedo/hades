@@ -21,6 +21,7 @@
 
 import {{ hades_live_dir }}/*.caddy
 
+# Unknown host names say nothing about this server: a redirect to the apex.
 http://:{{ caddy_port }} {
-	respond "No worktree is live at {host}. Worktree sites are https://<label>.{{ hades_domain }} with label {{ hades_label_template }}." 404
+	redir https://{{ hades_domain }} 302
 }

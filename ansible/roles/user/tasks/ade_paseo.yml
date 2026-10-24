@@ -1,19 +1,5 @@
 ---
 # One present dev user listing paseo, run as the user (loop variable `user`).
-- name: Read the installed Paseo version
-  ansible.builtin.command: paseo --version
-  register: user_paseo_installed
-  changed_when: false
-  failed_when: false
-  check_mode: false
-
-# Only when missing or older, so a newer Paseo the developer installed is never downgraded.
-- name: Install Paseo
-  ansible.builtin.shell: npm install -g @getpaseo/cli@{{ paseo_version }} && asdf reshim nodejs
-  register: user_paseo_install
-  changed_when: true
-  when: user_paseo_installed.rc != 0 or user_paseo_installed.stdout is version(paseo_version, '<', version_type='semver')
-
 # Generated on the host once and kept, also when edited by hand; it never touches the
 # controller's disk.
 - name: Generate the Paseo password, once
@@ -47,6 +33,6 @@
     scope: user
     enabled: true
     daemon_reload: "{{ user_paseo_unit is changed }}"
-    state: "{{ 'restarted' if [user_paseo_install, user_paseo_password, user_paseo_unit] | select('changed') | list else 'started' }}"
+    state: "{{ 'restarted' if [user_paseo_password, user_paseo_unit] | select('changed') | list else 'started' }}"
   # In check mode a new unit is not written yet, so systemd cannot find it.
   when: not (ansible_check_mode and user_paseo_unit is changed)

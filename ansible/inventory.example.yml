@@ -7,8 +7,23 @@ dev_servers:
       ansible_user: <SUDO_USER>
       hades_domain: <DOMAIN>
       hades_label_template: !unsafe '{{project}}-{{name}}'
-      cloudflare_team_domain: <TEAM>.cloudflareaccess.com
+      # Cloudflare Access admits every present dev user's email plus these emails or @domains.
+      access_allow: []
       dev_services: [rabbitmq, localstack]
+      tailscale_enabled: false  # true when a dev user lists orca
+      vpn_enabled: false
+      vpn_conf_env: AMNEZIA_WG_CONF_BOX  # the environment variable holding this host's AmneziaWG config
+      vpn_probe: ""  # "<IP>:<PORT>", one intranet TCP endpoint verify must reach
+      # Exact versions; the first of each tool is the box default. Erlang before Elixir.
+      tools:
+        node: ["24.22.1"]
+        erlang: ["29.1.2", "28.5", "28.3.1"]
+        elixir: ["1.20.4-otp-29", "1.19.5-otp-28"]
+        python: ["3.14.9", "3.12.10"]
+        go: ["1.26.10"]
+        kubectl: ["1.33.13"]
+        gh: ["2.103.1"]
+      host_extra_packages: []
       protected:
         floor: true
         capped_users: []
@@ -19,6 +34,8 @@ dev_servers:
         - name: dev1
           uid: 2001
           state: present
+          admin: false  # the box's one administrator: group sudo, password required
+          email: <EMAIL>  # their Cloudflare Access login
           ssh_keys: ["<SSH_PUBLIC_KEY>"]
           ades: [paseo]
           paseo_port: 6767

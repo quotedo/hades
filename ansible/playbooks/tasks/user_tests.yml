@@ -54,9 +54,11 @@
       - "{{ item.name }}"
       - -c
       - >-
-        asdf --version && node --version && claude --version && codex --version
+        node --version && claude --version && codex --version && command -v node
         && direnv version && hades version && gh --version
-        && printf 'ERL_FLAGS=%s\nCHROME_PATH=%s\n' "$ERL_FLAGS" "$CHROME_PATH"
+        && printf 'ERL_FLAGS=%s\nCHROME_PATH=%s\nMIX_HOME=%s\nPATH=%s\n' "$ERL_FLAGS" "$CHROME_PATH" "$MIX_HOME" "$PATH"
+    # Otherwise the module expands $PATH with root's value before the login shell runs.
+    expand_argument_vars: false
   become: true
   register: user_test_login
   changed_when: false
@@ -103,6 +105,7 @@
       - user_test_pw[5] == '/bin/bash'
       - hades_group in user_test_groups
       - "'docker' not in user_test_groups"
+      - (item.name in ansible_facts.getent_group['sudo'][2].split(',')) == (item.admin | default(false))
       - user_test_linger.results[i].stdout == 'yes'
       - user_test_slice.results[i].status.MemoryHigh == dev_user_memory_high | human_to_bytes | string
       - user_test_slice.results[i].status.MemoryMax == dev_user_memory_max | human_to_bytes | string
@@ -112,8 +115,11 @@
       - user_test_manager.results[i].status.LimitNOFILE == default_limit_nofile | string
       - user_test_user_conf.results[i].stdout == default_limit_nofile | string
       - user_test_login.results[i].rc == 0
+      - (mise_shims ~ '/node') in user_test_login.results[i].stdout_lines
+      - user_test_login.results[i].stdout is not search('^PATH=.*/[.]asdf/', multiline=True)
       - ('ERL_FLAGS=' ~ erl_flags) in user_test_login.results[i].stdout_lines
       - ('CHROME_PATH=' ~ chrome_root ~ '/chrome') in user_test_login.results[i].stdout_lines
+      - ('MIX_HOME=' ~ user_test_pw[4] ~ '/.mix') in user_test_login.results[i].stdout_lines
       - user_test_sudo.results[i].rc == 1
       - user_test_sudo.results[i].stderr is search('^sudo:', multiline=True)
       - user_test_doctor.results[i].stdout is search('^ok +host-config:', multiline=True)
@@ -137,3 +143,19 @@
     user_test_pw: "{{ ansible_facts.getent_passwd[item.name] | default(['missing'] * 6) }}"
     user_test_groups: >-
       {{ ansible_facts.getent_group | dict2items | selectattr('value.2', 'search', '(^|,)' ~ item.name ~ '(,|$)') | map(attribute='key') | list }}
+
+- name: Read sshd's effective settings
+  ansible.builtin.command: sshd -T
+  become: true
+  register: user_test_sshd
+  changed_when: false
+
+- name: Assert sshd allows agent forwarding and refuses password logins with an administrator
+  ansible.builtin.assert:
+    that:
+      - "'allowagentforwarding yes' in user_test_sshd.stdout_lines"
+      - "('passwordauthentication no' in user_test_sshd.stdout_lines and 'kbdinteractiveauthentication no' in user_test_sshd.stdout_lines)
+        or user_present | selectattr('admin', 'defined') | selectattr('admin') | list | length == 0"
+    fail_msg: >-
+      sshd -T: {{ user_test_sshd.stdout_lines | select('match', '^(allowagentforwarding|passwordauthentication|kbdinteractiveauthentication) ') | join(', ') }}
+    quiet: true

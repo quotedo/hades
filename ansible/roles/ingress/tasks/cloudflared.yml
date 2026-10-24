@@ -1,13 +1,4 @@
 ---
-- name: Assert the tunnel token is set on the controller
-  ansible.builtin.assert:
-    that:
-      - lookup('ansible.builtin.env', 'CLOUDFLARE_TUNNEL_TOKEN') | length > 0
-    fail_msg: >-
-      CLOUDFLARE_TUNNEL_TOKEN is empty: export the tunnel's token from the Cloudflare dashboard
-      (steps in {{ hades_config_dir }}/ingress.md, written by a run with --skip-tags cloudflared)
-    quiet: true
-
 - name: Download Cloudflare's signing key
   ansible.builtin.get_url:
     url: https://pkg.cloudflare.com/cloudflare-main.gpg
@@ -45,14 +36,22 @@
     mode: "0700"
 
 # The unit reads it with --token-file, so the token is in no world-readable file and no process
-# list. A rotated token is written, and the connector restarted, on the next run.
+# list. cloudflare.yml reads it from the API; it travels over the task's stdin, so it never passes
+# through a controller file or a command line. A rotated token is written, and the connector
+# restarted, on the next run. Check mode against a tunnel not created yet has no token.
 - name: Write the tunnel token
-  ansible.builtin.copy:
-    content: "{{ lookup('ansible.builtin.env', 'CLOUDFLARE_TUNNEL_TOKEN') }}"
-    dest: /etc/cloudflared/token
-    mode: "0600"
+  ansible.builtin.shell: |
+    set -e; umask 077
+    new=$(cat)
+    [ -f /etc/cloudflared/token ] && [ "$(cat /etc/cloudflared/token)" = "$new" ] && exit 0
+    printf '%s' "$new" > /etc/cloudflared/token && echo changed
+  args:
+    stdin: "{{ ingress_tunnel_token.json.result }}"
+  register: ingress_token_write
+  changed_when: "'changed' in ingress_token_write.stdout"
   no_log: true
   notify: cloudflared restart
+  when: ingress_tunnel_token.json is defined
 
 - name: Write the cloudflared unit
   ansible.builtin.template:

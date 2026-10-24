@@ -4,4 +4,4 @@ dev_servers:
     box:
       ansible_connection: local
       dev_users:
-        - { name: alice, uid: 2001 }
+        - { name: alice, uid: 2001, email: alice@example.test }

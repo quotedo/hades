@@ -9,3 +9,14 @@ ingress_loopback_address: 127.0.0.1
 ingress_caddy_api_socket: /var/lib/caddy/api.sock
 # Orca pairs over Tailscale. The name is the one the collection documents.
 tailscale_enabled: "{{ user_present | map(attribute='ades', default=[]) | flatten is contains('orca') }}" # noqa: var-naming[no-role-prefix]
+
+# Cloudflare (design v2 6.6a), managed through the API by cloudflare.yml.
+ingress_cloudflare_api: https://api.cloudflare.com/client/v4
+# The Access policy admits the present dev users' emails and access_allow: the plain emails in
+# that order, then the @domain entries, each admitting a whole mail domain.
+ingress_access_entries: "{{ (user_present | map(attribute='email', default='') | list + access_allow) | unique }}"
+ingress_access_include: >-
+  {{ ingress_access_entries | reject('match', '@') | map('community.general.dict_kv', 'email')
+     | map('community.general.dict_kv', 'email') | list
+     + ingress_access_entries | select('match', '@') | map('regex_replace', '^@', '')
+     | map('community.general.dict_kv', 'domain') | map('community.general.dict_kv', 'email_domain') | list }}

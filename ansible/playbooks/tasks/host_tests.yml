@@ -209,3 +209,81 @@
     fail_msg: "governors in use: {{ host_test_governors.stdout_lines | unique | join(', ') }}"
     quiet: true
   when: host_test_cpufreq.stat.exists
+
+- name: Read the tool installs
+  ansible.builtin.command: mise ls --json
+  become: true
+  register: host_tools_ls
+  changed_when: false
+
+- name: Assert the store holds exactly the tools versions
+  ansible.builtin.assert:
+    that:
+      - host_tools_installed | sort == host_tools_listed | sort
+    fail_msg: "the store holds {{ host_tools_installed | sort }}, tools lists {{ host_tools_listed | sort }}"
+    quiet: true
+
+- name: Stat the shims directory
+  ansible.builtin.stat:
+    path: "{{ mise_shims }}"
+  register: host_test_shims
+
+- name: Assert the shims directory exists and is root 0755
+  ansible.builtin.assert:
+    that:
+      - host_test_shims.stat.isdir | default(false)
+      - host_test_shims.stat.mode == '0755'
+      - host_test_shims.stat.pw_name == 'root'
+    fail_msg: "{{ mise_shims }} must be a root-owned directory with mode 0755"
+    quiet: true
+
+- name: Read the system mise config
+  ansible.builtin.slurp:
+    src: /etc/mise/config.toml
+  register: host_test_mise_config
+
+# Without these a shim auto-installs a missing project version or silently runs another binary.
+- name: Assert the system config disables auto-install and fall-through
+  ansible.builtin.assert:
+    that:
+      - "'auto_install = false' in host_test_mise_config_lines"
+      - "'not_found_system_fallback = false' in host_test_mise_config_lines"
+    fail_msg: /etc/mise/config.toml must set auto_install = false and not_found_system_fallback = false
+    quiet: true
+  vars:
+    host_test_mise_config_lines: "{{ (host_test_mise_config.content | b64decode).splitlines() }}"
+
+# `mise which` names the binary behind a shim (the shims themselves link to mise).
+- name: Read the global CLI versions
+  ansible.builtin.shell: set -e; mise which {{ item }}; {{ mise_shims }}/{{ item }} --version
+  loop: [claude, codex, paseo]
+  register: host_test_clis
+  changed_when: false
+  failed_when: false
+
+- name: Assert the agent CLIs and Paseo are installed in the store
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout_lines[0].startswith(mise_store ~ '/installs/node/' ~ tools.node[0] ~ '/bin/')
+      - item.item != 'paseo' or paseo_version in item.stdout
+    fail_msg: "{{ item.item }} must run from the default Node in the store ({{ paseo_version }} for paseo): {{ item.stdout }} {{ item.stderr }}"
+    quiet: true
+  loop: "{{ host_test_clis.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Stat Orca and its wrapper
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: ["{{ orca_root }}/orca-{{ orca_version }}.AppImage", /usr/local/bin/orca-ide]
+  register: host_test_orca
+  when: host_orca_wanted
+
+- name: Assert Orca is the pinned version and its wrapper is executable
+  ansible.builtin.assert:
+    that:
+      - host_test_orca.results | map(attribute='stat.mode', default='') | unique == ['0755']
+    fail_msg: "{{ orca_root }}/orca-{{ orca_version }}.AppImage and /usr/local/bin/orca-ide must exist with mode 0755"
+    quiet: true
+  when: host_orca_wanted

@@ -60,6 +60,8 @@ type Real struct {
 func ToolPrepend(home string, extra []string) []string {
 	return append([]string{
 		filepath.Join(home, ".asdf", "shims"),
+		filepath.Join(home, ".local", "share", "mise", "shims"),
+		"/usr/local/share/mise/shims", // the server's shared tool store
 		filepath.Join(home, ".local", "bin"),
 	}, extra...)
 }

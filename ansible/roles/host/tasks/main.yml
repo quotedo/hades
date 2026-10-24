@@ -19,15 +19,19 @@
       - backup_dir is match('^/.+')
       - chrome_channel is string
       - chrome_channel | length > 0
-      - node_major | int > 0
     fail_msg: >-
       hades_domain, hades_label_template, hades_version and chrome_channel must be non-empty
-      strings, backup_dir an absolute path, node_major a Node major version and dev_services
-      a list
+      strings, backup_dir an absolute path and dev_services a list
     quiet: true
 
 - name: Packages
   ansible.builtin.import_tasks: packages.yml
+
+- name: Shared tool store
+  ansible.builtin.import_tasks: toolchain.yml
+
+- name: Agent CLIs, Paseo and Orca
+  ansible.builtin.import_tasks: agents.yml
 
 - name: Kernel settings and CPU governor
   ansible.builtin.import_tasks: sysctl.yml

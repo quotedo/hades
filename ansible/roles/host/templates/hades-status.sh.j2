@@ -71,6 +71,17 @@ else
   echo "dev postgres connections: unavailable ($(head -n 1 <<<"$n"))"
 fi
 
+{% if vpn_enabled %}
+echo
+if ! is_root; then
+  echo "vpn: unavailable (needs root)"
+elif last=$(awg show intranet latest-handshakes 2>/dev/null | awk 'NR == 1 { print $2 }') && [ "${last:-0}" -gt 0 ]; then
+  echo "vpn: last handshake $(( $(date +%s) - last )) s ago"
+else
+  echo "vpn: unavailable"
+fi
+
+{% endif %}
 echo
 echo "oom kills (this boot, last 10):"
 if ! is_root && ! id -nG | tr ' ' '\n' | grep -qxE 'adm|systemd-journal'; then

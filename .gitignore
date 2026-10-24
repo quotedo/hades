@@ -3,3 +3,4 @@
 /ansible/inventory.yml
 /ansible/.env
 /ansible/.ansible/
+/.envrc

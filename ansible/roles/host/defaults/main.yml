@@ -22,6 +22,17 @@ hades_registry_root: /srv/hades # noqa: var-naming[no-role-prefix]
 hades_tool_paths: [] # noqa: var-naming[no-role-prefix]
 dev_services: [] # noqa: var-naming[no-role-prefix]
 
+# Cloudflare Access (ingress role): extra emails or @domain entries the policy admits besides the
+# present dev users' emails, and the session length (Cloudflare's maximum).
+access_allow: [] # noqa: var-naming[no-role-prefix]
+access_session: 720h # noqa: var-naming[no-role-prefix]
+
+# Intranet VPN (vpn role): vpn_conf_env names the operator's environment variable holding the
+# host's AmneziaWG config; vpn_probe ("<host>:<port>") is one intranet TCP endpoint verify reaches.
+vpn_enabled: false # noqa: var-naming[no-role-prefix]
+vpn_conf_env: "" # noqa: var-naming[no-role-prefix]
+vpn_probe: "" # noqa: var-naming[no-role-prefix]
+
 # Caddy (installed by the ingress role)
 caddy_port: 8090 # noqa: var-naming[no-role-prefix]
 caddy_config: /etc/caddy/Caddyfile # noqa: var-naming[no-role-prefix]
@@ -45,11 +56,55 @@ rabbitmq_mqtt_port: 1883 # noqa: var-naming[no-role-prefix]
 localstack_port: 14566 # noqa: var-naming[no-role-prefix]
 redis_port: 6379 # noqa: var-naming[no-role-prefix]
 
-# Chrome for Testing; the binary is <chrome_root>/chrome
+# Shared tool store (design v2 6.2): mise installs every `tools` version as root under
+# mise_store; the first version of each tool is the box default. Versions are exact (preflight).
+mise_version: "2026.10.18" # noqa: var-naming[no-role-prefix]
+mise_store: /usr/local/share/mise # noqa: var-naming[no-role-prefix]
+mise_shims: "{{ mise_store }}/shims" # noqa: var-naming[no-role-prefix]
+tools: # noqa: var-naming[no-role-prefix]
+  node: ["24.22.1"]
+# `tool@version` for every tools entry, and for every installed record under the store in
+# host_tools_ls (`mise ls --json`, registered by the role and by verify). mise also lists versions
+# a config requests but nobody installed, and root's own installs: neither counts.
+host_tools_listed: >-
+  {%- set out = [] -%}
+  {%- for tool, versions in tools.items() -%}
+  {%- for v in versions -%}
+  {%- set _ = out.append(tool ~ '@' ~ v) -%}
+  {%- endfor -%}
+  {%- endfor -%}
+  {{ out }}
+host_tools_installed: >-
+  {%- set out = [] -%}
+  {%- for tool, records in (host_tools_ls.stdout | default('{}') | from_json).items() -%}
+  {%- for r in records if r.installed and r.install_path.startswith(mise_store ~ '/installs/') -%}
+  {%- set _ = out.append(tool ~ '@' ~ r.version) -%}
+  {%- endfor -%}
+  {%- endfor -%}
+  {{ out }}
+kerl_configure_options: "--without-wx --without-javac --without-odbc" # noqa: var-naming[no-role-prefix]
+# apt packages a host adds on top of host_packages; never removed by the role.
+host_extra_packages: []
+
+# Installed as root with npm under the store's default Node (agents.yml). agent_clis maps a
+# command to its npm package; a package without @<version> gets the latest when missing.
+agent_clis: # noqa: var-naming[no-role-prefix]
+  claude: "@anthropic-ai/claude-code"
+  codex: "@openai/codex"
+paseo_version: "0.12.0" # noqa: var-naming[no-role-prefix]
+# One Orca AppImage in orca_root with the /usr/local/bin/orca-ide wrapper, only while a present
+# dev user lists orca. orca_packages are the Electron libraries beyond host_chrome_packages.
+orca_version: "1.4.232" # noqa: var-naming[no-role-prefix]
+orca_root: /opt/orca # noqa: var-naming[no-role-prefix]
+orca_packages: [libnotify4, libsecret-1-0, libxss1, libxtst6, xdg-utils] # noqa: var-naming[no-role-prefix]
+host_orca_wanted: >-
+  {{ dev_users | default([]) | selectattr('ades', 'defined') | selectattr('ades', 'contains', 'orca')
+     | map(attribute='state', default='present') | select('eq', 'present') | list | length > 0 }}
+
+# Chrome for Testing; the binary is <chrome_root>/chrome, a link into <chrome_root>/<version>/.
+# chrome_channel names a channel of the Chrome for Testing index (stable, beta, dev, canary).
 chrome_root: /opt/chrome-for-testing # noqa: var-naming[no-role-prefix]
 chrome_channel: stable # noqa: var-naming[no-role-prefix]
-# System Node from NodeSource, used only to run @puppeteer/browsers for the Chrome install.
-node_major: 24 # noqa: var-naming[no-role-prefix]
 # Runtime libraries and fonts Chrome needs; on Ubuntu 24.04+ the first two are virtual
 # packages provided by their t64 builds.
 host_chrome_packages:
@@ -112,7 +167,7 @@ default_limit_nofile: 1048576 # noqa: var-naming[no-role-prefix]
 cpu_governor: performance # noqa: var-naming[no-role-prefix]
 erl_flags: "+sbwt none +sbwtdcpu none +sbwtdio none" # noqa: var-naming[no-role-prefix]
 
-# Build dependencies for the per-user toolchains, plus tools the roles use.
+# Build dependencies for the store's toolchains, plus tools the roles use.
 host_packages:
   - autoconf
   - m4

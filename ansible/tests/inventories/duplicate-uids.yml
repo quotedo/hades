@@ -5,7 +5,7 @@ dev_servers:
       ansible_connection: local
       hades_domain: valid.example.test
       dev_users:
-        - { name: alice, uid: 3001 }
-        - { name: bob, uid: 3001, state: present }
-        - { name: carol, uid: 3002, state: absent }
-        - { name: dave, uid: 3002 }
+        - { name: alice, uid: 3001, email: alice@example.test }
+        - { name: bob, uid: 3001, state: present, email: bob@example.test }
+        - { name: carol, uid: 3002, state: absent, email: carol@example.test }
+        - { name: dave, uid: 3002, email: dave@example.test }

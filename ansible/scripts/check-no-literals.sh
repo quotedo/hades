@@ -18,6 +18,8 @@ import json, sys
 SKIP = {"present", "absent", "true", "false", "local"}
 # Role vocabulary (ADE and service names) is part of the collection interface.
 VOCAB = {"paseo", "orca", "rabbitmq", "localstack"}
+# The dev_users key `admin` is collection interface too, though an account may share the name.
+VOCAB.add("admin")
 # The documented default label template; a role must write it as a default, so the
 # inventory may legitimately repeat it.
 VOCAB.add("{{project}}-{{name}}")
@@ -33,8 +35,10 @@ def walk(v):
         if len(v) >= 4 and v not in SKIP and v not in VOCAB and "\n" not in v:
             out.add(v)
     elif isinstance(v, dict):
-        for x in v.values():
-            walk(x)
+        # Tool version pins are shared by design: host defaults pin the same versions.
+        for k, x in v.items():
+            if k != "tools":
+                walk(x)
     elif isinstance(v, list):
         for x in v:
             walk(x)
