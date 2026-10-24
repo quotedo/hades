@@ -23,6 +23,14 @@
       ansible.builtin.import_tasks: tasks/preflight_tests.yml
       tags: [preflight]
 
+    - name: Scan the roles and playbooks for inventory literals
+      ansible.builtin.command: "{{ playbook_dir }}/../scripts/check-no-literals.sh {{ inventory_file }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: false
+      tags: [preflight]
+
     - name: Host tests
       ansible.builtin.import_tasks: tasks/host_tests.yml
       tags: [host]
@@ -66,9 +74,11 @@
       tags: [protected]
       when: protected is defined
 
+    # Opt-in: it writes into acceptance_user's home, so only a throwaway dev user.
     - name: Acceptance tests
       ansible.builtin.import_tasks: tasks/acceptance_tests.yml
       tags: [acceptance]
+      when: acceptance_user is defined
 
     # Opt-in (-e reboot_test=true): the boot-sensitive checks again after a reboot.
     - name: Reboot, then verify again

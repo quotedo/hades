@@ -1,18 +1,24 @@
 ---
-# End to end as the first present dev user: the sample project gets a worktree, `hades up` and
-# `hades down`, checked through the registry, Caddy, the dev Postgres and loopback isolation.
-- name: Scan the roles and playbooks for inventory literals
-  ansible.builtin.command: "{{ playbook_dir }}/../scripts/check-no-literals.sh {{ inventory_file }}"
-  delegate_to: localhost
-  become: false
-  run_once: true
-  changed_when: false
+# End to end as acceptance_user, a throwaway dev user given with -e: the sample project gets a
+# worktree, `hades up` and `hades down`, checked through the registry, Caddy, the dev Postgres
+# and loopback isolation.
+- name: Read the user's passwd entry
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ acceptance_user }}"
+
+# Before the block: its clean-up deletes ~/sample and ~/sample-wt in this user's home.
+- name: Assert the user is a present dev user
+  ansible.builtin.assert:
+    that:
+      - acceptance_user in user_present | map(attribute='name')
+    fail_msg: "acceptance_user {{ acceptance_user }} is not a present dev user"
+    quiet: true
 
 - name: Bring a sample worktree up and down
   become: true
   vars:
-    acceptance_user: "{{ user_present[0].name }}"
-    acceptance_repo: "{{ user_home_base }}/{{ acceptance_user }}/sample"
+    acceptance_repo: "{{ ansible_facts.getent_passwd[acceptance_user][4] }}/sample"
     acceptance_wt: "{{ acceptance_repo }}-wt"
     acceptance_entry: "{{ acceptance_ls.stdout | from_json | selectattr('Worktree', 'eq', acceptance_wt) | first | default({}) }}"
     acceptance_port: "{{ acceptance_entry.Port }}"

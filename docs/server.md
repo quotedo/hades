@@ -101,7 +101,7 @@ Set the user's `state: absent` and apply `--tags user`. The role then:
 
 | Tag | Proves | Time on the reference host |
 |---|---|---|
-| `preflight` | preflight rejects the bad fixtures in `tests/inventories/` and accepts the valid one | 4 s |
+| `preflight` | preflight rejects the bad fixtures in `tests/inventories/` and accepts the valid one; no inventory literal appears in the roles or playbooks | 4 s |
 | `host` | registry, host config, sudoers rule, kernel settings, `hades.slice`, set-property caps still effective, CPU governor | 232 s |
 | `isolation` | the rule table is loaded at boot; a throwaway non-dev account is refused while root and ssh still connect | 70 s |
 | `ops` | gc and backup timers, a backup run, `hades-status`, journald and Docker log caps, Chrome headless with its sandbox | 182 s |
@@ -112,9 +112,9 @@ Set the user's `state: absent` and apply `--tags user`. The role then:
 | `ade` | each ADE's unit and listeners, Paseo's password, Orca's port in the input chain, no stale units | 70 s |
 | `offboard` | absent users gone and archived, GPG keys exported | 18 s |
 | `protected` | floor, caps and private homes | 97 s |
-| `acceptance` | the scan for inventory literals, then the sample project as the first present user, described below | 184 s |
+| `acceptance` | the sample project end to end, described below | 184 s |
 
-The `acceptance` check uses the sample project in `tests/sample-project/`:
+The `acceptance` check runs only with `-e acceptance_user=<a throwaway dev user>` and is skipped otherwise. It works in that user's home with the sample project in `tests/sample-project/`:
 
 1. It commits the project and adds a worktree.
 2. It runs `hades up`.
