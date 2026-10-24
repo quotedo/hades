@@ -33,8 +33,10 @@ def walk(v):
         if len(v) >= 4 and v not in SKIP and v not in VOCAB and "\n" not in v:
             out.add(v)
     elif isinstance(v, dict):
-        for x in v.values():
-            walk(x)
+        # Tool version pins are shared by design: host defaults pin the same versions.
+        for k, x in v.items():
+            if k != "tools":
+                walk(x)
     elif isinstance(v, list):
         for x in v:
             walk(x)

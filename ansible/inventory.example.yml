@@ -9,6 +9,16 @@ dev_servers:
       hades_label_template: !unsafe '{{project}}-{{name}}'
       cloudflare_team_domain: <TEAM>.cloudflareaccess.com
       dev_services: [rabbitmq, localstack]
+      # Exact versions; the first of each tool is the box default. Erlang before Elixir.
+      tools:
+        node: ["24.22.1"]
+        erlang: ["29.1.2", "28.5", "28.3.1"]
+        elixir: ["1.20.4-otp-29", "1.19.5-otp-28"]
+        python: ["3.14.9", "3.12.10"]
+        go: ["1.26.10"]
+        kubectl: ["1.33.13"]
+        gh: ["2.103.1"]
+      host_extra_packages: []
       protected:
         floor: true
         capped_users: []

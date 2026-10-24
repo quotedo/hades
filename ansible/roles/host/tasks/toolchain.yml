@@ -1,0 +1,77 @@
+---
+# Shared tool store (design v2 6.2): mise installs every `tools` version as root under
+# mise_store, and the store holds exactly that list. /etc/mise/config.toml, which every user
+# reads, sets the defaults and turns off auto-install and the fall-through to other binaries.
+- name: Install mise
+  ansible.builtin.get_url:
+    url: https://github.com/jdx/mise/releases/download/v{{ mise_version }}/mise-v{{ mise_version }}-linux-x64
+    dest: /usr/local/bin/mise
+    mode: "0755"
+    checksum: sha256:https://github.com/jdx/mise/releases/download/v{{ mise_version }}/SHASUMS256.txt
+  register: host_mise_binary
+
+- name: Create the store and the mise config directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: ["{{ mise_store }}", /etc/mise]
+
+- name: Write the system mise config
+  ansible.builtin.template:
+    src: mise-config.toml.j2
+    dest: /etc/mise/config.toml
+    mode: "0644"
+
+# State comes from `mise ls --json`, never from directories: a failed install leaves no record,
+# so the next run tries it again. mise also lists versions a config requests but nobody
+# installed, and root's own installs: only installed records under the store count.
+- name: Install and prune the tool versions
+  vars:
+    host_tools_listed: >-
+      {%- set out = [] -%}
+      {%- for tool, versions in tools.items() -%}
+      {%- for v in versions -%}
+      {%- set _ = out.append(tool ~ '@' ~ v) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+    host_tools_installed: >-
+      {%- set out = [] -%}
+      {%- for tool, records in (host_tools_ls.stdout | default('{}') | from_json).items() -%}
+      {%- for r in records if r.installed and r.install_path.startswith(mise_store ~ '/installs/') -%}
+      {%- set _ = out.append(tool ~ '@' ~ r.version) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+  block:
+    - name: Read the tool installs
+      ansible.builtin.command: mise ls --json
+      register: host_tools_ls
+      changed_when: false
+      check_mode: false
+      when: not (ansible_check_mode and host_mise_binary is changed)
+
+    # Every listed version in one command, in inventory order: installed ones are skipped, and an
+    # Elixir build finds the Erlang listed before it.
+    - name: Install the listed tool versions
+      ansible.builtin.command:
+        argv: "{{ ['mise', 'install', '--system'] + host_tools_listed }}"
+      environment:
+        KERL_CONFIGURE_OPTIONS: "{{ kerl_configure_options }}"
+        MISE_YES: "1"
+      register: host_tools_install
+      changed_when: true
+      when: host_tools_listed | difference(host_tools_installed) | length > 0
+
+    - name: Remove unlisted tool versions
+      ansible.builtin.command:
+        argv: "{{ ['mise', 'uninstall'] + host_tools_installed | difference(host_tools_listed) }}"
+      changed_when: true
+      when: host_tools_installed | difference(host_tools_listed) | length > 0
+
+    # install --system creates no shims; uninstall removes its own.
+    - name: Create the shims # noqa: no-handler
+      ansible.builtin.command: mise reshim --system
+      changed_when: true
+      when: host_tools_install is changed

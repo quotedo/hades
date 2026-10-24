@@ -4,5 +4,7 @@ case " $(id -nG 2>/dev/null) " in
 *" {{ hades_group }} "*)
 	export CHROME_PATH={{ (chrome_root ~ '/chrome') | quote }}
 	export ERL_FLAGS={{ erl_flags | quote }}
+	export PATH={{ mise_shims | quote }}:"$PATH"
+	export DISABLE_AUTOUPDATER=1
 	;;
 esac

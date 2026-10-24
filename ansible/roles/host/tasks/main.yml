@@ -29,6 +29,9 @@
 - name: Packages
   ansible.builtin.import_tasks: packages.yml
 
+- name: Shared tool store
+  ansible.builtin.import_tasks: toolchain.yml
+
 - name: Kernel settings and CPU governor
   ansible.builtin.import_tasks: sysctl.yml
 

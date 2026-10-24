@@ -43,6 +43,17 @@
   changed_when: false
   failed_when: preflight_orca_without_tailscale.rc == 0
 
+- name: Preflight rejects a bare major in tools
+  ansible.builtin.command:
+    cmd: >-
+      ansible-playbook -i {{ playbook_dir }}/../tests/inventories/tools-prefix.yml
+      {{ playbook_dir }}/preflight.yml
+  delegate_to: localhost
+  run_once: true
+  register: preflight_tools_prefix
+  changed_when: false
+  failed_when: preflight_tools_prefix.rc == 0
+
 - name: Preflight accepts a valid inventory
   ansible.builtin.command:
     cmd: >-
@@ -62,5 +73,6 @@
       - "'[j-smith, jsmith]' in preflight_colliding.stdout"
       - "'Present dev_users share a uid: 3001 [alice, bob]' in preflight_duplicate_uids.stdout"
       - "'orca is listed by: alice — it pairs over Tailscale' in preflight_orca_without_tailscale.stdout"
+      - "'tools.node: versions must be exact' in preflight_tools_prefix.stdout"
     quiet: true
   run_once: true

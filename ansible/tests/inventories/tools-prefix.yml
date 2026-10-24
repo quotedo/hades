@@ -1,0 +1,10 @@
+---
+dev_servers:
+  hosts:
+    box:
+      ansible_connection: local
+      hades_domain: valid.example.test
+      dev_users:
+        - { name: alice, uid: 2001, ades: [paseo] }
+      tools:
+        node: ["24"]

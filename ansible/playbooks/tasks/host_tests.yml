@@ -209,3 +209,65 @@
     fail_msg: "governors in use: {{ host_test_governors.stdout_lines | unique | join(', ') }}"
     quiet: true
   when: host_test_cpufreq.stat.exists
+
+- name: Read the tool installs
+  ansible.builtin.command: mise ls --json
+  become: true
+  register: host_test_mise_ls
+  changed_when: false
+
+# mise also lists versions a config requests but nobody installed, and root's own installs: only
+# installed records under the store count.
+- name: Assert the store holds exactly the tools versions
+  ansible.builtin.assert:
+    that:
+      - host_test_installed | sort == host_test_listed | sort
+    fail_msg: "the store holds {{ host_test_installed | sort }}, tools lists {{ host_test_listed | sort }}"
+    quiet: true
+  vars:
+    host_test_installed: >-
+      {%- set out = [] -%}
+      {%- for tool, records in (host_test_mise_ls.stdout | from_json).items() -%}
+      {%- for r in records if r.installed and r.install_path.startswith(mise_store ~ '/installs/') -%}
+      {%- set _ = out.append(tool ~ '@' ~ r.version) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+    host_test_listed: >-
+      {%- set out = [] -%}
+      {%- for tool, versions in tools.items() -%}
+      {%- for v in versions -%}
+      {%- set _ = out.append(tool ~ '@' ~ v) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Stat the shims directory
+  ansible.builtin.stat:
+    path: "{{ mise_shims }}"
+  register: host_test_shims
+
+- name: Assert the shims directory exists and is root 0755
+  ansible.builtin.assert:
+    that:
+      - host_test_shims.stat.isdir | default(false)
+      - host_test_shims.stat.mode == '0755'
+      - host_test_shims.stat.pw_name == 'root'
+    fail_msg: "{{ mise_shims }} must be a root-owned directory with mode 0755"
+    quiet: true
+
+- name: Read the system mise config
+  ansible.builtin.slurp:
+    src: /etc/mise/config.toml
+  register: host_test_mise_config
+
+# Without these a shim auto-installs a missing project version or silently runs another binary.
+- name: Assert the system config disables auto-install and fall-through
+  ansible.builtin.assert:
+    that:
+      - "'auto_install = false' in host_test_mise_config_lines"
+      - "'not_found_system_fallback = false' in host_test_mise_config_lines"
+    fail_msg: /etc/mise/config.toml must set auto_install = false and not_found_system_fallback = false
+    quiet: true
+  vars:
+    host_test_mise_config_lines: "{{ (host_test_mise_config.content | b64decode).splitlines() }}"

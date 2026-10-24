@@ -45,6 +45,18 @@ rabbitmq_mqtt_port: 1883 # noqa: var-naming[no-role-prefix]
 localstack_port: 14566 # noqa: var-naming[no-role-prefix]
 redis_port: 6379 # noqa: var-naming[no-role-prefix]
 
+# Shared tool store (design v2 6.2): mise installs every `tools` version as root under
+# mise_store; the first version of each tool is the box default. Versions are exact (preflight).
+mise_version: "2026.10.18" # noqa: var-naming[no-role-prefix]
+mise_store: /usr/local/share/mise # noqa: var-naming[no-role-prefix]
+mise_shims: "{{ mise_store }}/shims" # noqa: var-naming[no-role-prefix]
+tools: # noqa: var-naming[no-role-prefix]
+  node: ["24.22.1"]
+host_tools_default: "{{ dict(tools | zip(tools.values() | map('first'))) }}"
+kerl_configure_options: "--without-wx --without-javac --without-odbc" # noqa: var-naming[no-role-prefix]
+# apt packages a host adds on top of host_packages; never removed by the role.
+host_extra_packages: []
+
 # Chrome for Testing; the binary is <chrome_root>/chrome
 chrome_root: /opt/chrome-for-testing # noqa: var-naming[no-role-prefix]
 chrome_channel: stable # noqa: var-naming[no-role-prefix]
@@ -112,7 +124,7 @@ default_limit_nofile: 1048576 # noqa: var-naming[no-role-prefix]
 cpu_governor: performance # noqa: var-naming[no-role-prefix]
 erl_flags: "+sbwt none +sbwtdcpu none +sbwtdio none" # noqa: var-naming[no-role-prefix]
 
-# Build dependencies for the per-user toolchains, plus tools the roles use.
+# Build dependencies for the store's toolchains, plus tools the roles use.
 host_packages:
   - autoconf
   - m4

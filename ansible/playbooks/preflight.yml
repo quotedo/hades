@@ -83,3 +83,23 @@
         quiet: true
       vars:
         hades_orca_users: "{{ hades_present_users | selectattr('ades', 'contains', 'orca') | map(attribute='name') | list }}"
+
+    # Exact versions keep two boxes or two applies on the same release; keys are mise registry
+    # names, under which `mise ls --json` reports them (go, never golang).
+    - name: Assert every tools version is exact
+      ansible.builtin.assert:
+        that:
+          - item.key != 'golang'
+          - item.value is sequence
+          - item.value is not string
+          - item.value | length > 0
+          - item.value | reject('string') | list == []
+          - item.value | reject('match', '^\\d+\\.\\d+(\\.\\d+)*([.-][A-Za-z0-9.-]+)?$') | list == []
+        fail_msg: >-
+          {{ 'tools.golang: use go, the mise registry name' if item.key == 'golang' else
+             'tools.' ~ item.key ~ ': versions must be exact quoted strings, major.minor at least, got '
+             ~ item.value | to_json }}
+        quiet: true
+      loop: "{{ tools | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
