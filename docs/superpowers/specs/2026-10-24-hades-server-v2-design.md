@@ -177,18 +177,20 @@ The owner also asked about encrypting home directories; this document records wh
 
   ```yaml
   tools:
-    node: ["<latest Active LTS patch at build time>"]
-    erlang: ["29.1.2", "28.5", "28.3.1"]        # jarl default; pops; saga
+    node: ["24.22.1"]                           # newest LTS on 2026-10-24; Node 26 is Active LTS from 2026-10-28, owner's call when to move
+    erlang: ["29.1.2", "28.5", "28.3.1"]        # jarl default; pops; saga (erlang before elixir: Elixir installs need erl)
     elixir: ["1.20.4-otp-29", "1.19.5-otp-28"]  # jarl default; saga and pops
-    python: ["<latest 3.14 patch>", "3.12.10"]  # latest default; infra's pin
-    golang: ["<latest 1.26 patch>"]             # tyrr-go needs >= 1.26.1
-    kubectl: ["<latest 1.33 patch>"]            # production is 1.33; one minor above staging, within skew
-    gh: ["<latest 2.x>"]                        # replaces v1's per-user gh install (v1 final review K16)
+    python: ["3.14.9", "3.12.10"]               # latest default; infra's pin
+    go: ["1.26.10"]                             # mise registry name is go, not golang; tyrr-go needs >= 1.26.1
+    kubectl: ["1.33.13"]                        # production is 1.33; one minor above staging, within skew
+    gh: ["2.103.1"]                             # replaces v1's per-user gh install (v1 final review K16)
   ```
 
-  The builder pins the `<latest …>` entries to exact versions at plan time. Versions are exact,
-  never prefixes, so two boxes or two applies cannot land on different patch releases; preflight
-  rejects a bare major or minor *(my call)*. The host role renders the default versions into mise's
+  Pinned by the Task 0 spike on 2026-10-24. Versions are exact (two or more numeric components,
+  optional suffix; Erlang's own `28.5` counts), never a bare major, so two boxes or two applies
+  cannot land on different patch releases; preflight rejects a bare major *(my call)*. The spike
+  also found that mise's `not_found_system_fallback` must be off, or a missing project version
+  silently runs the distribution's binary of the same name (section 8 item 1, resolved). The host role renders the default versions into mise's
   system-wide config, installs every listed version with `mise install --system` as root, and
   removes system versions no longer listed, so the store is exactly the inventory *(my call)*.
   Removing a Node version removes the npm globals under it; the role installs the agent CLIs and
