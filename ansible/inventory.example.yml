@@ -29,6 +29,7 @@ dev_servers:
         - name: dev1
           uid: 2001
           state: present
+          admin: false  # the box's one administrator: group sudo, password required
           ssh_keys: ["<SSH_PUBLIC_KEY>"]
           ades: [paseo]
           paseo_port: 6767

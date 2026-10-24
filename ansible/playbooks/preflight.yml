@@ -41,10 +41,11 @@
           - (item.ades | default([])) is sequence
           - (item.ades | default([])) is not string
           - (item.ades | default([])) is subset(['paseo', 'orca'])
+          - (item.admin | default(false)) is boolean
         fail_msg: >-
           dev_users entry {{ item.name | default('<unnamed>') }} is invalid: name must match
           ^[a-z][a-z0-9_-]{0,31}$, uid must be an integer >= 1000, state must be present or
-          absent, ades must be a list drawn from paseo and orca
+          absent, ades must be a list drawn from paseo and orca, admin must be true or false
         quiet: true
       loop: "{{ dev_users }}"
       loop_control:

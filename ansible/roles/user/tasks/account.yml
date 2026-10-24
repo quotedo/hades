@@ -1,11 +1,11 @@
 ---
-# Group hades only: `groups` replaces the supplementary groups, so no sudo or docker membership
-# survives a run.
+# Group hades, plus sudo for an administrator: `groups` replaces the supplementary groups, so no
+# other sudo or docker membership survives a run. sudo asks for the user's password.
 - name: Create the account
   ansible.builtin.user:
     name: "{{ user.name }}"
     uid: "{{ user.uid }}"
-    groups: ["{{ hades_group }}"]
+    groups: "{{ [hades_group] + (['sudo'] if user.admin | default(false) else []) }}"
     append: false
     shell: /bin/bash
     home: "{{ user_home }}"

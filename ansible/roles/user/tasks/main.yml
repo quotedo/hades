@@ -7,6 +7,7 @@
       - user_present | map(attribute='uid') | select('integer') | list | length == user_present | length
       - user_present | map(attribute='ssh_keys', default=[]) | reject('sequence') | list == []
       - user_present | map(attribute='ssh_keys', default=[]) | select('string') | list == []
+      - user_present | map(attribute='admin', default=false) | reject('boolean') | list == []
       - hades_tool_paths is sequence
       - hades_tool_paths is not string
       - hex_repos is sequence
@@ -14,9 +15,9 @@
       - user_ade_users | selectattr('ades', 'contains', 'paseo') | map(attribute='paseo_port', default='') | reject('integer') | list == []
       - user_ade_users | selectattr('ades', 'contains', 'orca') | map(attribute='orca_port', default='') | reject('integer') | list == []
     fail_msg: >-
-      every present dev_users entry needs a string name, an integer uid and a list ssh_keys, and an
-      integer paseo_port or orca_port for each ADE it lists; hades_tool_paths and hex_repos must be
-      lists
+      every present dev_users entry needs a string name, an integer uid, a list ssh_keys, admin true
+      or false when given, and an integer paseo_port or orca_port for each ADE it lists;
+      hades_tool_paths and hex_repos must be lists
     quiet: true
   vars:
     user_ade_users: "{{ user_present | selectattr('ades', 'defined') }}"
@@ -68,6 +69,25 @@
     label: "{{ user.name }}"
   vars:
     user_uid: "{{ ansible_facts.getent_passwd[user.name][1] }}"
+
+- name: Read sshd's effective settings
+  ansible.builtin.command: sshd -T
+  register: user_sshd
+  changed_when: false
+  check_mode: false
+
+# An administrator has a password, which must not open SSH logins. The role never edits /etc/ssh.
+- name: Assert sshd allows agent forwarding and refuses password logins with an administrator
+  ansible.builtin.assert:
+    that:
+      - "'allowagentforwarding yes' in user_sshd.stdout_lines"
+      - "'passwordauthentication no' in user_sshd.stdout_lines
+        or user_present | selectattr('admin', 'defined') | selectattr('admin') | list | length == 0"
+    fail_msg: >-
+      sshd must allow agent forwarding and, with an admin: true dev user, refuse password logins:
+      set AllowAgentForwarding yes and PasswordAuthentication no in an sshd drop-in yourself
+      (sshd -T: {{ user_sshd.stdout_lines | select('match', '^(allowagentforwarding|passwordauthentication) ') | join(', ') }})
+    quiet: true
 
 # In check mode a new account does not exist yet, so nothing can run as it.
 - name: Set up each present dev user
