@@ -60,3 +60,8 @@
     - name: Offboarding and GPG key tests
       ansible.builtin.import_tasks: tasks/offboard_tests.yml
       tags: [offboard]
+
+    - name: Protected workload tests
+      ansible.builtin.import_tasks: tasks/protected_tests.yml
+      tags: [protected]
+      when: protected is defined

@@ -1,0 +1,44 @@
+---
+- name: Read the passwd database
+  ansible.builtin.getent:
+    database: passwd
+
+# systemctl prints memory sizes in bytes.
+- name: Read the resource properties of the floor slices and the capped units
+  ansible.builtin.command: systemctl show {{ item }} -p CPUWeight -p MemoryLow -p MemoryMax # noqa: command-instead-of-module
+  loop: "{{ (['system.slice', 'user.slice'] if protected.floor else []) + protected_test_capped }}"
+  vars:
+    protected_test_capped: >-
+      {{ protected.capped_users | map('extract', ansible_facts.getent_passwd) | map(attribute='1')
+         | map('regex_replace', '^(.+)$', 'user-\1.slice') | list + protected.capped_units }}
+  register: protected_test_show
+  changed_when: false
+
+- name: Assert the floor and the caps
+  ansible.builtin.assert:
+    that: protected_test_expected[item.item] | default(protected_test_cap) is subset(item.stdout_lines)
+    fail_msg: "{{ item.item }}: expected {{ protected_test_expected[item.item] | default(protected_test_cap) }}, got {{ item.stdout_lines }}"
+    quiet: true
+  loop: "{{ protected_test_show.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  vars:
+    protected_test_expected:
+      system.slice: ["MemoryLow={{ protected_system_memory_low | human_to_bytes }}", "CPUWeight={{ protected_system_cpu_weight }}"]
+      user.slice: ["CPUWeight={{ protected_user_slice_cpu_weight }}"]
+    protected_test_cap: ["CPUWeight={{ capped_cpu_weight }}", "MemoryMax={{ capped_memory_max | human_to_bytes }}"]
+
+- name: Stat the private homes
+  ansible.builtin.stat:
+    path: "{{ ansible_facts.getent_passwd[item][4] }}"
+  loop: "{{ protected.private_homes }}"
+  register: protected_test_homes
+
+- name: Assert the private homes are 0750
+  ansible.builtin.assert:
+    that: item.stat.mode == '0750'
+    fail_msg: "{{ item.stat.path }} of {{ item.item }} has mode {{ item.stat.mode }}, expected 0750"
+    quiet: true
+  loop: "{{ protected_test_homes.results }}"
+  loop_control:
+    label: "{{ item.item }}"
