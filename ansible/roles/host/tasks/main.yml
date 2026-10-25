@@ -78,3 +78,8 @@
 
 - name: Chrome for Testing
   ansible.builtin.import_tasks: chrome.yml
+
+- name: Protected workloads
+  ansible.builtin.import_tasks: protected.yml
+  tags: [protected]
+  when: protected is defined

@@ -1,4 +1,5 @@
 ---
+# Protected workloads (inventory `protected`): the slice floor, the caps and the private homes.
 - name: Read the passwd database
   ansible.builtin.getent:
     database: passwd

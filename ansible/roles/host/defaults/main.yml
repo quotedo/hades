@@ -116,6 +116,10 @@ protected_system_cpu_weight: 300
 protected_user_slice_cpu_weight: 700
 capped_cpu_weight: 100
 capped_memory_max: 6G
+# protected.capped_users become their user-<uid>.slice. Reads the passwd facts gathered before use.
+protected_capped: >-
+  {{ protected.capped_users | default([]) | map('extract', ansible_facts.getent_passwd) | map(attribute='1')
+     | map('regex_replace', '^(.+)$', 'user-\1.slice') | list + protected.capped_units | default([]) }}
 orca_terminal_memory_max: 28G
 orca_terminal_swap_max: 0
 vm_swappiness: 10
