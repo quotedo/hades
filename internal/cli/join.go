@@ -7,24 +7,60 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/quotedo/hades/internal/envfile"
 	"github.com/quotedo/hades/internal/execx"
 )
 
-const joinUsage = "usage: hades join <host-or-ip> [--as LOGIN] [--alias NAME]"
+const joinUsage = "usage: hades join <host-or-ip> [--as LOGIN] [--alias NAME] [--github LOGIN]"
 
-// join prepares this laptop to reach a hades box: an SSH key, the key on
-// GitHub, a block in ~/.ssh/config, then a test login. It exits 0 when the
-// login works, 2 while the box does not accept the key yet and 1 on errors.
+// keysURL is where GitHub serves a user's public keys; tests point it at a
+// local server.
+var keysURL = "https://github.com/%s.keys"
+
+// handOff runs argv attached to this process's terminal and returns its exit
+// code; tests replace it.
+var handOff = func(argv []string) int {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	err := cmd.Run()
+	var xe *exec.ExitError
+	switch {
+	case errors.As(err, &xe):
+		return xe.ExitCode()
+	case err != nil:
+		fmt.Fprintf(os.Stderr, "join: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// sshKey is a public key line, read from file ("" for a key only in the agent).
+type sshKey struct{ line, file string }
+
+func (k sshKey) blob() string {
+	if f := strings.Fields(k.line); len(f) >= 2 {
+		return f[1]
+	}
+	return ""
+}
+
+// join prepares this laptop to reach a hades box: an SSH key on GitHub, a
+// block in ~/.ssh/config, a test login, then hades-onboard on the box. It
+// exits with hades-onboard's code once the login works, 2 while the box does
+// not accept the key yet and 1 on errors.
 func join(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("join", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	login := fs.String("as", ctx.Getenv("USER"), "Linux login on the box")
 	aliasFlag := fs.String("alias", "", "~/.ssh/config host alias")
+	githubFlag := fs.String("github", "", "GitHub login")
 	// Flags may come before or after the host.
 	err := fs.Parse(args)
 	arg := fs.Arg(0)
@@ -54,31 +90,78 @@ func join(ctx *Context, args []string) int {
 		return failf("%v", err)
 	}
 	bg, run := context.Background(), ctx.Runner
+	sshDir := filepath.Join(home, ".ssh")
 
-	pubPath, ok := findPublicKey(home)
-	if !ok {
-		hostname, _ := os.Hostname()
-		key := filepath.Join(home, ".ssh", "id_ed25519")
-		if err := os.MkdirAll(filepath.Dir(key), 0o700); err != nil {
-			return failf("%v", err)
+	// Files first, so a key that is in the agent too gets its IdentityFile.
+	files := localKeys(sshDir)
+	keys := files
+	if res, err := run.Run(bg, execx.Cmd{Argv: []string{"ssh-add", "-L"}}); err == nil {
+		for _, l := range strings.Split(strings.TrimSpace(res.Stdout), "\n") {
+			keys = append(keys, sshKey{line: l})
 		}
-		if _, err := run.Run(bg, execx.Cmd{Argv: []string{"ssh-keygen", "-t", "ed25519", "-N", "", "-f", key, "-C", ctx.Getenv("USER") + "@" + hostname}}); err != nil {
-			return failf("%v", err)
+	}
+
+	ghUser := ""
+	if res, err := run.Run(bg, execx.Cmd{Argv: []string{"gh", "api", "user", "--jq", ".login"}}); err == nil {
+		ghUser = strings.TrimSpace(res.Stdout)
+	}
+	ghLogin := *githubFlag
+	if ghLogin == "" {
+		ghLogin = ghUser
+	}
+	served := map[string]bool{}
+	if ghLogin != "" {
+		body, err := fetchKeys(ghLogin)
+		if err != nil {
+			fmt.Fprintf(ctx.Stderr, "github: %v\n", err)
 		}
-		fmt.Fprintf(ctx.Stderr, "generated %s\n", key)
-		pubPath = key + ".pub"
-	}
-	pub, err := os.ReadFile(pubPath)
-	if err != nil {
-		return failf("%v", err)
+		for _, l := range strings.Split(body, "\n") {
+			served[sshKey{line: l}.blob()] = true
+		}
 	}
 
-	ghLogin, err := githubKey(bg, run, pubPath, string(pub), alias)
-	if err != nil {
-		fmt.Fprintf(ctx.Stderr, "github: %v; run gh auth login and then hades join again, or send your key to the administrator\n", err)
+	var key sshKey
+	onGitHub := false
+	for _, k := range keys {
+		if k.blob() != "" && served[k.blob()] {
+			key, onGitHub = k, true
+			break
+		}
+	}
+	if !onGitHub {
+		if len(files) == 0 {
+			hostname, _ := os.Hostname()
+			priv := filepath.Join(sshDir, "id_ed25519")
+			if err := os.MkdirAll(sshDir, 0o700); err != nil {
+				return failf("%v", err)
+			}
+			if _, err := run.Run(bg, execx.Cmd{Argv: []string{"ssh-keygen", "-t", "ed25519", "-N", "", "-f", priv, "-C", ctx.Getenv("USER") + "@" + hostname}}); err != nil {
+				return failf("%v", err)
+			}
+			fmt.Fprintf(ctx.Stderr, "generated %s\n", priv)
+			if files = localKeys(sshDir); len(files) == 0 {
+				return failf("ssh-keygen wrote no %s.pub", priv)
+			}
+		}
+		key = files[0]
+		for _, k := range files {
+			if filepath.Base(k.file) == "id_ed25519.pub" {
+				key = k
+			}
+		}
+		if ghUser == "" || ghUser != ghLogin {
+			fmt.Fprintln(ctx.Stderr, "github: gh is not logged in; your key was not added. Run gh auth login, then hades join again, or add the key below at https://github.com/settings/keys.")
+		} else if res, err := run.Run(bg, execx.Cmd{Argv: []string{"gh", "ssh-key", "add", key.file, "--title", "hades " + alias}}); err == nil {
+			onGitHub = true
+		} else if strings.Contains(res.Stdout+res.Stderr, "admin:public_key") {
+			fmt.Fprintln(ctx.Stderr, "github: gh lacks the admin:public_key scope; your key was not added. Run gh auth refresh -h github.com -s admin:public_key, then hades join again.")
+		} else {
+			fmt.Fprintf(ctx.Stderr, "github: %v; your key was not added.\n", err)
+		}
 	}
 
-	changed, err := envfile.UpsertBlock(filepath.Join(home, ".ssh", "config"), "# hades:begin "+alias+"\n", "# hades:end "+alias+"\n", sshConfigBlock(alias, host, *login))
+	identity := strings.TrimSuffix(key.file, ".pub")
+	changed, err := envfile.UpsertBlock(filepath.Join(sshDir, "config"), "# hades:begin "+alias+"\n", "# hades:end "+alias+"\n", sshConfigBlock(alias, host, *login, identity))
 	if err != nil {
 		return failf("%v", err)
 	}
@@ -86,22 +169,30 @@ func join(ctx *Context, args []string) int {
 		fmt.Fprintf(ctx.Stderr, "wrote Host %s to ~/.ssh/config\n", alias)
 	}
 
-	_, err = run.Run(bg, execx.Cmd{Argv: []string{"ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", alias, "true"}})
+	_, err = run.Run(bg, execx.Cmd{Argv: []string{"ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10", alias, "true"}})
 	var xe *execx.ExitError
+	errors.As(err, &xe)
 	switch {
 	case err == nil:
 		fmt.Fprintf(ctx.Stdout, "connected: %s@%s\n", *login, alias)
-		fmt.Fprintf(ctx.Stdout, "in Paseo Desktop choose Remote SSH, host %s, user %s; log in once over SSH to read your Paseo password and run hades-onboard\n", alias, *login)
-		return 0
-	case errors.As(err, &xe):
-		fmt.Fprint(ctx.Stderr, xe.Result.Stderr)
-		who := "your key below"
-		if ghLogin != "" {
-			who = "github: " + ghLogin + " (or your key below)"
+		code := handOff([]string{"ssh", "-t", alias, "hades-onboard", alias})
+		if code == 127 {
+			fmt.Fprintf(ctx.Stdout, "next: ssh %s\n", alias)
+			return 0
 		}
-		fmt.Fprintf(ctx.Stdout, "not authorised yet: ask the administrator to add %s to your entry and apply, then run: hades join %s\n", who, strings.Join(args, " "))
-		fmt.Fprint(ctx.Stdout, string(pub))
+		return code
+	case xe != nil && strings.Contains(xe.Result.Stderr, "Permission denied"):
+		fmt.Fprint(ctx.Stderr, xe.Result.Stderr)
+		fmt.Fprintln(ctx.Stdout, "not authorised yet: the box does not accept your key.")
+		if onGitHub {
+			fmt.Fprintf(ctx.Stdout, "Your key is on GitHub as %s: if the administrator has added you, the box picks it up within the hour (they can run: sudo hades-keys %s); otherwise ask them to add you with github: %s.\n", ghLogin, *login, ghLogin)
+		} else {
+			fmt.Fprintf(ctx.Stdout, "Your key is not on GitHub: send the key below to the administrator, or add it at https://github.com/settings/keys.\n%s\n", key.line)
+		}
+		fmt.Fprintf(ctx.Stdout, "Then run again: hades join %s\n", strings.Join(args, " "))
 		return 2
+	case xe != nil:
+		return failf("ssh: %s", strings.TrimSpace(xe.Result.Stderr))
 	default:
 		return failf("%v", err)
 	}
@@ -120,45 +211,40 @@ func joinTarget(arg, alias string) (host, aliasOut string, err error) {
 	return arg, label, nil
 }
 
-// findPublicKey returns ~/.ssh/id_ed25519.pub, else the first ~/.ssh/*.pub.
-func findPublicKey(home string) (pubPath string, found bool) {
-	p := filepath.Join(home, ".ssh", "id_ed25519.pub")
-	if _, err := os.Stat(p); err == nil {
-		return p, true
+// localKeys returns the keys in dir/*.pub, sorted by file name.
+func localKeys(dir string) []sshKey {
+	files, _ := filepath.Glob(filepath.Join(dir, "*.pub")) // sorted
+	var keys []sshKey
+	for _, f := range files {
+		if b, err := os.ReadFile(f); err == nil {
+			keys = append(keys, sshKey{line: strings.TrimSpace(string(b)), file: f})
+		}
 	}
-	m, _ := filepath.Glob(filepath.Join(home, ".ssh", "*.pub")) // sorted
-	if len(m) == 0 {
-		return "", false
-	}
-	return m[0], true
+	return keys
 }
 
-// githubKey makes sure the key is on the gh user's GitHub account and returns
-// that account's login.
-func githubKey(bg context.Context, run execx.Runner, pubPath, pub, alias string) (string, error) {
-	gh := func(args ...string) (string, error) {
-		res, err := run.Run(bg, execx.Cmd{Argv: append([]string{"gh"}, args...)})
-		return strings.TrimSpace(res.Stdout), err
-	}
-	login, err := gh("api", "user", "--jq", ".login")
+// fetchKeys returns the public keys GitHub serves for login, one per line.
+func fetchKeys(login string) (string, error) {
+	url := fmt.Sprintf(keysURL, login)
+	resp, err := (&http.Client{Timeout: 10 * time.Second}).Get(url)
 	if err != nil {
 		return "", err
 	}
-	list, err := gh("ssh-key", "list")
-	if err != nil {
-		return "", err
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
-	if f := strings.Fields(pub); len(f) >= 2 && strings.Contains(list, f[1]) {
-		return login, nil
-	}
-	if _, err := gh("ssh-key", "add", pubPath, "--title", "hades "+alias); err != nil {
-		return "", err
-	}
-	return login, nil
+	b, err := io.ReadAll(resp.Body)
+	return string(b), err
 }
 
 // sshConfigBlock is the ~/.ssh/config entry for the box, written between
-// "# hades:begin <alias>" and "# hades:end <alias>".
-func sshConfigBlock(alias, host, login string) string {
-	return "Host " + alias + "\n  HostName " + host + "\n  User " + login + "\n  ForwardAgent yes\n"
+// "# hades:begin <alias>" and "# hades:end <alias>". identity is the private
+// key file, "" for a key only in the agent.
+func sshConfigBlock(alias, host, login, identity string) string {
+	b := "Host " + alias + "\n  HostName " + host + "\n  User " + login + "\n  ForwardAgent yes\n  StrictHostKeyChecking accept-new\n"
+	if identity != "" {
+		b += "  IdentityFile " + identity + "\n"
+	}
+	return b
 }
