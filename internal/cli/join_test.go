@@ -40,7 +40,7 @@ func TestUpsertSSHConfigKeepsOtherContent(t *testing.T) {
 	upsertSSHConfig := func(path, alias, block string) (bool, error) {
 		return envfile.UpsertBlock(path, "# hades:begin "+alias+"\n", "# hades:end "+alias+"\n", block)
 	}
-	changed, err := upsertSSHConfig(path, "shop", sshConfigBlock("shop", "shop.example.test", "alice", "", ""))
+	changed, err := upsertSSHConfig(path, "shop", sshConfigBlock("shop", "shop.example.test", "alice", "shop", "", ""))
 	if err != nil || !changed {
 		t.Fatalf("create: %v %v", changed, err)
 	}
@@ -53,15 +53,15 @@ func TestUpsertSSHConfigKeepsOtherContent(t *testing.T) {
 
 	before := "Host other\n  User bob\n\n"
 	after := "\nHost later\n  User carol" // no trailing newline
-	block := "# hades:begin shop\nHost shop\n  HostName shop.example.test\n  User alice\n  ForwardAgent yes\n  StrictHostKeyChecking accept-new\n# hades:end shop\n"
+	block := "# hades:begin shop\nHost shop\n  HostName shop.example.test\n  User alice\n  HostKeyAlias shop\n  ForwardAgent yes\n  StrictHostKeyChecking accept-new\n# hades:end shop\n"
 	os.WriteFile(path, []byte(before+block+after), 0o644)
 	os.Chmod(path, 0o644)
 
-	changed, err = upsertSSHConfig(path, "shop", sshConfigBlock("shop", "shop.example.test", "alice", "", ""))
+	changed, err = upsertSSHConfig(path, "shop", sshConfigBlock("shop", "shop.example.test", "alice", "shop", "", ""))
 	if err != nil || changed {
 		t.Fatalf("identical rerun: %v %v", changed, err)
 	}
-	changed, err = upsertSSHConfig(path, "shop", sshConfigBlock("shop", "203.0.113.10", "alice", "", ""))
+	changed, err = upsertSSHConfig(path, "shop", sshConfigBlock("shop", "203.0.113.10", "alice", "shop", "", ""))
 	if err != nil || !changed {
 		t.Fatalf("changed host: %v %v", changed, err)
 	}
@@ -74,7 +74,7 @@ func TestUpsertSSHConfigKeepsOtherContent(t *testing.T) {
 	}
 
 	// A second alias is appended; the first block is untouched.
-	if _, err := upsertSSHConfig(path, "sh", sshConfigBlock("sh", "sh.example.test", "alice", "", "")); err != nil {
+	if _, err := upsertSSHConfig(path, "sh", sshConfigBlock("sh", "sh.example.test", "alice", "sh", "", "")); err != nil {
 		t.Fatal(err)
 	}
 	got := string(mustRead(t, path))
@@ -189,10 +189,10 @@ func sshBatch(args ...string) []string {
 }
 
 // viaBox is the block for name through the jump account of box.example.test,
-// with the key ~/.ssh/id_ed25519.
+// with the key ~/.ssh/id_ed25519 and the host key stored as box.
 func viaBox(home, name string) string {
 	key := filepath.Join(home, ".ssh", "id_ed25519")
-	return "# hades:begin " + name + "\nHost " + name + "\n  HostName 10.88.7.209\n  User alice\n" +
+	return "# hades:begin " + name + "\nHost " + name + "\n  HostName 10.88.7.209\n  User alice\n  HostKeyAlias box\n" +
 		"  ProxyCommand ssh -W %h:%p -l hades -o StrictHostKeyChecking=accept-new -i " + key + " box.example.test\n" +
 		"  ForwardAgent yes\n  StrictHostKeyChecking accept-new\n  IdentityFile " + key + "\n# hades:end " + name + "\n"
 }
@@ -224,7 +224,7 @@ func TestJoinSwitchesAliasToTailnetAfterOnboarding(t *testing.T) {
 	if !called(r.f, sshBatch("box-via-host", "tailscale", "status", "--json")...) || !called(r.f, sshBatch("-l", "alice", "-i", key, "box.tail1234.ts.net", "true")...) {
 		t.Fatal(r.f.Calls)
 	}
-	tailnet := "# hades:begin box\nHost box\n  HostName box.tail1234.ts.net\n  User alice\n  ForwardAgent yes\n  StrictHostKeyChecking accept-new\n  IdentityFile " + key + "\n# hades:end box\n"
+	tailnet := "# hades:begin box\nHost box\n  HostName box.tail1234.ts.net\n  User alice\n  HostKeyAlias box\n  ForwardAgent yes\n  StrictHostKeyChecking accept-new\n  IdentityFile " + key + "\n# hades:end box\n"
 	if got := sshConfig(t, home); got != viaBox(home, "box-via-host")+tailnet {
 		t.Fatal(got)
 	}

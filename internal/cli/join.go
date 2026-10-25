@@ -196,7 +196,7 @@ func join(ctx *Context, args []string) int {
 		return 2
 	}
 	upsert := func(name, hostName, proxy string) error {
-		changed, err := envfile.UpsertBlock(filepath.Join(sshDir, "config"), "# hades:begin "+name+"\n", "# hades:end "+name+"\n", sshConfigBlock(name, hostName, *login, proxy, identity))
+		changed, err := envfile.UpsertBlock(filepath.Join(sshDir, "config"), "# hades:begin "+name+"\n", "# hades:end "+name+"\n", sshConfigBlock(name, hostName, *login, alias, proxy, identity))
 		if changed {
 			fmt.Fprintf(ctx.Stderr, "wrote Host %s to ~/.ssh/config\n", name)
 		}
@@ -297,11 +297,12 @@ func fetchKeys(login string) (string, error) {
 }
 
 // sshConfigBlock is the ~/.ssh/config entry for name, written between
-// "# hades:begin <name>" and "# hades:end <name>". proxy is the ProxyCommand,
-// "" for a direct connection; identity is the private key file, "" for a key
-// only in the agent.
-func sshConfigBlock(name, hostName, login, proxy, identity string) string {
-	b := "Host " + name + "\n  HostName " + hostName + "\n  User " + login + "\n"
+// "# hades:begin <name>" and "# hades:end <name>". keyAlias names the host
+// key in known_hosts whatever the HostName; proxy is the ProxyCommand, "" for
+// a direct connection; identity is the private key file, "" for a key only in
+// the agent.
+func sshConfigBlock(name, hostName, login, keyAlias, proxy, identity string) string {
+	b := "Host " + name + "\n  HostName " + hostName + "\n  User " + login + "\n  HostKeyAlias " + keyAlias + "\n"
 	if proxy != "" {
 		b += "  ProxyCommand " + proxy + "\n"
 	}

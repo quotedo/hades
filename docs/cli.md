@@ -117,7 +117,7 @@ Steps, in order. Every ssh that `join` runs, except the hand-off, has `-o BatchM
 | `<alias>` | `<name>` | none | the tailnet login worked; prints `daily: ssh <alias> (tailnet); fallback: ssh <alias>-via-host` |
 | `<alias>` | the VM's address | as `<alias>-via-host` | otherwise; with Tailscale `Running`, prints `<alias> goes through the box: this laptop does not reach <name> on your tailnet` |
 
-Each alias is a block between `# hades:begin <name>` and `# hades:end <name>` in `~/.ssh/config`, also holding `User <login>`, `ForwardAgent yes`, `StrictHostKeyChecking accept-new` and `IdentityFile <key>` for a key on disk. `wrote Host <name> to ~/.ssh/config` is printed only when a block changed.
+Each alias is a block between `# hades:begin <name>` and `# hades:end <name>` in `~/.ssh/config`, also holding `User <login>`, `HostKeyAlias <alias>` (both aliases store the VM's host key under `<alias>`, whatever the `HostName`), `ForwardAgent yes`, `StrictHostKeyChecking accept-new` and `IdentityFile <key>` for a key on disk. `wrote Host <name> to ~/.ssh/config` is printed only when a block changed.
 
 ## Exit codes
 
