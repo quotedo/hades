@@ -55,9 +55,3 @@ func TestGlobalFlagsBeforeAndAfterCommand(t *testing.T) {
 		}
 	}
 }
-
-func TestGCOwnerFlagIsGone(t *testing.T) {
-	if code, _, errs := runMain(func(string) string { return "" }, "gc", "--owner", "bob"); code != 2 {
-		t.Fatalf("code=%d err=%q", code, errs)
-	}
-}

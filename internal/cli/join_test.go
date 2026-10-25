@@ -303,11 +303,17 @@ func TestJoinPermissionDeniedOnJumpAccount(t *testing.T) {
 
 func TestJoinVMRefusesLogin(t *testing.T) {
 	// The jump account answered, so the box accepts the key: no GitHub hints.
-	home := homeWithKeys(t, "id_ed25519")
-	r := runJoin(t, home, joinCase{vmErr: refused}, "box.example.test", "--as", "bob")
-	want := "not authorised yet: the box accepted your key; the VM refused login bob: pass --as <your inventory name>\n"
-	if r.code != 2 || r.out != want || !strings.Contains(r.errOut, refused) || strings.Contains(r.errOut, "github:") || r.handoff != nil {
-		t.Fatalf("%d %q %q", r.code, r.out, r.errOut)
+	for args, want := range map[string]string{
+		"--as bob": "bob: pass --as <your inventory name>\n",
+		// The login came from the box: the VM's copy of the key lags.
+		"": "alice: the box copies your key to the VM within the hour (the administrator can run: sudo hades-keys alice)\n",
+	} {
+		home := homeWithKeys(t, "id_ed25519")
+		r := runJoin(t, home, joinCase{vmErr: refused}, append([]string{"box.example.test"}, strings.Fields(args)...)...)
+		want = "not authorised yet: the box accepted your key; the VM refused login " + want
+		if r.code != 2 || r.out != want || !strings.Contains(r.errOut, refused) || strings.Contains(r.errOut, "github:") || r.handoff != nil {
+			t.Fatalf("%q: %d %q %q", args, r.code, r.out, r.errOut)
+		}
 	}
 }
 

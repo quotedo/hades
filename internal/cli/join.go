@@ -192,7 +192,11 @@ func join(ctx *Context, args []string) int {
 		}
 		fmt.Fprint(ctx.Stderr, xe.Result.Stderr)
 		if vmLogin != "" {
-			fmt.Fprintf(ctx.Stdout, "not authorised yet: the box accepted your key; the VM refused login %s: pass --as <your inventory name>\n", vmLogin)
+			fix := "pass --as <your inventory name>"
+			if *asFlag == "" { // the box named the login, so the VM lags behind it
+				fix = "the box copies your key to the VM within the hour (the administrator can run: sudo hades-keys " + vmLogin + ")"
+			}
+			fmt.Fprintf(ctx.Stdout, "not authorised yet: the box accepted your key; the VM refused login %s: %s\n", vmLogin, fix)
 			return 2
 		}
 		if ghHint != "" {

@@ -139,7 +139,7 @@ Each alias is a block between `# hades:begin <name>` and `# hades:end <name>` in
 | Code | When |
 |---|---|
 | hades-onboard's code | The login through `<alias>-via-host` worked: 0 when onboarding completed. A VM without `hades-onboard` gives 0 and prints `next: ssh <alias>-via-host`. |
-| 2 | `not authorised yet`: the jump account refused the key (`the box does not accept your key.`), or the VM refused the login (`the box accepted your key; the VM refused login <login>: pass --as <your inventory name>`). Also a usage error. |
+| 2 | `not authorised yet`: the jump account refused the key (`the box does not accept your key.`), or the VM refused the login (`the box accepted your key; the VM refused login <login>: …`, which names `--as` when you passed it, else the hourly key refresh). Also a usage error. |
 | 1 | Any other failure, as `join: <reason>`; an unreachable host or a refused host key is `join: ssh: <ssh's message>`, jump-account output that is no address `join: ssh -l hades <host> printed "<output>", not an address`, an address without a login and no `--as` `join: ssh -l hades <host> printed no login; pass --as LOGIN`. |
 
 ## VM scripts and files
