@@ -9,7 +9,7 @@
   vars:
     user_gpg_uid: "{{ user.name }}+{{ inventory_hostname }}@{{ hades_domain }}"
 
-- name: Hex, ADE daemons and repositories, as the user
+- name: Toolchain and ADE daemons, as the user
   become: true
   become_user: "{{ user.name }}"
   environment:
@@ -30,6 +30,3 @@
     - name: Orca
       ansible.builtin.import_tasks: ade_orca.yml
       when: "'orca' in user.ades | default([])"
-
-    - name: Repositories
-      ansible.builtin.import_tasks: repos.yml
