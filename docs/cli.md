@@ -111,7 +111,7 @@ Steps, in order. Every ssh that `join` runs, except the hand-off, has `-o BatchM
 | Address | `ssh [-i <key>] -l hades <host>`: the box's jump account prints your VM's address. |
 | `<alias>-via-host` | Writes the alias, then logs in once: `ssh <alias>-via-host true`. |
 | Hand-off | `ssh -t <alias>-via-host hades-onboard <alias>` on your terminal. |
-| `<alias>` | Only after `hades-onboard` exits 0. Reads `tailscale status --json` in the VM; with `BackendState` `Running`, logs in once over the tailnet: `ssh -l <login> [-i <key>] <name> true`, `<name>` being `Self.DNSName` without the trailing dot. Then writes the alias. |
+| `<alias>` | Only after `hades-onboard` exits 0. Reads `tailscale status --json` in the VM; with `BackendState` `Running`, logs in once over the tailnet with the VM's host key from `<alias>-via-host`: `ssh -o HostKeyAlias=<alias> -l <login> [-i <key>] <name> true`, `<name>` being `Self.DNSName` without the trailing dot. Then writes the alias. |
 
 | Alias | `HostName` | `ProxyCommand` | Written when |
 |---|---|---|---|

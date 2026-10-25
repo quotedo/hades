@@ -246,7 +246,8 @@ func join(ctx *Context, args []string) int {
 	json.Unmarshal([]byte(res.Stdout), &st) // no tailnet when this fails
 	tsName, hostName, proxy := strings.TrimSuffix(st.Self.DNSName, "."), addr, jump
 	if st.BackendState == "Running" {
-		if _, err := run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, []string{"-l", *login}, idArg, []string{tsName, "true"})}); err == nil {
+		// The VM's host key is known under the alias since the test login.
+		if _, err := run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, []string{"-o", "HostKeyAlias=" + alias, "-l", *login}, idArg, []string{tsName, "true"})}); err == nil {
 			hostName, proxy = tsName, ""
 		}
 	}

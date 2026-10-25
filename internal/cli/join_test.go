@@ -221,7 +221,7 @@ func TestJoinSwitchesAliasToTailnetAfterOnboarding(t *testing.T) {
 	if r.code != 0 || r.out != "connected: alice@box\ndaily: ssh box (tailnet); fallback: ssh box-via-host\n" {
 		t.Fatalf("%d %q", r.code, r.out)
 	}
-	if !called(r.f, sshBatch("box-via-host", "tailscale", "status", "--json")...) || !called(r.f, sshBatch("-l", "alice", "-i", key, "box.tail1234.ts.net", "true")...) {
+	if !called(r.f, sshBatch("box-via-host", "tailscale", "status", "--json")...) || !called(r.f, sshBatch("-o", "HostKeyAlias=box", "-l", "alice", "-i", key, "box.tail1234.ts.net", "true")...) {
 		t.Fatal(r.f.Calls)
 	}
 	tailnet := "# hades:begin box\nHost box\n  HostName box.tail1234.ts.net\n  User alice\n  HostKeyAlias box\n  ForwardAgent yes\n  StrictHostKeyChecking accept-new\n  IdentityFile " + key + "\n# hades:end box\n"
