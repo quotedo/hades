@@ -1,11 +1,10 @@
 ---
 # The dev cluster is a second cluster beside any packaged one, owned by its own account so a dev
 # superuser (COPY ... TO PROGRAM runs as the cluster owner) never reaches another cluster's files.
-# The dev_pg_* names extend the shared dev_pg_* family, so the role-prefix rule is waived per line.
 # 18 is the newest major PGDG ships today; if a host's PGDG suite lacks it, set the newest it has.
-dev_pg_major: 18 # noqa: var-naming[no-role-prefix]
-dev_pg_cluster: dev # noqa: var-naming[no-role-prefix]
-dev_pg_os_user: hades-postgres # noqa: var-naming[no-role-prefix]
+dev_pg_major: 18
+dev_pg_cluster: dev
+dev_pg_os_user: hades-postgres
 
 # Both loopback families: "localhost" resolves to 127.0.0.1 only on some hosts. pg_hba.conf allows
 # exactly these addresses.

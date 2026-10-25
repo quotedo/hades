@@ -1,67 +1,66 @@
 ---
 # Shared defaults for every role. They are role defaults of `host`, which site.yml and verify.yml
 # list in `roles:`, so every role sees them under any tag selection and inventory still wins.
-# Names shared across roles keep their own prefix, so the role-prefix rule is waived per line.
 
 # hades CLI
-hades_version: "0.1.0" # noqa: var-naming[no-role-prefix]
-hades_bin_dir: /usr/local/bin # noqa: var-naming[no-role-prefix]
+hades_version: "0.1.0"
+hades_bin_dir: /usr/local/bin
 # hades_local_binary_dir: a controller directory holding `hades` and `hades-port`; when set,
 # both are copied from there instead of fetching the release (development only).
 
 # Host contract (/etc/hades/host.toml)
-hades_group: hades # noqa: var-naming[no-role-prefix]
-hades_config_dir: /etc/hades # noqa: var-naming[no-role-prefix]
+hades_group: hades
+hades_config_dir: /etc/hades
 # A literal for hades to expand, not a Jinja expression.
-hades_label_template: !unsafe "{{project}}-{{name}}" # noqa: var-naming[no-role-prefix] jinja[spacing]
-hades_port_range: "4100-4999" # noqa: var-naming[no-role-prefix]
-hades_registry_root: /srv/hades # noqa: var-naming[no-role-prefix]
-hades_tool_paths: [] # noqa: var-naming[no-role-prefix]
-dev_services: [] # noqa: var-naming[no-role-prefix]
+hades_label_template: !unsafe "{{project}}-{{name}}" # noqa: jinja[spacing]
+hades_port_range: "4100-4999"
+hades_registry_root: /srv/hades
+hades_tool_paths: []
+dev_services: []
 
 # Cloudflare Access (ingress role): extra emails or @domain entries the policy admits besides the
 # present dev users' emails, and the session length (Cloudflare's maximum).
-access_allow: [] # noqa: var-naming[no-role-prefix]
-access_session: 720h # noqa: var-naming[no-role-prefix]
+access_allow: []
+access_session: 720h
 # The Zero Trust team name the ingress role creates the Access organization with, when the
 # account has none yet: <cloudflare_team>.cloudflareaccess.com.
-cloudflare_team: "hades-{{ hades_domain | replace('.', '-') }}" # noqa: var-naming[no-role-prefix]
+cloudflare_team: "hades-{{ hades_domain | replace('.', '-') }}"
 
 # Intranet VPN (vpn role): vpn_conf_env names the operator's environment variable holding the
 # host's AmneziaWG config; vpn_probe ("<host>:<port>") is one intranet TCP endpoint verify reaches.
-vpn_enabled: false # noqa: var-naming[no-role-prefix]
-vpn_conf_env: "" # noqa: var-naming[no-role-prefix]
-vpn_probe: "" # noqa: var-naming[no-role-prefix]
+vpn_enabled: false
+vpn_conf_env: ""
+vpn_probe: ""
 
 # Caddy (installed by the ingress role)
-caddy_port: 8090 # noqa: var-naming[no-role-prefix]
-caddy_config: /etc/caddy/Caddyfile # noqa: var-naming[no-role-prefix]
-caddy_reload_command: [systemctl, reload, caddy] # noqa: var-naming[no-role-prefix]
-hades_live_dir: /etc/caddy/hades-sites # noqa: var-naming[no-role-prefix]
+caddy_port: 8090
+caddy_config: /etc/caddy/Caddyfile
+caddy_reload_command: [systemctl, reload, caddy]
+hades_live_dir: /etc/caddy/hades-sites
 
 # Dev Postgres (postgres role)
-dev_pg_host: 127.0.0.1 # noqa: var-naming[no-role-prefix]
-dev_pg_port: 5433 # noqa: var-naming[no-role-prefix]
-dev_pg_user: postgres # noqa: var-naming[no-role-prefix]
-dev_pg_password: postgres # noqa: var-naming[no-role-prefix]
+dev_pg_host: 127.0.0.1
+dev_pg_port: 5433
+dev_pg_user: postgres
+dev_pg_password: postgres
 
 # Shared dev services (services role)
-dev_services_host: 127.0.0.1 # noqa: var-naming[no-role-prefix]
-rabbitmq_management_port: 15672 # noqa: var-naming[no-role-prefix]
-rabbitmq_amqp_port: 5672 # noqa: var-naming[no-role-prefix]
-rabbitmq_user: guest # noqa: var-naming[no-role-prefix]
-rabbitmq_password: guest # noqa: var-naming[no-role-prefix]
-rabbitmq_mqtt_port: 1883 # noqa: var-naming[no-role-prefix]
+dev_services_host: 127.0.0.1
+rabbitmq_management_port: 15672
+rabbitmq_amqp_port: 5672
+rabbitmq_user: guest
+rabbitmq_password: guest
+rabbitmq_mqtt_port: 1883
 # Outside hades_port_range, which hades hands to worktrees; the SDK endpoint reaches worktrees via the env file.
-localstack_port: 14566 # noqa: var-naming[no-role-prefix]
-redis_port: 6379 # noqa: var-naming[no-role-prefix]
+localstack_port: 14566
+redis_port: 6379
 
 # Shared tool store: mise installs every `tools` version as root under
 # mise_store; the first version of each tool is the box default. Versions are exact (preflight).
-mise_version: "2026.10.18" # noqa: var-naming[no-role-prefix]
-mise_store: /usr/local/share/mise # noqa: var-naming[no-role-prefix]
-mise_shims: "{{ mise_store }}/shims" # noqa: var-naming[no-role-prefix]
-tools: # noqa: var-naming[no-role-prefix]
+mise_version: "2026.10.18"
+mise_store: /usr/local/share/mise
+mise_shims: "{{ mise_store }}/shims"
+tools:
   node: ["24.22.1"]
   gh: ["2.103.1"]
 # `tool@version` for every tools entry, and for every installed record under the store in
@@ -83,29 +82,29 @@ host_tools_installed: >-
   {%- endfor -%}
   {%- endfor -%}
   {{ out }}
-kerl_configure_options: "--without-wx --without-javac --without-odbc" # noqa: var-naming[no-role-prefix]
+kerl_configure_options: "--without-wx --without-javac --without-odbc"
 # apt packages a host adds on top of host_packages; never removed by the role.
 host_extra_packages: []
 
 # Installed as root with npm under the store's default Node (agents.yml). agent_clis maps a
 # command to its npm package; a package without @<version> gets the latest when missing.
-agent_clis: # noqa: var-naming[no-role-prefix]
+agent_clis:
   claude: "@anthropic-ai/claude-code"
   codex: "@openai/codex"
-paseo_version: "0.12.0" # noqa: var-naming[no-role-prefix]
+paseo_version: "0.12.0"
 # One Orca AppImage in orca_root with the /usr/local/bin/orca-ide wrapper, only while a present
 # dev user lists orca. orca_packages are the Electron libraries beyond host_chrome_packages.
-orca_version: "1.4.232" # noqa: var-naming[no-role-prefix]
-orca_root: /opt/orca # noqa: var-naming[no-role-prefix]
-orca_packages: [libnotify4, libsecret-1-0, libxss1, libxtst6, xdg-utils] # noqa: var-naming[no-role-prefix]
+orca_version: "1.4.232"
+orca_root: /opt/orca
+orca_packages: [libnotify4, libsecret-1-0, libxss1, libxtst6, xdg-utils]
 host_orca_wanted: >-
   {{ dev_users | default([]) | selectattr('ades', 'defined') | selectattr('ades', 'contains', 'orca')
      | map(attribute='state', default='present') | select('eq', 'present') | list | length > 0 }}
 
 # Chrome for Testing; the binary is <chrome_root>/chrome, a link into <chrome_root>/<version>/.
 # chrome_channel names a channel of the Chrome for Testing index (stable, beta, dev, canary).
-chrome_root: /opt/chrome-for-testing # noqa: var-naming[no-role-prefix]
-chrome_channel: stable # noqa: var-naming[no-role-prefix]
+chrome_root: /opt/chrome-for-testing
+chrome_channel: stable
 # Runtime libraries and fonts Chrome needs; on Ubuntu 24.04+ the first two are virtual
 # packages provided by their t64 builds.
 host_chrome_packages:
@@ -117,16 +116,16 @@ host_chrome_packages:
   - fonts-liberation
 
 # Ops
-backup_dir: /var/backups/hades # noqa: var-naming[no-role-prefix]
+backup_dir: /var/backups/hades
 host_backup_keep: 7
 host_backup_on_calendar: "*-*-* 03:30:00"
 host_gc_on_calendar: weekly
-journald_system_max_use: 2G # noqa: var-naming[no-role-prefix]
-docker_log_max_size: 50m # noqa: var-naming[no-role-prefix]
-docker_log_max_file: 3 # noqa: var-naming[no-role-prefix]
+journald_system_max_use: 2G
+docker_log_max_size: 50m
+docker_log_max_file: 3
 # The host role never restarts a running Docker on its own: protected containers may run there,
 # and log options only affect containers created after a restart anyway.
-docker_restart_on_change: false # noqa: var-naming[no-role-prefix]
+docker_restart_on_change: false
 # Fallbacks for hades-status when /etc/login.defs has no UID_MIN/UID_MAX.
 host_uid_min: 1000
 host_uid_max: 60000
@@ -146,27 +145,27 @@ host_test_unprivileged_user: nobody
 # Its per-uid slice drop-in is named 20-*.conf so that it sorts before the 50-<Property>.conf
 # files `systemctl set-property` writes; drop-ins apply in filename order across directories,
 # so an operator's set-property value still overrides it.
-hades_user_slice_dropin_name: 20-hades.conf # noqa: var-naming[no-role-prefix]
-dev_user_memory_high: 88G # noqa: var-naming[no-role-prefix]
-dev_user_memory_max: 96G # noqa: var-naming[no-role-prefix]
-dev_user_memory_swap_max: 2G # noqa: var-naming[no-role-prefix]
-dev_user_cpu_weight: 900 # noqa: var-naming[no-role-prefix]
-dev_user_tasks_max: infinity # noqa: var-naming[no-role-prefix]
-hades_slice_memory_max: 16G # noqa: var-naming[no-role-prefix]
-hades_slice_cpu_weight: 300 # noqa: var-naming[no-role-prefix]
-protected_system_memory_low: 10G # noqa: var-naming[no-role-prefix]
-protected_system_cpu_weight: 300 # noqa: var-naming[no-role-prefix]
-protected_user_slice_cpu_weight: 700 # noqa: var-naming[no-role-prefix]
-capped_cpu_weight: 100 # noqa: var-naming[no-role-prefix]
-capped_memory_max: 6G # noqa: var-naming[no-role-prefix]
-orca_terminal_memory_max: 28G # noqa: var-naming[no-role-prefix]
-orca_terminal_swap_max: 0 # noqa: var-naming[no-role-prefix]
-vm_swappiness: 10 # noqa: var-naming[no-role-prefix]
-inotify_max_user_instances: 4096 # noqa: var-naming[no-role-prefix]
-inotify_max_user_watches: 2097152 # noqa: var-naming[no-role-prefix]
-default_limit_nofile: 1048576 # noqa: var-naming[no-role-prefix]
-cpu_governor: performance # noqa: var-naming[no-role-prefix]
-erl_flags: "+sbwt none +sbwtdcpu none +sbwtdio none" # noqa: var-naming[no-role-prefix]
+hades_user_slice_dropin_name: 20-hades.conf
+dev_user_memory_high: 88G
+dev_user_memory_max: 96G
+dev_user_memory_swap_max: 2G
+dev_user_cpu_weight: 900
+dev_user_tasks_max: infinity
+hades_slice_memory_max: 16G
+hades_slice_cpu_weight: 300
+protected_system_memory_low: 10G
+protected_system_cpu_weight: 300
+protected_user_slice_cpu_weight: 700
+capped_cpu_weight: 100
+capped_memory_max: 6G
+orca_terminal_memory_max: 28G
+orca_terminal_swap_max: 0
+vm_swappiness: 10
+inotify_max_user_instances: 4096
+inotify_max_user_watches: 2097152
+default_limit_nofile: 1048576
+cpu_governor: performance
+erl_flags: "+sbwt none +sbwtdcpu none +sbwtdio none"
 
 # Build dependencies for the store's toolchains, plus tools the roles use.
 host_packages:
