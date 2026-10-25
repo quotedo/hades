@@ -6,7 +6,7 @@ dev_servers:
       ansible_host: <IP>
       ansible_user: <SUDO_USER>  # its SSH keys are also root's in every VM
       hades_domain: <DOMAIN>
-      # hades_version: "0.1.0"  # a published release, tagged v<version>, downloaded with the administrator's gh
+      # hades_version: "0.2.0"  # a published release, tagged v<version>; the box downloads it
       # hades_local_binary_dir: /path/to/dist/linux_amd64  # development: a local linux/amd64 build instead of the release
       # Cloudflare Access admits every present developer's email plus these emails or @domains.
       # access_allow: []
