@@ -12,7 +12,7 @@
 - name: Assert the user is a present dev user
   ansible.builtin.assert:
     that:
-      - acceptance_user in user_present | map(attribute='name')
+      - acceptance_user in dev_present | map(attribute='name')
     fail_msg: "acceptance_user {{ acceptance_user }} is not a present dev user"
     quiet: true
 

@@ -1,6 +1,6 @@
 ---
-# A restart, not a reload: the drop-in's slice and API socket apply at start only. In check mode
-# the unit may not exist yet.
+# A restart, not a reload: the drop-in's API socket applies at start only. In check mode the unit
+# may not exist yet.
 - name: Restart Caddy
   ansible.builtin.systemd_service:
     name: caddy.service

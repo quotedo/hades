@@ -1,6 +1,0 @@
-# {{ ansible_managed }}
-[Service]
-Slice=hades.slice
-# Read by `caddy run` and by `caddy reload` (ExecReload): Caddy's API on a unix socket that only
-# the caddy account can connect to, instead of TCP 2019 open to every local user.
-Environment=CADDY_ADMIN=unix/{{ ingress_caddy_api_socket }}

@@ -4,6 +4,6 @@ dev_servers:
       ansible_connection: local
       hades_domain: valid.example.test
       dev_users:
-        - { name: alice, github: alice, uid: 2001, ades: [paseo], paseo_port: 7001, email: alice@example.test }
+        - { name: alice, github: alice, uid: 2001, email: alice@example.test }
       vpn_enabled: true
       vpn_conf_env: HADES_TEST_VPN_CONF

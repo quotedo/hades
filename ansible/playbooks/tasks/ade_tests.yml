@@ -7,7 +7,7 @@
   register: ade_test_unit
   changed_when: false
   failed_when: false
-  loop: "{{ user_present | subelements('ades') }}"
+  loop: "{{ dev_present | subelements('ades') }}"
   loop_control:
     label: "{{ item.0.name }} {{ item.1 }}"
 
@@ -16,7 +16,7 @@
   become: true
   register: ade_test_ss
   changed_when: false
-  loop: "{{ user_present | subelements('ades') }}"
+  loop: "{{ dev_present | subelements('ades') }}"
   loop_control:
     label: "{{ item.0.name }} {{ item.1 }}"
 
@@ -35,7 +35,7 @@
       expected listeners on {{ ade_test_address }}:{{ item.0[item.1 ~ '_port'] }} from uid {{ item.0.uid }}'s {{ item.1 }}.service:
       {{ ade_test_listeners | join('\n') or 'none' }}
     quiet: true
-  loop: "{{ user_present | subelements('ades') }}"
+  loop: "{{ dev_present | subelements('ades') }}"
   loop_control:
     index_var: i
     label: "{{ item.0.name }} {{ item.1 }}"
@@ -56,7 +56,7 @@
   register: ade_test_paseo_http
   changed_when: false
   failed_when: false
-  loop: "{{ user_present | selectattr('ades', 'contains', 'paseo') }}"
+  loop: "{{ dev_present | selectattr('ades', 'contains', 'paseo') }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -65,7 +65,7 @@
     path: "{{ user_home_base }}/{{ item.name }}/.config/hades/paseo.env"
   become: true
   register: ade_test_paseo_env
-  loop: "{{ user_present | selectattr('ades', 'contains', 'paseo') }}"
+  loop: "{{ dev_present | selectattr('ades', 'contains', 'paseo') }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -81,7 +81,7 @@
       paseo.env {{ ade_test_paseo_env.results[i].stat.mode | default('missing') }}
       {{ ade_test_paseo_env.results[i].stat.pw_name | default('') }} (want 0600 {{ item.name }})
     quiet: true
-  loop: "{{ user_present | selectattr('ades', 'contains', 'paseo') }}"
+  loop: "{{ dev_present | selectattr('ades', 'contains', 'paseo') }}"
   loop_control:
     index_var: i
     label: "{{ item.name }}"
@@ -91,7 +91,7 @@
     path: "{{ user_home_base }}/{{ item.0.name }}/.config/systemd/user/{{ item.1 }}.service"
   become: true
   register: ade_test_unit_file
-  loop: "{{ user_present | product(['paseo', 'orca']) }}"
+  loop: "{{ dev_present | product(['paseo', 'orca']) }}"
   loop_control:
     label: "{{ item.0.name }} {{ item.1 }}"
 
@@ -103,7 +103,7 @@
       {{ item.0.name }} lists {{ item.0.ades }}, but {{ item.1 }}.service
       {{ 'exists' if ade_test_unit_file.results[i].stat.exists else 'is missing' }}
     quiet: true
-  loop: "{{ user_present | product(['paseo', 'orca']) }}"
+  loop: "{{ dev_present | product(['paseo', 'orca']) }}"
   loop_control:
     index_var: i
     label: "{{ item.0.name }} {{ item.1 }}"

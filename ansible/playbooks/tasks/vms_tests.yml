@@ -1,0 +1,106 @@
+---
+# Every present developer's VM, probed from its box with incus.
+- name: Read the instances
+  ansible.builtin.command: incus list -f json
+  become: true
+  register: vms_test_list
+  changed_when: false
+
+- name: Assert each present developer has a running VM with the inventory's limits and devices
+  ansible.builtin.assert:
+    that:
+      - vm.type | default('') == 'virtual-machine'
+      - vm.status | default('') == 'Running'
+      - vm.config['limits.cpu'] | default('') == item.cpus | string
+      - vm.config['limits.memory'] | default('') == item.memory | string
+      - vm.config['boot.autostart'] | default('') == 'true'
+      - vm.devices | default({}) == vms_test_devices
+    fail_msg: "{{ item.name }}: {{ vm | dict2items | selectattr('key', 'in', ['type', 'status', 'config', 'devices']) | items2dict | to_json }}"
+    quiet: true
+  vars:
+    vm: "{{ vms_test_list.stdout | from_json | selectattr('name', 'eq', item.name) | first | default({}) }}"
+    # The root disk, the bridged NIC with its fixed address and port isolation, the read-only shares.
+    vms_test_devices:
+      root: { type: disk, path: /, pool: default, size: "{{ item.disk }}" }
+      eth0: { type: nic, nictype: bridged, parent: "{{ vm_bridge }}", ipv4.address: "{{ item.address }}", security.port_isolation: "true" }
+      hades: { type: disk, source: "{{ hades_share }}", path: "{{ hades_share }}", readonly: "true" }
+      mise: { type: disk, source: "{{ mise_store }}", path: "{{ mise_store }}", readonly: "true" }
+      mise-config: { type: disk, source: /etc/mise, path: /etc/mise, readonly: "true" }
+  loop: "{{ dev_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Read the CPUs and the memory each VM sees
+  ansible.builtin.command:
+    argv: [incus, exec, "{{ item.name }}", --, sh, -c, "nproc; free -b | awk '/^Mem:/ { print $2 }'"]
+  become: true
+  register: vms_test_size
+  changed_when: false
+  loop: "{{ dev_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# The guest kernel keeps a little of its memory for itself; a percentage is that share of the host.
+- name: Assert each VM sees its cpus and, within 5 %, its memory
+  ansible.builtin.assert:
+    that:
+      - item.stdout_lines[0] | int == item.item.cpus | int
+      - (item.stdout_lines[1] | float - vms_test_want | float) | abs <= 0.05 * vms_test_want | float
+    fail_msg: >-
+      {{ item.item.name }}: nproc {{ item.stdout_lines[0] }}, memory {{ item.stdout_lines[1] }} bytes;
+      want {{ item.item.cpus }} and {{ vms_test_want }}
+    quiet: true
+  vars:
+    vms_test_memory: "{{ item.item.memory | string }}"
+    vms_test_want: >-
+      {{ (vms_test_memory[:-1] | float / 100 * ansible_facts.memtotal_mb * 1024 * 1024) if vms_test_memory.endswith('%')
+         else vms_test_memory | regex_replace('iB$', 'B') | human_to_bytes }}
+  loop: "{{ vms_test_size.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"
+
+# incus exec runs as root; a write that got through is removed again.
+- name: Write into each share as root inside each VM
+  ansible.builtin.command:
+    argv: [incus, exec, "{{ item.0.name }}", --, sh, -c, 'touch "$1/hades-probe" && rm "$1/hades-probe"', sh, "{{ item.1 }}"]
+  become: true
+  register: vms_test_write
+  changed_when: false
+  failed_when: false
+  loop: "{{ dev_present | product([hades_share, mise_store, '/etc/mise']) }}"
+  loop_control:
+    label: "{{ item.0.name }} {{ item.1 }}"
+
+- name: Assert the shares are read-only even to root
+  ansible.builtin.assert:
+    that:
+      - item.rc != 0
+      - item.stderr is search('Read-only file system')
+    fail_msg: "{{ item.item.0.name }}: {{ item.item.1 }} took a write as root: rc {{ item.rc }} {{ item.stderr }}"
+    quiet: true
+  loop: "{{ vms_test_write.results }}"
+  loop_control:
+    label: "{{ item.item.0.name }} {{ item.item.1 }}"
+
+- name: List the shared bin directory and resolve the node shim in each VM
+  ansible.builtin.command:
+    argv: [incus, exec, "{{ item.name }}", --, sh, -c, 'ls "$1"; readlink -f "$2"', sh, "{{ hades_bin_dir }}", "{{ mise_shims }}/node"]
+  become: true
+  register: vms_test_bin
+  changed_when: false
+  loop: "{{ dev_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Assert each VM sees the shared binaries and the shims resolve to the shared mise
+  ansible.builtin.assert:
+    that:
+      - item.stdout_lines[:-1] | sort == vms_test_bins
+      - item.stdout_lines[-1] == mise_bin
+    fail_msg: "{{ item.item.name }}: {{ item.stdout_lines | join(' ') }}; want {{ vms_test_bins | join(' ') }} and {{ mise_bin }}"
+    quiet: true
+  vars:
+    vms_test_bins: "{{ ['hades', 'hades-onboard', 'hades-port', 'mise'] + (['orca-ide'] if host_orca_wanted else []) }}"
+  loop: "{{ vms_test_bin.results }}"
+  loop_control:
+    label: "{{ item.item.name }}"

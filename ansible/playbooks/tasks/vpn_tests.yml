@@ -60,3 +60,10 @@
   ansible.builtin.command: nc -z -w 3 {{ vpn_probe.rsplit(':', 1) | join(' ') }}
   changed_when: false
   when: vpn_probe | length > 0
+
+# VM traffic to the intranet takes the host's tunnel (NAT on the bridge).
+- name: Reach the intranet probe endpoint from a VM
+  ansible.builtin.command: incus exec {{ dev_present[-1].name }} -- nc -z -w 5 {{ vpn_probe.rsplit(':', 1) | join(' ') }}
+  become: true
+  changed_when: false
+  when: vpn_probe | length > 0 and dev_present | length > 0

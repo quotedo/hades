@@ -2,7 +2,6 @@
 # Provision a dev server (docs/server.md).
 - name: Preflight
   ansible.builtin.import_playbook: preflight.yml
-  tags: [always]
 
 - name: Provision dev servers
   hosts: dev_servers
@@ -10,26 +9,26 @@
   # Keeps Ubuntu's needrestart from restarting services (Docker, Postgres) after a package install.
   environment:
     NEEDRESTART_SUSPEND: "1"
+  # Before the roles, so that the VM hosts get the box's inventory variables and no results.
+  pre_tasks:
+    - name: Add the VMs to dev_vms
+      ansible.builtin.import_tasks: tasks/vm_hosts.yml
+      tags: [always]
   # Shared defaults live in roles/host/defaults/main.yml. Listing the host role makes them
   # visible to every role and task in this play under any tag selection, at role-default
   # precedence. Do not load that file with vars_files: play vars_files outrank inventory host
   # vars, so per-host overrides (hades_version, resource numbers, ...) would be ignored.
   roles:
     - { role: host, tags: [host] }
-    - { role: postgres, tags: [postgres] }
-    - { role: services, tags: [services], when: dev_services | length > 0 }
     - { role: ingress, tags: [ingress] }
-    - { role: user, tags: [user] }
     - { role: vpn, tags: [vpn], when: vpn_enabled }
+
+# Each developer's VM, reached as root through its box.
+- name: Configure the VMs
+  hosts: dev_vms
+  gather_facts: false
+  roles:
+    - { role: host, tags: [never], when: false }
   tasks:
-    # The rule set is derived from every role's outputs (dev users and their ports, service
-    # accounts, shared services), so it is recomputed after any tagged run, including tags added
-    # later: `always`. `--skip-tags isolation` still leaves it out. Tags on an include select the
-    # include only; `apply` gives them to the included tasks.
-    - name: Loopback isolation rules
-      ansible.builtin.include_role:
-        name: host
-        tasks_from: isolation
-        apply:
-          tags: [always, isolation]
-      tags: [always, isolation]
+    - name: Reach the VM through its box
+      ansible.builtin.ping:

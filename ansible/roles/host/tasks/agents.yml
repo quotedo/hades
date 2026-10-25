@@ -17,20 +17,18 @@
   register: host_npm
   when: not (ansible_check_mode and host_mise_binary is changed)
 
-# Not a handler: the user role starts Paseo through its shim later in the same play.
+# Not a handler: running VMs see the new binaries as soon as they are installed.
 - name: Create the shims for the new npm binaries
   ansible.builtin.command: mise reshim --system
+  environment:
+    PATH: "{{ hades_bin_dir }}:{{ ansible_facts.env.PATH }}"
   changed_when: true
   when: host_npm is changed # noqa: no-handler
 
+# The VMs install the libraries Orca needs.
 - name: Orca
   when: host_orca_wanted
   block:
-    - name: Install the libraries Orca needs
-      ansible.builtin.apt:
-        name: "{{ orca_packages }}"
-        state: present
-
     - name: Create the Orca directory
       ansible.builtin.file:
         path: "{{ orca_root }}"
@@ -49,7 +47,7 @@
         content: |
           #!/bin/sh
           exec {{ orca_root }}/orca-{{ orca_version }}.AppImage --appimage-extract-and-run "$@"
-        dest: /usr/local/bin/orca-ide
+        dest: "{{ hades_bin_dir }}/orca-ide"
         mode: "0755"
 
     - name: Find other Orca versions

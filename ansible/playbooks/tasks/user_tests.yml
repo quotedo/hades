@@ -15,7 +15,7 @@
   register: user_test_linger
   changed_when: false
   failed_when: false
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -23,7 +23,7 @@
   ansible.builtin.systemd_service:
     name: user-{{ item.uid }}.slice
   register: user_test_slice
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -31,7 +31,7 @@
   ansible.builtin.systemd_service:
     name: user@{{ item.uid }}.service
   register: user_test_manager
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -42,7 +42,7 @@
   register: user_test_user_conf
   changed_when: false
   failed_when: false
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -63,7 +63,7 @@
   register: user_test_login
   changed_when: false
   failed_when: false
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -73,7 +73,7 @@
   register: user_test_sudo
   changed_when: false
   failed_when: false
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -84,7 +84,7 @@
   register: user_test_blocked
   changed_when: false
   failed_when: user_test_blocked.rc == 0
-  loop: "{{ user_present | product((protected | default({})).blocked_ports | default([])) | list }}"
+  loop: "{{ dev_present | product((protected | default({})).blocked_ports | default([])) | list }}"
   loop_control:
     label: "{{ item.0.name }} to {{ item.1 }}"
 
@@ -94,7 +94,7 @@
   register: user_test_doctor
   changed_when: false
   failed_when: false
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -135,7 +135,7 @@
       doctor rc {{ user_test_doctor.results[i].rc }}: {{ user_test_doctor.results[i].stdout_lines | select('match', '^(FAIL|WARN) ') | join(' | ')
                                                      or user_test_doctor.results[i].stderr }}
     quiet: true
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     index_var: i
     label: "{{ item.name }}"
@@ -145,7 +145,7 @@
       {{ ansible_facts.getent_group | dict2items | selectattr('value.2', 'search', '(^|,)' ~ item.name ~ '(,|$)') | map(attribute='key') | list }}
 
 # Keys, onboarding reminder and administrator password. Each loop runs over every present user,
-# skipping where it does not apply, so the results line up with user_present.
+# skipping where it does not apply, so the results line up with dev_present.
 - name: Fetch each GitHub user's public keys from the controller
   ansible.builtin.uri:
     url: https://github.com/{{ item.github }}.keys
@@ -154,7 +154,7 @@
   become: false
   register: user_test_github
   when: item.github is defined
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -164,7 +164,7 @@
   become: true
   register: user_test_authorized
   failed_when: false
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -180,7 +180,7 @@
     path: "{{ user_home_base }}/{{ item.name }}/.config/hades/onboarded"
   become: true
   register: user_test_onboarded
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -192,7 +192,7 @@
   register: user_test_shell
   changed_when: false
   failed_when: false
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -203,7 +203,7 @@
   register: user_test_interactive
   changed_when: false
   failed_when: false
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -213,7 +213,7 @@
   register: user_test_admin_status
   changed_when: false
   when: item.admin | default(false)
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -238,7 +238,7 @@
       interactive output: {{ user_test_interactive.results[i].stdout_lines | join(' | ') or 'none' }};
       admin password status {{ (user_test_admin_status.results[i].stdout | default('')).split()[1:2] | join or 'n/a' }}
     quiet: true
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     index_var: i
     label: "{{ item.name }}"
@@ -273,11 +273,11 @@
 - name: Assert sshd admits every present dev user, or the drop-in is gone
   ansible.builtin.assert:
     that:
-      - user_test_allowusers.rc == 1 or user_present | map(attribute='name') | reject('in', user_test_allowed) | list == []
+      - user_test_allowusers.rc == 1 or dev_present | map(attribute='name') | reject('in', user_test_allowed) | list == []
       - user_test_allowusers.rc == 0 or not user_test_allowusers_dropin.stat.exists
     fail_msg: >-
       {{ 'AllowUsers in ' ~ user_test_allowusers.stdout_lines | join(', ') ~ ', but sshd does not admit '
-         ~ user_present | map(attribute='name') | reject('in', user_test_allowed) | join(', ')
+         ~ dev_present | map(attribute='name') | reject('in', user_test_allowed) | join(', ')
          if user_test_allowusers.rc == 0 else
          'no AllowUsers outside the drop-in, but /etc/ssh/sshd_config.d/hades-allowusers.conf exists' }}
     quiet: true

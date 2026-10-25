@@ -20,12 +20,12 @@ jobs:
       - run: ansible-playbook --syntax-check -i ansible/inventory.example.yml ansible/playbooks/verify.yml
       - run: ansible-lint -c ansible/.ansible-lint ansible/
       - run: ansible/scripts/check-no-literals.sh ansible/inventory.example.yml
-      # Each invalid fixture must fail preflight with its message; valid.yml must pass without the
-      # sshd play, which reads the host's sshd.
+      # Each invalid fixture must fail preflight with its message; valid.yml must pass.
       - name: Preflight fixtures
         working-directory: ansible
         env:
           HADES_TEST_VPN_CONF: "[Peer]\nAllowedIPs = 0.0.0.0/0, ::/0\n"
+          HADES_TEST_VPN_OVERLAP: "[Peer]\nAllowedIPs = 10.8.1.0/24, 10.0.0.0/8\n"
         run: |
           while IFS='|' read -r fixture message; do
             if out=$(ansible-playbook -i "tests/inventories/$fixture.yml" playbooks/preflight.yml 2>&1); then
@@ -34,10 +34,14 @@ jobs:
             tr -s ' \n' ' ' <<<"$out" | grep -F -- "$message" >/dev/null || { echo "$out"; echo "$fixture: no '$message'"; exit 1; }
           done <<'EOF'
           missing-domain|hades_domain must be defined
-          colliding-logins|[j-smith, jsmith]
+          bad-entry|dev_users entry j-smith is invalid
+          bad-entry|dev_users entry bob is invalid
+          duplicate-names|Present dev_users share a name: alice
           duplicate-uids|Present dev_users share a uid: 3001 [alice, bob]
-          orca-without-tailscale|orca is listed by: alice — it pairs over Tailscale
           tools-prefix|tools.node: versions must be exact
+          bad-subnet|vm_subnet must be <a>.<b>.0.0/16
           vpn-full-tunnel|intranet subnets in AllowedIPs
+          vpn-overlap|overlaps the VPN's AllowedIPs 10.0.0.0/8
+          oversized|the present VMs take
           EOF
-          ansible-playbook -i tests/inventories/valid.yml playbooks/preflight.yml --skip-tags sshd
+          ansible-playbook -i tests/inventories/valid.yml playbooks/preflight.yml

@@ -1,42 +1,4 @@
 ---
-- name: Group hades exists
-  ansible.builtin.getent:
-    database: group
-    key: "{{ hades_group }}"
-
-- name: Stat the registry directories
-  ansible.builtin.stat:
-    path: "{{ hades_registry_root }}/{{ item }}"
-  loop: [ports, sites, manifests]
-  register: host_test_registry
-
-- name: Assert the registry directories are root:hades 3775
-  ansible.builtin.assert:
-    that:
-      - item.stat.isdir
-      - item.stat.mode == '3775'
-      - item.stat.pw_name == 'root'
-      - item.stat.gr_name == hades_group
-    fail_msg: "{{ item.item }}: expected a root:{{ hades_group }} directory with mode 3775"
-    quiet: true
-  loop: "{{ host_test_registry.results }}"
-  loop_control:
-    label: "{{ item.item }}"
-
-- name: Stat the Caddy live directory
-  ansible.builtin.stat:
-    path: "{{ hades_live_dir }}"
-  register: host_test_live_dir
-
-- name: Assert the Caddy live directory is root 0755
-  ansible.builtin.assert:
-    that:
-      - host_test_live_dir.stat.isdir
-      - host_test_live_dir.stat.mode == '0755'
-      - host_test_live_dir.stat.pw_name == 'root'
-    fail_msg: "{{ hades_live_dir }} must be a root-owned directory with mode 0755"
-    quiet: true
-
 - name: Read the installed hades version
   ansible.builtin.command: "{{ hades_bin_dir }}/hades version"
   register: host_test_version
@@ -47,44 +9,29 @@
     path: "{{ hades_bin_dir }}/hades-port"
   register: host_test_hades_port
 
+# A local build (hades_local_binary_dir) reports its own version.
 - name: Assert hades is the pinned version and hades-port is installed
   ansible.builtin.assert:
     that:
-      - host_test_version.stdout == hades_version
+      - hades_local_binary_dir is defined or host_test_version.stdout == hades_version
       - host_test_hades_port.stat.exists
       - host_test_hades_port.stat.mode == '0755'
       - host_test_hades_port.stat.pw_name == 'root'
     fail_msg: "hades reports {{ host_test_version.stdout }}, expected {{ hades_version }}; hades-port must be root 0755"
     quiet: true
 
-- name: Read the kernel settings
-  ansible.builtin.command: sysctl -n vm.swappiness fs.inotify.max_user_instances fs.inotify.max_user_watches
-  register: host_test_sysctl
-  changed_when: false
+- name: Stat the host's mise
+  ansible.builtin.stat:
+    path: /usr/local/bin/mise
+  register: host_test_mise
 
-- name: Assert the kernel settings
+- name: Assert the host's mise is a link to the shared one
   ansible.builtin.assert:
     that:
-      - host_test_sysctl.stdout_lines[0] | int == vm_swappiness | int
-      - host_test_sysctl.stdout_lines[1] | int == inotify_max_user_instances | int
-      - host_test_sysctl.stdout_lines[2] | int == inotify_max_user_watches | int
-    fail_msg: "sysctl reports {{ host_test_sysctl.stdout_lines | join(', ') }}"
+      - host_test_mise.stat.islnk | default(false)
+      - host_test_mise.stat.lnk_target == mise_bin
+    fail_msg: "/usr/local/bin/mise must link to {{ mise_bin }}, got {{ host_test_mise.stat.lnk_target | default('no link') }}"
     quiet: true
-
-- name: Read the hades.slice properties
-  ansible.builtin.systemd_service:
-    name: hades.slice
-  register: host_test_slice
-
-- name: Assert the hades.slice memory limit
-  ansible.builtin.assert:
-    that:
-      - host_test_slice.status.MemoryMax == host_test_expected
-    fail_msg: "hades.slice MemoryMax is {{ host_test_slice.status.MemoryMax }}, expected {{ host_test_expected }}"
-    quiet: true
-  vars:
-    host_test_expected: >-
-      {{ 'infinity' if hades_slice_memory_max == 'infinity' else (hades_slice_memory_max | human_to_bytes | string) }}
 
 # `mise which` names the binary behind a shim (the shims themselves link to mise).
 - name: Read the global CLI versions
@@ -109,7 +56,7 @@
 - name: Stat Orca and its wrapper
   ansible.builtin.stat:
     path: "{{ item }}"
-  loop: ["{{ orca_root }}/orca-{{ orca_version }}.AppImage", /usr/local/bin/orca-ide]
+  loop: ["{{ orca_root }}/orca-{{ orca_version }}.AppImage", "{{ hades_bin_dir }}/orca-ide"]
   register: host_test_orca
   when: host_orca_wanted
 
@@ -117,7 +64,7 @@
   ansible.builtin.assert:
     that:
       - host_test_orca.results | map(attribute='stat.mode', default='') | unique == ['0755']
-    fail_msg: "{{ orca_root }}/orca-{{ orca_version }}.AppImage and /usr/local/bin/orca-ide must exist with mode 0755"
+    fail_msg: "{{ orca_root }}/orca-{{ orca_version }}.AppImage and {{ hades_bin_dir }}/orca-ide must exist with mode 0755"
     quiet: true
   when: host_orca_wanted
 
@@ -151,7 +98,7 @@
         mode: "0600"
 
     - name: Run hades-keys against the probe list
-      ansible.builtin.command: "{{ hades_bin_dir }}/hades-keys"
+      ansible.builtin.command: /usr/local/sbin/hades-keys
       environment:
         HADES_KEYS_FILE: "{{ host_test_keys_list.path }}"
       register: host_test_keys_run

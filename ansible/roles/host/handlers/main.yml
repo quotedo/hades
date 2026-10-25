@@ -4,25 +4,14 @@
     daemon_reload: true
   listen: daemon-reload
 
-- name: Reload sysctl
-  ansible.builtin.command: sysctl --system
-  changed_when: true
-  listen: sysctl reload
-
 # Reload applies the rule file atomically; on an inactive unit the module starts it instead.
 # In check mode the unit may not exist yet.
-- name: Reload the isolation rules
+- name: Reload the firewall rules
   ansible.builtin.systemd_service:
     name: hades-nftables.service
     state: reloaded
   when: not ansible_check_mode
   listen: hades-nftables reload
-
-- name: Restart journald
-  ansible.builtin.systemd_service:
-    name: systemd-journald.service
-    state: restarted
-  listen: journald restart
 
 # After the daemon-reload above: a changed cpu_governor reaches the CPUs.
 - name: Restart the governor unit
@@ -31,8 +20,3 @@
     state: restarted
   when: not ansible_check_mode
   listen: governor restart
-
-- name: Load the Chrome for Testing AppArmor profile
-  ansible.builtin.command: apparmor_parser -r -T -W /etc/apparmor.d/chrome-for-testing
-  changed_when: true
-  listen: apparmor load chrome

@@ -1,11 +1,4 @@
 ---
-- name: Write the kernel settings
-  ansible.builtin.template:
-    src: sysctl-hades.conf.j2
-    dest: /etc/sysctl.d/90-hades.conf
-    mode: "0644"
-  notify: sysctl reload
-
 - name: Check whether the host exposes a CPU frequency governor
   ansible.builtin.stat:
     path: /sys/devices/system/cpu/cpu0/cpufreq

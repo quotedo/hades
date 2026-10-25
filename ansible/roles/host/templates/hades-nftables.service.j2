@@ -2,7 +2,7 @@
 # Applies table inet hades only. Ordered after nftables.service, in case a host enables it, so
 # that its `flush ruleset` cannot remove these rules.
 [Unit]
-Description=Hades loopback isolation rules (nftables table inet hades)
+Description=Hades bridge rules (nftables table inet hades)
 DefaultDependencies=no
 Wants=network-pre.target
 After=nftables.service

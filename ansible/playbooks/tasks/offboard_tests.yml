@@ -14,7 +14,7 @@
   become: true
   register: offboard_test_registry
   changed_when: false
-  loop: "{{ user_absent }}"
+  loop: "{{ dev_absent }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -27,7 +27,7 @@
   become: true
   register: offboard_test_config
   changed_when: false
-  loop: "{{ user_absent }}"
+  loop: "{{ dev_absent }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -37,7 +37,7 @@
     patterns: "{{ item.name }}-offboard-*.tar.gz"
   become: true
   register: offboard_test_archives
-  loop: "{{ user_absent }}"
+  loop: "{{ dev_absent }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -54,7 +54,7 @@
       left in {{ hades_config_dir }}: {{ offboard_test_config.results[i].stdout_lines | join(', ') or 'none' }};
       archives: {{ offboard_test_archives.results[i].files | map(attribute='path') | join(', ') or 'none' }} (want at least one)
     quiet: true
-  loop: "{{ user_absent }}"
+  loop: "{{ dev_absent }}"
   loop_control:
     index_var: i
     label: "{{ item.name }}"
@@ -66,7 +66,7 @@
   register: offboard_test_gpg
   changed_when: false
   failed_when: false
-  loop: "{{ user_present | selectattr('gpg_key', 'defined') | selectattr('gpg_key') }}"
+  loop: "{{ dev_present | selectattr('gpg_key', 'defined') | selectattr('gpg_key') }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -74,7 +74,7 @@
   ansible.builtin.stat:
     path: "{{ hades_config_dir }}/keys/{{ item.name }}.asc"
   register: offboard_test_gpg_export
-  loop: "{{ user_present | selectattr('gpg_key', 'defined') | selectattr('gpg_key') }}"
+  loop: "{{ dev_present | selectattr('gpg_key', 'defined') | selectattr('gpg_key') }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -88,7 +88,7 @@
       (want 1) {{ offboard_test_gpg.results[i].stderr }}; {{ hades_config_dir }}/keys/{{ item.name }}.asc
       {{ 'exists' if offboard_test_gpg_export.results[i].stat.exists else 'is missing' }}
     quiet: true
-  loop: "{{ user_present | selectattr('gpg_key', 'defined') | selectattr('gpg_key') }}"
+  loop: "{{ dev_present | selectattr('gpg_key', 'defined') | selectattr('gpg_key') }}"
   loop_control:
     index_var: i
     label: "{{ item.name }}"

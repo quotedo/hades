@@ -14,9 +14,13 @@
     state: directory
     mode: "0755"
 
-- name: Put Caddy into hades.slice with its API socket
-  ansible.builtin.template:
-    src: caddy-slice.conf.j2
+# Read by `caddy run` and by `caddy reload` (ExecReload): Caddy's API on a unix socket that only
+# the caddy account can connect to, instead of TCP 2019 open to every local user.
+- name: Give Caddy its API socket
+  ansible.builtin.copy:
+    content: |
+      [Service]
+      Environment=CADDY_ADMIN=unix/{{ ingress_caddy_api_socket }}
     dest: /etc/systemd/system/caddy.service.d/hades.conf
     mode: "0644"
   notify: caddy restart

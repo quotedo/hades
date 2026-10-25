@@ -1,9 +1,0 @@
-# {{ ansible_managed }}
-[Unit]
-Description=Release hades manifests of vanished worktrees
-After=postgresql.service hades-services.service caddy.service
-
-[Service]
-Type=oneshot
-ExecStart={{ hades_bin_dir }}/hades gc
-Nice=10

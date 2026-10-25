@@ -1,4 +1,0 @@
-# {{ ansible_managed }}
-# Members of {{ hades_group }} may validate and reload the Caddy sites as root, and nothing else.
-# sudo's default env_reset applies; no variables are kept.
-%{{ hades_group }} ALL=(root) NOPASSWD: {{ hades_bin_dir }}/hades caddy-reload, {{ hades_bin_dir }}/hades caddy-reload --check

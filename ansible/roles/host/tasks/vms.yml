@@ -1,0 +1,119 @@
+---
+# One VM per present developer. A missing VM is created with its config and devices and started.
+# An existing VM gains missing devices and boot.autostart, also while it runs; its limits and root
+# size are set only while it is stopped, and it stays stopped. A running VM is never restarted or
+# resized: a size that differs from the inventory prints the pending line.
+- name: Read the instances
+  ansible.builtin.command: incus list -f json
+  register: host_vms_list
+  changed_when: false
+  check_mode: false
+  when: not (ansible_check_mode and host_incus_package is changed)
+
+- name: Create, update and start the VMs
+  vars:
+    host_vms: "{{ host_vms_list.stdout | default('[]') | from_json }}"
+    host_vms_names: "{{ host_vms | map(attribute='name') | list }}"
+    # Present VMs that never ran: the ones this run creates and any an interrupted run created.
+    host_vms_new: >-
+      {{ dev_present | map(attribute='name') | reject('in', host_vms | rejectattr('last_used_at', 'match', '^1970-')
+         | map(attribute='name') | list) | list }}
+    host_vm: "{{ host_vms | selectattr('name', 'eq', item.name) | first }}"
+    host_vm_config:
+      limits.cpu: "{{ item.cpus | string }}"
+      limits.memory: "{{ item.memory | string }}"
+      boot.autostart: "true"
+    host_vm_devices:
+      root: { type: disk, path: /, pool: default, size: "{{ item.disk }}" }
+      eth0: { type: nic, nictype: bridged, parent: "{{ vm_bridge }}", ipv4.address: "{{ item.address }}", security.port_isolation: "true" }
+      hades: { type: disk, source: "{{ hades_share }}", path: "{{ hades_share }}", readonly: "true" }
+      mise: { type: disk, source: "{{ mise_store }}", path: "{{ mise_store }}", readonly: "true" }
+      mise-config: { type: disk, source: /etc/mise, path: /etc/mise, readonly: "true" }
+  block:
+    - name: Create the missing VMs
+      ansible.builtin.command:
+        argv: [incus, init, "{{ vm_image }}", "{{ item.name }}", --vm]
+        stdin: "{{ {'config': host_vm_config, 'devices': host_vm_devices} | to_json }}"
+      changed_when: true
+      loop: "{{ dev_present | rejectattr('name', 'in', host_vms_names) }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Update the existing VMs
+      ansible.builtin.command:
+        argv: [incus, query, -X, PATCH, "/1.0/instances/{{ item.name }}", --data, "{{ host_vm_patch | to_json }}"]
+      changed_when: true
+      when: host_vm_patch | length > 0
+      loop: "{{ dev_present | selectattr('name', 'in', host_vms_names) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      vars:
+        host_vm_patch: >-
+          {%- set ns = namespace(config={}, devices={}) -%}
+          {%- for k, v in (host_vm_config if host_vm.status == 'Stopped' else {'boot.autostart': 'true'}).items()
+              if host_vm.config[k] | default('') != v -%}
+          {%- set ns.config = ns.config | combine({k: v}) -%}
+          {%- endfor -%}
+          {%- for k, v in host_vm_devices.items() if k not in host_vm.devices
+              or (k == 'root' and host_vm.status == 'Stopped' and host_vm.devices.root.size | default('') != v.size) -%}
+          {%- set ns.devices = ns.devices | combine({k: v}) -%}
+          {%- endfor -%}
+          {{ {'config': ns.config, 'devices': ns.devices} | dict2items | selectattr('value') | items2dict }}
+
+    - name: Report the sizes that wait for a stopped VM
+      ansible.builtin.debug:
+        msg: "{{ item.name }}: pending: incus stop {{ item.name }}, apply, incus start {{ item.name }}"
+      when:
+        - host_vm.status != 'Stopped'
+        - host_vm.config['limits.cpu'] | default('') != item.cpus | string
+          or host_vm.config['limits.memory'] | default('') != item.memory | string
+          or host_vm.devices.root.size | default('') != item.disk
+      loop: "{{ dev_present | selectattr('name', 'in', host_vms_names) }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Start the new VMs
+      ansible.builtin.command: incus start {{ item }}
+      changed_when: true
+      loop: "{{ host_vms_new }}"
+
+    - name: Wait for the new VMs' agent
+      ansible.builtin.command: incus exec {{ item }} -- true
+      register: host_vms_agent
+      until: host_vms_agent.rc == 0
+      retries: 60
+      delay: 5
+      changed_when: false
+      loop: "{{ host_vms_new }}"
+
+    # Whoever administers the box administers its VMs: root's keys in a VM are ansible_user's.
+    - name: Read the administrator's SSH keys
+      ansible.builtin.slurp:
+        src: ~{{ ansible_user }}/.ssh/authorized_keys
+      register: host_vms_admin_keys
+
+    # The image has no SSH server.
+    - name: Give root in each running VM an SSH server and the administrator's SSH keys
+      ansible.builtin.command:
+        argv:
+          - incus
+          - exec
+          - "{{ item }}"
+          - --
+          - sh
+          - -ec
+          - |
+            new=$(cat); f=/root/.ssh/authorized_keys
+            if ! command -v sshd >/dev/null; then
+              apt-get -q -o DPkg::Lock::Timeout=300 update >/dev/null
+              DEBIAN_FRONTEND=noninteractive apt-get -qy -o DPkg::Lock::Timeout=300 install openssh-server >/dev/null
+              echo "openssh-server installed"
+            fi
+            [ -f "$f" ] && [ "$(cat "$f")" = "$new" ] && exit 0
+            umask 077; mkdir -p /root/.ssh && printf '%s\n' "$new" > "$f" && echo "root's keys updated"
+        stdin: "{{ host_vms_admin_keys.content | b64decode }}"
+      register: host_vms_keys
+      changed_when: host_vms_keys.stdout | length > 0
+      loop: >-
+        {{ host_vms_new + host_vms | selectattr('status', 'eq', 'Running') | map(attribute='name')
+           | select('in', dev_present | map(attribute='name') | list) | list }}

@@ -52,16 +52,8 @@
         group: root
         mode: "0755"
 
-# caddy-reload refuses a host config that is not root-owned or is group- or world-writable.
-- name: Write the host config
+- name: Install hades-onboard
   ansible.builtin.template:
-    src: host.toml.j2
-    dest: "{{ hades_config_dir }}/host.toml"
-    mode: "0644"
-
-- name: Allow group hades to run hades caddy-reload as root
-  ansible.builtin.template:
-    src: hades-sudoers.j2
-    dest: /etc/sudoers.d/hades
-    mode: "0440"
-    validate: visudo -cf %s
+    src: hades-onboard.sh.j2
+    dest: "{{ hades_bin_dir }}/hades-onboard"
+    mode: "0755"

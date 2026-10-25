@@ -1,8 +1,0 @@
-# {{ ansible_managed }}
-[Unit]
-Description=Hades dev services (dev Postgres, shared services, Caddy, cloudflared)
-Before=slices.target
-
-[Slice]
-MemoryMax={{ hades_slice_memory_max }}
-CPUWeight={{ hades_slice_cpu_weight }}

@@ -1,11 +1,7 @@
 ---
-# Chrome for Testing for the chrome-devtools MCP, from Google's own index.
-- name: Install the Chrome runtime libraries and fonts
-  ansible.builtin.apt:
-    name: "{{ host_chrome_packages }}"
-    state: present
-    install_recommends: false
-
+# Chrome for Testing for the chrome-devtools MCP, from Google's own index. It runs in the VMs,
+# which install its libraries and AppArmor profile.
+#
 # The index names the channel's current build. A newer build is unpacked beside the old one,
 # the link moves, and the old build goes; an unpack that stopped half way is removed by hand.
 - name: Read the Chrome for Testing index
@@ -59,32 +55,3 @@
       loop: "{{ host_chrome_old.files }}"
       loop_control:
         label: "{{ item.path }}"
-
-- name: Find libraries Chrome cannot resolve
-  ansible.builtin.shell: set -o pipefail; ldd {{ chrome_root }}/chrome | { grep 'not found' || true; }
-  args:
-    executable: /bin/bash
-  register: host_chrome_ldd
-  changed_when: false
-  when: not ansible_check_mode
-
-- name: Assert Chrome resolves every library
-  ansible.builtin.assert:
-    that:
-      - host_chrome_ldd.stdout == ''
-    fail_msg: >-
-      {{ chrome_root }}/chrome lacks libraries; add their packages to host_chrome_packages:
-      {{ host_chrome_ldd.stdout_lines | map('trim') | join('; ') }}
-    quiet: true
-  when: not ansible_check_mode
-
-# Only on hosts that run AppArmor; nothing is installed for it. Loads this one profile and
-# touches no other.
-- name: Write the Chrome for Testing AppArmor profile
-  ansible.builtin.template:
-    src: apparmor-chrome-for-testing.j2
-    dest: /etc/apparmor.d/chrome-for-testing
-    mode: "0644"
-    validate: apparmor_parser -Q -K %s
-  notify: apparmor load chrome
-  when: ansible_facts.apparmor.status | default('') == 'enabled'

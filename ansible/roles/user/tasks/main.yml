@@ -19,7 +19,7 @@
       dev_users {{ item.name }} ({{ item.state }}, uid {{ item.uid }}) names an account hades did not create
       (uid {{ ansible_facts.getent_passwd[item.name][1] | default('') }}); hades does not take over or delete it
     quiet: true
-  loop: "{{ user_present + user_absent }}"
+  loop: "{{ dev_present + dev_absent }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -27,7 +27,7 @@
 - name: Offboard each absent dev user
   ansible.builtin.include_tasks: offboard.yml
   when: user.name in ansible_facts.getent_passwd
-  loop: "{{ user_absent }}"
+  loop: "{{ dev_absent }}"
   loop_control:
     loop_var: user
     label: "{{ user.name }}"
@@ -38,7 +38,7 @@
 - name: Set up each present dev user
   ansible.builtin.include_tasks: present.yml
   when: not ansible_check_mode or user.name in ansible_facts.getent_passwd
-  loop: "{{ user_present }}"
+  loop: "{{ dev_present }}"
   loop_control:
     loop_var: user
     label: "{{ user.name }}"
@@ -61,15 +61,15 @@
   ansible.builtin.copy:
     content: |
       # Ansible managed
-      AllowUsers {{ user_present | map(attribute='name') | join(' ') }}
+      AllowUsers {{ dev_present | map(attribute='name') | join(' ') }}
     dest: /etc/ssh/sshd_config.d/hades-allowusers.conf
     mode: "0644"
-  when: user_allowusers.rc == 0 and user_present | length > 0
+  when: user_allowusers.rc == 0 and dev_present | length > 0
   notify: sshd reload
 
 - name: Remove the sshd AllowUsers drop-in
   ansible.builtin.file:
     path: /etc/ssh/sshd_config.d/hades-allowusers.conf
     state: absent
-  when: not (user_allowusers.rc == 0 and user_present | length > 0)
+  when: not (user_allowusers.rc == 0 and dev_present | length > 0)
   notify: sshd reload
