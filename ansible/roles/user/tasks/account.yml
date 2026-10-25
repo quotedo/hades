@@ -43,12 +43,6 @@
     - { src: user-service-dropin.conf.j2, dest: "/etc/systemd/system/user@{{ user.uid }}.service.d/50-hades.conf" }
   register: user_dropins
 
-# Not a handler: the reload has to precede lingering below, which starts the user manager.
-- name: Reload systemd for the resource policy
-  ansible.builtin.systemd_service:
-    daemon_reload: true
-  when: user_dropins is changed # noqa: no-handler
-
 - name: Write the user manager limits, shell environment and repository list
   ansible.builtin.template:
     src: "{{ item.src }}"
@@ -137,14 +131,17 @@
     group: "{{ user.name }}"
     mode: "0644"
 
-# Last, so the user manager it starts reads the limits above.
-- name: Enable lingering
-  ansible.builtin.command: loginctl enable-linger {{ user.name }}
-  args:
-    creates: /var/lib/systemd/linger/{{ user.name }}
-
-# Type=notify: this returns once the user manager and its bus are up, so `systemctl --user` works.
+# Last, so the user manager reads the limits above, after a reload for a changed resource
+# policy. Type=notify: this returns once the user manager and its bus are up, so `systemctl
+# --user` works.
 - name: Start the user manager
   ansible.builtin.systemd_service:
     name: user@{{ user.uid }}.service
     state: started
+    daemon_reload: "{{ user_dropins is changed }}"
+
+# Keeps the user manager running without a session.
+- name: Enable lingering
+  ansible.builtin.command: loginctl enable-linger {{ user.name }}
+  args:
+    creates: /var/lib/systemd/linger/{{ user.name }}
