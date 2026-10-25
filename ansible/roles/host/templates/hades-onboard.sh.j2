@@ -5,7 +5,7 @@
 # "already done" or does its work. hades doctor decides whether onboarding is complete; every
 # complete run prints the connection details.
 set -u
-[ -t 0 ] || { echo "hades-onboard needs a terminal: ssh -t <alias> hades-onboard <alias>" >&2; exit 2; }
+[ -t 0 ] || { echo "hades-onboard needs a terminal: rerun hades join <host>, or: ssh -t <alias>-via-host hades-onboard <alias>" >&2; exit 2; }
 host=${1:-$(hostname)}
 dir=$HOME/.config/hades
 
@@ -15,6 +15,15 @@ case $(git config --global credential.https://github.com.helper) in
 *gh*) echo "git: already done" ;;
 *) gh auth setup-git && echo "git: credentials through gh" ;;
 esac
+# An unset commit identity is the GitHub account's: its name (else login) and its public email
+# (else its noreply address).
+identity() {
+  if git config --global "user.$1" >/dev/null; then echo "git user.$1: already done"
+  elif v=$(gh api user --jq "$2") && [ -n "$v" ] && git config --global "user.$1" "$v"; then echo "git user.$1: $v"
+  else echo "onboarding incomplete: git user.$1 not set; run hades-onboard again"; exit 1; fi
+}
+identity name '.name // .login'
+identity email '.email // "\(.id)+\(.login)@users.noreply.github.com"'
 
 if command -v claude >/dev/null 2>&1; then
   if claude auth status >/dev/null 2>&1; then echo "claude: already done"; else claude auth login; fi
@@ -41,17 +50,25 @@ if [ -n "$failed" ]; then
 fi
 
 # The developer's tailnet carries Paseo on the phone and Orca. tailscale up prints the login link
-# and waits for it. Orca pairs on the tailnet address, so it starts again once there is one.
+# and waits for it. Orca pairs on the tailnet address, so it starts again after a login here or
+# when it is not running; a running Orca printed its pairing URL when it started.
 tailnet() { tailscale status --json 2>/dev/null | jq -r "$1"; }
+up=
 if [ "$(tailnet .BackendState)" = Running ]; then
   echo "tailscale: already done"
-elif ! sudo tailscale up --hostname={{ inventory_hostname }}; then
+elif sudo tailscale up --hostname={{ inventory_hostname }}; then
+  up=1
+else
   echo "onboarding incomplete: tailscale up failed; run hades-onboard again"
   exit 1
 fi
 since=$(date '+%Y-%m-%d %H:%M:%S')
 if systemctl --user cat orca.service >/dev/null 2>&1; then
-  systemctl --user reset-failed orca.service; systemctl --user restart orca.service
+  if [ -n "$up" ] || ! systemctl --user is-active -q orca.service; then
+    systemctl --user reset-failed orca.service; systemctl --user restart orca.service
+  else
+    since=$(systemctl --user show orca.service -p ActiveEnterTimestamp --value)
+  fi
 fi
 
 if ! {{ hades_bin_dir }}/hades doctor; then
@@ -61,7 +78,7 @@ fi
 mkdir -p "$dir" && touch "$dir/onboarded"
 echo "onboarding complete"
 
-ts=$(tailnet '.Self.DNSName | rtrimstr(".")')
+ts=$(tailnet '.Self.DNSName // empty | rtrimstr(".")')
 if systemctl --user cat paseo.service >/dev/null 2>&1; then
   echo "Paseo Desktop: Settings > Add host > Remote SSH"
   echo "  ssh://$(id -un)@$host"
@@ -78,4 +95,4 @@ if systemctl --user cat orca.service >/dev/null 2>&1; then
   done
   echo "Orca pairing: ${url:-not printed yet, see journalctl --user -u orca.service}"
 fi
-echo "Tailscale: disable key expiry for $ts in your Tailscale admin console, or it leaves your tailnet after 180 days."
+echo "Tailscale: disable key expiry for ${ts:-{{ inventory_hostname }}} in your Tailscale admin console, or it leaves your tailnet after 180 days."

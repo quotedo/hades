@@ -23,18 +23,68 @@
     loop_var: ade
   register: vm_ade_units
 
-- name: Enable and start the ADEs, restarting them after a change
+# A running ADE is never restarted: a changed unit or a new Paseo password waits for the developer.
+- name: Enable and start the ADEs
   ansible.builtin.systemd_service:
     name: "{{ item.ade }}.service"
     scope: user
     enabled: true
     daemon_reload: "{{ vm_ade_units is changed }}"
-    state: "{{ 'restarted' if item is changed or (item.ade == 'paseo' and vm_paseo_password is changed) else 'started' }}"
+    state: started
   loop: "{{ vm_ade_units.results }}"
   loop_control:
     label: "{{ item.ade }}"
+  register: vm_ade_started
   # In check mode a new unit is not written yet, so systemd cannot find it.
   when: not (ansible_check_mode and item is changed)
+
+# status is the unit as the task above found it, before starting it.
+- name: Report the ADE restarts that wait
+  ansible.builtin.debug:
+    msg: "{{ dev.name }}: pending: systemctl --user restart {{ item.item.ade }}.service"
+  when:
+    - item.status.ActiveState | default('') == 'active'
+    - item.item is changed or (item.item.ade == 'paseo' and vm_paseo_password is changed)
+  loop: "{{ vm_ade_started.results }}"
+  loop_control:
+    label: "{{ item.item.ade }}"
+
+# Daily: hades gc releases what `hades up` holds for worktrees whose directory is gone, then
+# Docker's images and build cache unused for a week go, also after a failed gc.
+- name: Write the daily cleanup
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ vm_home }}/.config/systemd/user/hades-cleanup.{{ item.type }}"
+    mode: "0644"
+  loop:
+    - type: service
+      content: |
+        [Service]
+        Type=oneshot
+        ExecStart=-{{ hades_bin_dir }}/hades gc
+        ExecStart=/usr/bin/docker image prune -af --filter until=168h
+        ExecStart=/usr/bin/docker builder prune -af --filter until=168h
+    - type: timer
+      content: |
+        [Timer]
+        OnCalendar=daily
+        RandomizedDelaySec=1h
+        Persistent=true
+
+        [Install]
+        WantedBy=timers.target
+  loop_control:
+    label: hades-cleanup.{{ item.type }}
+  register: vm_cleanup_units
+
+- name: Enable and start the daily cleanup's timer
+  ansible.builtin.systemd_service:
+    name: hades-cleanup.timer
+    scope: user
+    enabled: true
+    daemon_reload: "{{ vm_cleanup_units is changed }}"
+    state: started
+  when: not (ansible_check_mode and vm_cleanup_units is changed)
 
 - name: Stop and remove the units of the ADEs the developer no longer lists # noqa: command-instead-of-module
   ansible.builtin.shell: >-

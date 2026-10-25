@@ -39,6 +39,21 @@
     vm_distro: "{{ ansible_facts.distribution | lower }}"
   register: vm_repos
 
+# Caddy's own Caddyfile serves :80 and its postinst starts Caddy, so ours goes first: dpkg keeps an
+# existing conffile. caddy.yml validates every later change.
+- name: Create Caddy's config directory
+  ansible.builtin.file:
+    path: "{{ caddy_config | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Write the Caddyfile before the package is installed
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_config }}"
+    mode: "0644"
+    force: false
+
 - name: Install Docker CE, Tailscale and Caddy
   ansible.builtin.apt:
     name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin, docker-buildx-plugin, tailscale, caddy]

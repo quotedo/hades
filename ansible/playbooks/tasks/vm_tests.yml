@@ -20,6 +20,8 @@
       inotify: sysctl -n fs.inotify.max_user_instances fs.inotify.max_user_watches
       tailscaled_enabled: systemctl is-enabled tailscaled.service
       tailscaled_active: systemctl is-active tailscaled.service
+      hostname: hostname
+      cleanup: systemctl --user -M {{ dev.name }}@ show hades-cleanup.timer -p UnitFileState -p ActiveState
 
 - name: Probe as the developer, in a login shell
   ansible.builtin.command:
@@ -50,9 +52,13 @@
         erl -noshell -eval '{ok, V} = file:read_file(filename:join([code:root_dir(), "releases",
         erlang:system_info(otp_release), "OTP_VERSION"])), io:put_chars(V), halt().'
       hex: ls "$MIX_HOME/archives"
-      chrome: '"$CHROME_PATH" --headless --dump-dom about:blank'
+      # A profile of its own: the developer's Chrome may hold the default one.
+      chrome: d=$(mktemp -d) && "$CHROME_PATH" --headless --user-data-dir="$d" --dump-dom about:blank; rm -rf "$d"
       gpg: "{{ 'gpg --list-keys --with-colons ' ~ dev.name ~ '+' ~ hades_box ~ '@' ~ hades_domain if dev.gpg_key | default(false) else 'true' }}"
       tailscale: tailscale version
+      # The CLI must load the host.toml the role writes: its first check names it.
+      doctor: hades doctor
+      os: . /etc/os-release && echo "$VERSION_ID"
 
 # The store's tools are the records `mise ls --json` reports installed under the store.
 - name: Assert the developer's account, limits, environment, tools and services
@@ -67,6 +73,8 @@
       - vm_test.inotify.stdout_lines == [inotify_max_user_instances | string, inotify_max_user_watches | string]
       - vm_test.tailscaled_enabled.stdout == 'enabled'
       - vm_test.tailscaled_active.stdout == 'active'
+      - vm_test.hostname.stdout == hades_box
+      - vm_test.cleanup.stdout_lines is superset(['UnitFileState=enabled', 'ActiveState=active'])
       - vm_test.login.rc == 0
       - vm_test.login.stdout == ''
       # The share's bin, then the shims, ahead of the system's; the developer's own dirs may come first.
@@ -89,6 +97,8 @@
       - vm_test.chrome.stdout is search('<body></body>')
       - not dev.gpg_key | default(false) or vm_test.gpg.stdout_lines | select('match', 'pub:') | list | length == 1
       - vm_test.tailscale.rc == 0
+      - "('ok   host-config: loaded ' ~ hades_config_dir ~ '/host.toml (domain ' ~ hades_domain ~ ')') in vm_test.doctor.stdout_lines"
+      - vm_test.os.stdout == hostvars[hades_box].ansible_facts.distribution_version
     fail_msg: |-
       {% for name, probe in vm_test.items() %}{{ name }}: rc {{ probe.rc }}: {{ (probe.stdout_lines + probe.stderr_lines) | join(' | ') | truncate(300) }}
       {% endfor %}

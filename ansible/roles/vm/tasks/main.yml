@@ -1,5 +1,17 @@
 ---
 # One developer's VM (`dev`, their dev_present entry), configured as root.
+# Named after its box, as the developer's laptop and tailnet know it; the image comes with its
+# builder's name. The hosts line first, so sudo resolves the new name.
+- name: Resolve the box's name locally
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1\s'
+    line: 127.0.1.1 {{ hades_box }}
+
+- name: Name the VM after its box
+  ansible.builtin.hostname:
+    name: "{{ hades_box }}"
+
 - name: Packages
   ansible.builtin.import_tasks: packages.yml
 
