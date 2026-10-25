@@ -240,15 +240,26 @@ func join(ctx *Context, args []string) int {
 	// VM there; otherwise <alias> goes through the box like <alias>-via-host.
 	var st struct {
 		BackendState string
-		Self         struct{ DNSName string }
+		Self         struct {
+			DNSName      string
+			TailscaleIPs []string
+		}
 	}
 	res, _ = run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, []string{via, "tailscale", "status", "--json"})})
 	json.Unmarshal([]byte(res.Stdout), &st) // no tailnet when this fails
 	tsName, hostName, proxy := strings.TrimSuffix(st.Self.DNSName, "."), addr, jump
 	if st.BackendState == "Running" {
-		// The VM's host key is known under the alias since the test login.
-		if _, err := run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, []string{"-o", "HostKeyAlias=" + alias, "-l", *login}, idArg, []string{tsName, "true"})}); err == nil {
-			hostName, proxy = tsName, ""
+		// The name needs Tailscale's DNS on this laptop; the first address does not.
+		hosts := []string{tsName}
+		if ips := st.Self.TailscaleIPs; len(ips) > 0 {
+			hosts = append(hosts, ips[0])
+		}
+		for _, h := range hosts {
+			// The VM's host key is known under the alias since the test login.
+			if _, err := run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, []string{"-o", "HostKeyAlias=" + alias, "-l", *login}, idArg, []string{h, "true"})}); err == nil {
+				hostName, proxy = h, ""
+				break
+			}
 		}
 	}
 	if err := upsert(alias, hostName, proxy); err != nil {

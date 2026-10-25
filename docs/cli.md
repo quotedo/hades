@@ -111,12 +111,12 @@ Steps, in order. Every ssh that `join` runs, except the hand-off, has `-o BatchM
 | Address | `ssh [-i <key>] -l hades <host>`: the box's jump account prints your VM's address. |
 | `<alias>-via-host` | Writes the alias, then logs in once: `ssh <alias>-via-host true`. |
 | Hand-off | `ssh -t <alias>-via-host hades-onboard <alias>` on your terminal. |
-| `<alias>` | Only after `hades-onboard` exits 0. Reads `tailscale status --json` in the VM; with `BackendState` `Running`, logs in once over the tailnet with the VM's host key from `<alias>-via-host`: `ssh -o HostKeyAlias=<alias> -l <login> [-i <key>] <name> true`, `<name>` being `Self.DNSName` without the trailing dot. Then writes the alias. |
+| `<alias>` | Only after `hades-onboard` exits 0. Reads `tailscale status --json` in the VM; with `BackendState` `Running`, logs in once over the tailnet with the VM's host key from `<alias>-via-host`: `ssh -o HostKeyAlias=<alias> -l <login> [-i <key>] <name> true`, `<name>` being `Self.DNSName` without the trailing dot, then, if that fails, the first of `Self.TailscaleIPs` (for a laptop without Tailscale's DNS). Then writes the alias. |
 
 | Alias | `HostName` | `ProxyCommand` | Written when |
 |---|---|---|---|
 | `<alias>-via-host` | the VM's address | `ssh -W %h:%p -l hades -o StrictHostKeyChecking=accept-new [-i <key>] <host>` | every run |
-| `<alias>` | `<name>` | none | the tailnet login worked; prints `daily: ssh <alias> (tailnet); fallback: ssh <alias>-via-host` |
+| `<alias>` | `<name>` or the address | none | the tailnet login worked; prints `daily: ssh <alias> (tailnet); fallback: ssh <alias>-via-host` |
 | `<alias>` | the VM's address | as `<alias>-via-host` | otherwise; with Tailscale `Running`, prints `<alias> goes through the box: this laptop does not reach <name> on your tailnet` |
 
 Each alias is a block between `# hades:begin <name>` and `# hades:end <name>` in `~/.ssh/config`, also holding `User <login>`, `HostKeyAlias <alias>` (both aliases store the VM's host key under `<alias>`, whatever the `HostName`), `ForwardAgent yes`, `StrictHostKeyChecking accept-new` and `IdentityFile <key>` for a key on disk. `wrote Host <name> to ~/.ssh/config` is printed only when a block changed.

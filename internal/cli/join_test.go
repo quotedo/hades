@@ -93,7 +93,8 @@ type joinCase struct {
 	jumpOut string // what ssh -l hades prints; "" means 10.88.7.209
 	handoff int    // exit code of the hand-off
 	status  string // tailscale status --json in the VM
-	tsErr   string // the ssh test over the tailnet fails with this stderr
+	tsErr   string // the ssh tests over the tailnet fail with this stderr,
+	tsUp    string // except the one to this host
 }
 
 type joinRun struct {
@@ -141,7 +142,7 @@ func runJoin(t *testing.T, home string, jc joinCase, args ...string) joinRun {
 			return execx.Result{Stdout: cmp.Or(jc.jumpOut, "10.88.7.209\n")}, nil
 		case strings.HasSuffix(a, " tailscale status --json"):
 			return execx.Result{Stdout: jc.status}, nil
-		case strings.HasSuffix(a, ".ts.net true") && jc.tsErr != "":
+		case strings.Contains(a, " -l alice ") && jc.tsErr != "" && !strings.HasSuffix(a, " "+jc.tsUp+" true"):
 			return fail(jc.tsErr)
 		}
 		return execx.Result{}, nil
@@ -176,7 +177,7 @@ func calledPrefix(f *execx.Fake, argv ...string) bool {
 const (
 	notLoggedIn = "github: gh is not logged in; your key was not added. Run gh auth login, then hades join again, or add the key below at https://github.com/settings/keys.\n"
 	refused     = "Permission denied (publickey).\n"
-	tsRunning   = `{"BackendState":"Running","Self":{"DNSName":"box.tail1234.ts.net."}}`
+	tsRunning   = `{"BackendState":"Running","Self":{"DNSName":"box.tail1234.ts.net.","TailscaleIPs":["100.64.0.7","fd7a:115c:a1e0::7"]}}`
 )
 
 func sshConfig(t *testing.T, home string) string {
@@ -237,6 +238,23 @@ func TestJoinKeepsHostPathWhenTailnetUnreachable(t *testing.T) {
 		t.Fatalf("%d %q", r.code, r.out)
 	}
 	if got := sshConfig(t, home); got != viaBox(home, "box-via-host")+viaBox(home, "box") {
+		t.Fatal(got)
+	}
+}
+
+func TestJoinReachesTailnetByAddressWithoutItsDNS(t *testing.T) {
+	// This laptop does not use Tailscale's DNS: the name fails, the address works.
+	home := homeWithKeys(t, "id_ed25519")
+	key := filepath.Join(home, ".ssh", "id_ed25519")
+	r := runJoin(t, home, joinCase{status: tsRunning, tsErr: "ssh: Could not resolve hostname box.tail1234.ts.net\n", tsUp: "100.64.0.7"}, "box.example.test")
+	if r.code != 0 || r.out != "connected: alice@box\ndaily: ssh box (tailnet); fallback: ssh box-via-host\n" {
+		t.Fatalf("%d %q", r.code, r.out)
+	}
+	if !called(r.f, sshBatch("-o", "HostKeyAlias=box", "-l", "alice", "-i", key, "100.64.0.7", "true")...) || calledPrefix(r.f, sshBatch("-o", "HostKeyAlias=box", "-l", "alice", "-i", key, "fd7a:115c:a1e0::7")...) {
+		t.Fatal(r.f.Calls)
+	}
+	tailnet := "# hades:begin box\nHost box\n  HostName 100.64.0.7\n  User alice\n  HostKeyAlias box\n  ForwardAgent yes\n  StrictHostKeyChecking accept-new\n  IdentityFile " + key + "\n# hades:end box\n"
+	if got := sshConfig(t, home); got != viaBox(home, "box-via-host")+tailnet {
 		t.Fatal(got)
 	}
 }
