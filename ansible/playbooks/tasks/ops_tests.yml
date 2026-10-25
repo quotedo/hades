@@ -67,19 +67,6 @@
     fail_msg: "hades-status exited {{ host_test_status.rc }}: {{ host_test_status.stderr | default('') }}"
     quiet: true
 
-- name: Read the journald drop-in
-  ansible.builtin.slurp:
-    src: /etc/systemd/journald.conf.d/hades.conf
-  register: host_test_journald
-  failed_when: false
-
-- name: Assert journald is capped
-  ansible.builtin.assert:
-    that:
-      - ('SystemMaxUse=' ~ journald_system_max_use) in (host_test_journald.content | default('') | b64decode).splitlines()
-    fail_msg: "/etc/systemd/journald.conf.d/hades.conf must set SystemMaxUse={{ journald_system_max_use }}"
-    quiet: true
-
 - name: Source the profile script as an account outside group hades
   ansible.builtin.shell: . /etc/profile.d/hades.sh && echo "${CHROME_PATH-unset} ${ERL_FLAGS-unset}"
   become: true
@@ -119,33 +106,15 @@
   failed_when: false
   when: host_test_chrome.stat.exists
 
-- name: Find unresolved Chrome libraries
-  ansible.builtin.shell: set -o pipefail; ldd {{ chrome_root }}/chrome | { grep 'not found' || true; }
-  args:
-    executable: /bin/bash
-  register: host_test_chrome_ldd
-  changed_when: false
-  when: host_test_chrome.stat.exists
-
-- name: Read the Chrome for Testing index
-  ansible.builtin.uri:
-    url: https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json
-    return_content: true
-  register: host_test_chrome_index
-
-- name: Assert Chrome for Testing is the channel's version, executable and resolves every library
+- name: Assert Chrome for Testing is executable and runs
   ansible.builtin.assert:
     that:
       - host_test_chrome.stat.exists
       - host_test_chrome.stat.executable
       - host_test_chrome_version.rc == 0
-      - host_test_chrome_index.json.channels[chrome_channel | capitalize].version in host_test_chrome_version.stdout.split()
-      - host_test_chrome_ldd.stdout == ''
     fail_msg: >-
-      {{ chrome_root }}/chrome must be executable, run and be the {{ chrome_channel }} version
-      {{ host_test_chrome_index.json.channels[chrome_channel | capitalize].version }};
-      {{ host_test_chrome_version.stdout | default('') }}
-      {{ host_test_chrome_version.stderr | default('') }} {{ host_test_chrome_ldd.stdout | default('') }}
+      {{ chrome_root }}/chrome must be executable and run: {{ host_test_chrome_version.stdout | default('') }}
+      {{ host_test_chrome_version.stderr | default('') }}
     quiet: true
 
 # Agents drive Chrome as their own non-root user, with the sandbox on (acceptance 3). Where

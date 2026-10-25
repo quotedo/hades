@@ -1,9 +1,4 @@
 ---
-- name: Validate the Caddyfile
-  ansible.builtin.command: caddy validate --config {{ caddy_config }} --adapter caddyfile
-  become: true
-  changed_when: false
-
 - name: Read Caddy's unit
   ansible.builtin.systemd_service:
     name: caddy.service

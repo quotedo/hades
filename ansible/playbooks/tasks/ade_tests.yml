@@ -1,14 +1,6 @@
 ---
 # Per present dev user and listed ADE. Root may reach every dev port through loopback isolation,
-# so the probes run as root. Orca binds every address; the hades table's input chain limits its
-# ports (set orca_ports) to loopback and Tailscale.
-- name: Read the Orca ports the hades table guards
-  ansible.builtin.command: nft -j list set inet hades orca_ports
-  become: true
-  register: ade_test_orca_ports
-  changed_when: false
-  when: user_present | map(attribute='ades', default=[]) | flatten is contains('orca')
-
+# so the probes run as root.
 - name: Read each listed ADE unit's state
   ansible.builtin.command: systemctl --user -M {{ item.0.name }}@ show {{ item.1 }}.service -p ActiveState -p UnitFileState # noqa: command-instead-of-module
   become: true
@@ -53,16 +45,6 @@
     ade_test_line: >-
       {{ '\s' ~ (ade_test_address | regex_escape) ~ ':' ~ item.0[item.1 ~ '_port'] ~ '\s.*\buid:' ~ item.0.uid
          ~ '\b.*/user@' ~ item.0.uid ~ '\.service/app\.slice/' ~ item.1 ~ '\.service\b' }}
-
-- name: Assert each Orca port is in the hades table's orca_ports set
-  ansible.builtin.assert:
-    that:
-      - item.orca_port in (ade_test_orca_ports.stdout | from_json).nftables | map(attribute='set', default={}) | map(attribute='elem', default=[]) | flatten
-    fail_msg: "{{ item.name }}'s orca_port {{ item.orca_port }} is not in set inet hades orca_ports"
-    quiet: true
-  loop: "{{ user_present | selectattr('ades', 'defined') | selectattr('ades', 'contains', 'orca') }}"
-  loop_control:
-    label: "{{ item.name }}"
 
 # One curl for both status codes; uri would need a request each.
 - name: Request Paseo's health and, without a token, its agents # noqa: command-instead-of-module

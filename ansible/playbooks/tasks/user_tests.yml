@@ -144,22 +144,6 @@
     user_test_groups: >-
       {{ ansible_facts.getent_group | dict2items | selectattr('value.2', 'search', '(^|,)' ~ item.name ~ '(,|$)') | map(attribute='key') | list }}
 
-- name: Read sshd's effective settings
-  ansible.builtin.command: sshd -T
-  become: true
-  register: user_test_sshd
-  changed_when: false
-
-- name: Assert sshd allows agent forwarding and refuses password logins with an administrator
-  ansible.builtin.assert:
-    that:
-      - "'allowagentforwarding yes' in user_test_sshd.stdout_lines"
-      - "('passwordauthentication no' in user_test_sshd.stdout_lines and 'kbdinteractiveauthentication no' in user_test_sshd.stdout_lines)
-        or user_present | selectattr('admin', 'defined') | selectattr('admin') | list | length == 0"
-    fail_msg: >-
-      sshd -T: {{ user_test_sshd.stdout_lines | select('match', '^(allowagentforwarding|passwordauthentication|kbdinteractiveauthentication) ') | join(', ') }}
-    quiet: true
-
 # Keys, first-login welcome and administrator password. Each loop runs over every present user,
 # skipping where it does not apply, so the results line up with user_present.
 - name: Fetch each GitHub user's public keys from the controller

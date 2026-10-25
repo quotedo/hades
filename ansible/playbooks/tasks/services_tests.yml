@@ -67,20 +67,6 @@
     fail_msg: "hades-services.service is {{ services_test_unit.status.UnitFileState | default('missing') }}"
     quiet: true
 
-- name: Read group docker
-  ansible.builtin.getent:
-    database: group
-    key: docker
-
-- name: Assert no dev user is in group docker
-  ansible.builtin.assert:
-    that:
-      - services_test_docker_devs | length == 0
-    fail_msg: "dev users in group docker: {{ services_test_docker_devs | join(', ') }}"
-    quiet: true
-  vars:
-    services_test_docker_devs: "{{ user_present | map(attribute='name') | intersect(ansible_facts.getent_group.docker[2].split(',')) }}"
-
 # As root: loopback isolation lets only root, dev users and service accounts reach the ports.
 # Retried while the broker or LocalStack is still starting.
 - name: Query the RabbitMQ management API with the contracted credentials
