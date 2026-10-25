@@ -5,7 +5,7 @@
 # "already done" or does its work. hades doctor decides whether onboarding is complete; every
 # complete run prints the connection details.
 set -u
-[ -t 0 ] || { echo "hades-onboard needs a terminal: ssh -t $(hostname) hades-onboard" >&2; exit 2; }
+[ -t 0 ] || { echo "hades-onboard needs a terminal: ssh -t <alias> hades-onboard <alias>" >&2; exit 2; }
 host=${1:-$(hostname)}
 dir=$HOME/.config/hades
 
