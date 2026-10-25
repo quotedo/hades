@@ -1,5 +1,5 @@
 ---
-# Host-wide AmneziaWG tunnel `intranet` (design v2 6.4): the vendor's DKMS kernel module, and the
+# Host-wide AmneziaWG tunnel `intranet`: the vendor's DKMS kernel module, and the
 # config from the operator's environment variable that vpn_conf_env names.
 - name: Assert this is Ubuntu
   ansible.builtin.assert:

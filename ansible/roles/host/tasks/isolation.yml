@@ -1,5 +1,5 @@
 ---
-# Loopback isolation (design 6.12), included by site.yml at the end of the play so that the
+# Loopback isolation, included by site.yml at the end of the play so that the
 # service accounts created by later roles are already present.
 #
 # The rules live in their own table, inet hades, applied by hades-nftables.service. Nothing here

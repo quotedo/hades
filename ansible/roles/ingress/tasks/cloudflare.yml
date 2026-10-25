@@ -1,5 +1,5 @@
 ---
-# Design v2 6.6a: the Cloudflare side of ingress, from the inventory, through the API. Each object
+# The Cloudflare side of ingress, from the inventory, through the API. Each object
 # is read first and written only when it is missing or differs; nothing is ever deleted.
 - name: Assert the Cloudflare credentials and the Access allow-list
   ansible.builtin.assert:

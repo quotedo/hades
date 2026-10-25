@@ -1,5 +1,5 @@
 ---
-# Agent CLIs and Paseo (design v2 6.2): npm globals under the store's default Node, installed
+# Agent CLIs and Paseo: npm globals under the store's default Node, installed
 # as root through the npm shim, so a default-Node bump installs them again under the new Node.
 # chdir: / keeps a stray .tool-versions from choosing another Node.
 - name: Install the agent CLIs and Paseo

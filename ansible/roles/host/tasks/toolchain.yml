@@ -1,5 +1,5 @@
 ---
-# Shared tool store (design v2 6.2): mise installs every `tools` version as root under
+# Shared tool store: mise installs every `tools` version as root under
 # mise_store, and the store holds exactly that list. /etc/mise/config.toml, which every user
 # reads, sets the defaults and turns off auto-install and the fall-through to other binaries.
 - name: Install mise

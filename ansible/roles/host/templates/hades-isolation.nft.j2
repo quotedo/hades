@@ -1,6 +1,6 @@
 #!/usr/sbin/nft -f
 # {{ ansible_managed }}
-# Loopback isolation (hades design 6.12). This file manages table inet hades and nothing else;
+# Loopback isolation. This file manages table inet hades and nothing else;
 # hades-nftables.service applies it at boot and on reload. Do not include it from
 # /etc/nftables.conf. The first two lines make the reload atomic and idempotent.
 table inet hades {}

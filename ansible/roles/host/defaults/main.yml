@@ -56,7 +56,7 @@ rabbitmq_mqtt_port: 1883 # noqa: var-naming[no-role-prefix]
 localstack_port: 14566 # noqa: var-naming[no-role-prefix]
 redis_port: 6379 # noqa: var-naming[no-role-prefix]
 
-# Shared tool store (design v2 6.2): mise installs every `tools` version as root under
+# Shared tool store: mise installs every `tools` version as root under
 # mise_store; the first version of each tool is the box default. Versions are exact (preflight).
 mise_version: "2026.10.18" # noqa: var-naming[no-role-prefix]
 mise_store: /usr/local/share/mise # noqa: var-naming[no-role-prefix]
@@ -116,7 +116,7 @@ host_chrome_packages:
   - libasound2t64
   - fonts-liberation
 
-# Ops (design 6.10)
+# Ops
 backup_dir: /var/backups/hades # noqa: var-naming[no-role-prefix]
 host_backup_keep: 7
 host_backup_on_calendar: "*-*-* 03:30:00"
@@ -131,7 +131,7 @@ docker_restart_on_change: false # noqa: var-naming[no-role-prefix]
 host_uid_min: 1000
 host_uid_max: 60000
 
-# Loopback isolation (design 6.12): service accounts allowed to reach the dev port set, when
+# Loopback isolation: service accounts allowed to reach the dev port set, when
 # they exist on the host. Their uids are resolved at run time.
 host_isolation_service_accounts: [caddy, cloudflared, hades-postgres]
 
@@ -141,7 +141,7 @@ host_loopback_address: 127.0.0.1
 host_test_ssh_port: "{{ ansible_port | default(22) }}"
 host_test_unprivileged_user: nobody
 
-# Resource policy (design 6.2): starting values for a 128 GB box, override per host.
+# Resource policy: starting values for a 128 GB box, override per host.
 # The per-user values (dev_user_*, default_limit_nofile) are applied by the user role.
 # Its per-uid slice drop-in is named 20-*.conf so that it sorts before the 50-<Property>.conf
 # files `systemctl set-property` writes; drop-ins apply in filename order across directories,

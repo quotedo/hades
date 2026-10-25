@@ -1,5 +1,5 @@
 ---
-# Ops (design 6.10): gc, backup and keys timers, hades-status, hades-onboard, journal and Docker
+# Ops: gc, backup and keys timers, hades-status, hades-onboard, journal and Docker
 # log caps, and the login environment of group hades.
 - name: Create the backup directory
   ansible.builtin.file:

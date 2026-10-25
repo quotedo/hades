@@ -1,6 +1,6 @@
 #!/bin/bash
 # {{ ansible_managed }}
-# Nightly insurance against an accidental rm (design 6.10): per member of group
+# Nightly insurance against an accidental rm: per member of group
 # {{ hades_group }}, the ADE state and agent logins go into
 # {{ backup_dir }}/<user>-<date>.tar.gz; the newest {{ host_backup_keep }} per user are kept.
 # Dev data itself is reproducible and is not backed up.

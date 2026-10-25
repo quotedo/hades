@@ -1,5 +1,5 @@
 ---
-# Chrome for Testing (design 6.4) for the chrome-devtools MCP, from Google's own index.
+# Chrome for Testing for the chrome-devtools MCP, from Google's own index.
 - name: Install the Chrome runtime libraries and fonts
   ansible.builtin.apt:
     name: "{{ host_chrome_packages }}"
