@@ -277,6 +277,17 @@ func TestJoinRefusesJumpOutputThatIsNoAddress(t *testing.T) {
 	}
 }
 
+func TestJoinRefusesAliasEqualToHost(t *testing.T) {
+	// ssh would take the alias's own block for the box (names compare without case).
+	for _, args := range [][]string{{"shop"}, {"Shop.example.test", "--alias", "shop.example.test"}} {
+		r := runJoin(t, homeWithKeys(t, "id_ed25519"), joinCase{}, args...)
+		want := "join: " + args[0] + ": the alias must differ from the host; pass --alias NAME\n" + joinUsage + "\n"
+		if r.code != 2 || r.out != "" || r.errOut != want || len(r.f.Calls) != 0 {
+			t.Fatalf("%v: %d %q %v", args, r.code, r.errOut, r.f.Calls)
+		}
+	}
+}
+
 func TestJoinServedFileKey(t *testing.T) {
 	// id_ed25519 is not on GitHub, work is: work is chosen.
 	home := homeWithKeys(t, "id_ed25519", "work")

@@ -89,7 +89,7 @@ which ADE's variables to read.
 | `doctor` | Checks host config (`loaded <path> (domain <domain or none>)` or `no host config: laptop defaults`), registry directories, Postgres, RabbitMQ, git, tools, direnv, ADE hooks, manifests, and manifests written by another hades version. Prints `ok`, `WARN` or `FAIL` per check; every FAIL ends with its fix. A repository without `paseo.json` or `orca.yaml` is a WARN. Exit 0 when nothing fails. | `--json` |
 | `gc` | Releases the claims of worktrees whose directory vanished, and port links to vanished directories; reloads Caddy once when a site file went. | `--dry-run` |
 | `version` | Prints the version. | |
-| `join` | On a laptop: `hades join <host>` writes the SSH aliases `<alias>-via-host` (through the box) and `<alias>` (over your tailnet when this laptop reaches your VM there) and runs `hades-onboard` in your VM. See [`join`](#join). | `--as LOGIN` (default `$USER`), `--alias NAME` (default: the host's first DNS label; required for an IP), `--github LOGIN` (default: `gh`'s login) |
+| `join` | On a laptop: `hades join <host>` writes the SSH aliases `<alias>-via-host` (through the box) and `<alias>` (over your tailnet when this laptop reaches your VM there) and runs `hades-onboard` in your VM. See [`join`](#join). | `--as LOGIN` (default `$USER`), `--alias NAME` (default: the host's first DNS label; required for an IP or a host without a dot), `--github LOGIN` (default: `gh`'s login) |
 
 How a worktree is identified: `--root`/`--worktree`/`--name` flags, else Paseo's `PASEO_*`
 variables, else Orca's `ORCA_*`, else git. The name is the branch (Paseo, git; the directory name on
@@ -100,6 +100,8 @@ label. A label held by the manifest of another worktree path fails `up` with
 `label <l> taken by <user> for <path>`.
 
 ## `join`
+
+The alias must differ from the host, compared without case, or ssh would take the alias's own block for the box: `hades join shop` exits 2 with `join: shop: the alias must differ from the host; pass --alias NAME` and the usage.
 
 Steps, in order. Every ssh that `join` runs, except the hand-off, has `-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10`; `<key>` is the private key file, for a key on disk.
 

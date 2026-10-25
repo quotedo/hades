@@ -97,6 +97,12 @@ func join(ctx *Context, args []string) int {
 	if err != nil {
 		return failf("%v", err)
 	}
+	// ssh matches names without case; a Host block named like the box would
+	// capture the jump to the box.
+	if strings.EqualFold(host, alias) {
+		fmt.Fprintf(ctx.Stderr, "join: %s: the alias must differ from the host; pass --alias NAME\n%s\n", host, joinUsage)
+		return 2
+	}
 	bg, run := context.Background(), ctx.Runner
 	sshDir := filepath.Join(home, ".ssh")
 
