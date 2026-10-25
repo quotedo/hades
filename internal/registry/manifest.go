@@ -267,30 +267,6 @@ func (r *Registry) RemoveManifest(label string) error {
 	return os.Remove(path)
 }
 
-// ManifestOwner returns the uid owning the manifest file for label, which
-// must be a regular file. Ownership decisions use this (or
-// Manifest.OwnerUID), never the UID recorded inside the manifest.
-func (r *Registry) ManifestOwner(label string) (int, error) {
-	path, err := r.ManifestPath(label)
-	if err != nil {
-		return 0, err
-	}
-	return RegularFileOwner(path)
-}
-
-// RegularFileOwner returns the owner uid of the regular file at path, without
-// following a symlink.
-func RegularFileOwner(path string) (int, error) {
-	fi, err := os.Lstat(path)
-	if err != nil {
-		return 0, err
-	}
-	if !fi.Mode().IsRegular() {
-		return 0, fmt.Errorf("%s: %w", path, errNotRegular)
-	}
-	return ownerOf(fi, path)
-}
-
 func ownerOf(fi fs.FileInfo, path string) (int, error) {
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {

@@ -15,23 +15,18 @@ import (
 	"github.com/quotedo/hades/internal/envfile"
 )
 
-const envUsage = "usage: hades env [--shell|--json]"
+const envUsage = "usage: hades env [--json]"
 
 // envCmd prints the worktree's .env.worktree for eval or machines.
 func envCmd(ctx *Context, args []string) int {
 	flags := flag.NewFlagSet("env", flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
-	shell := flags.Bool("shell", false, "print export lines (the default)")
 	if err := flags.Parse(args); err != nil {
 		fmt.Fprintf(ctx.Stderr, "env: %v\n%s\n", err, envUsage)
 		return 2
 	}
 	if flags.NArg() > 0 {
 		fmt.Fprintf(ctx.Stderr, "env: unexpected arguments %q\n%s\n", flags.Args(), envUsage)
-		return 2
-	}
-	if *shell && ctx.Flags.JSON {
-		fmt.Fprintf(ctx.Stderr, "env: --shell and --json are exclusive\n%s\n", envUsage)
 		return 2
 	}
 	wt, err := resolveWorktree(context.Background(), ctx)

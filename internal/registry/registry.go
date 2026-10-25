@@ -25,9 +25,6 @@ var (
 	ErrNotOwner = errors.New("port is not owned by this worktree")
 	// ErrNoManifest means no manifest matches the query.
 	ErrNoManifest = errors.New("no manifest found")
-	// ErrRegistryPerms means a shared registry directory lacks a property
-	// the ownership model rests on.
-	ErrRegistryPerms = errors.New("registry directory has the wrong mode or group")
 )
 
 // Registry is the set of directories hades keeps its state in.
@@ -78,7 +75,7 @@ func (r *Registry) Check() error {
 		return err
 	}
 	if len(problems) > 0 {
-		return fmt.Errorf("%w: %s", ErrRegistryPerms, strings.Join(problems, "; "))
+		return fmt.Errorf("registry directory has the wrong mode or group: %s", strings.Join(problems, "; "))
 	}
 	return nil
 }

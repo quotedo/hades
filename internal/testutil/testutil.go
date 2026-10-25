@@ -48,14 +48,3 @@ func StubTool(t *testing.T, bindir, name, script string) {
 		t.Fatal(err)
 	}
 }
-
-// StubPATH returns a getenv whose PATH is bindir followed by the system dirs.
-func StubPATH(t *testing.T, bindir string) func(string) string {
-	t.Helper()
-	return func(k string) string {
-		if k == "PATH" {
-			return bindir + ":/usr/bin:/bin"
-		}
-		return ""
-	}
-}

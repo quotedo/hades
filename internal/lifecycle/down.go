@@ -135,7 +135,7 @@ func ignoredManifestFor(d Deps, c wtctx.Context) (registry.Problem, bool) {
 		return registry.Problem{}, false
 	}
 	label := ""
-	if cfg, _, err := config.LoadProject(c.Worktree, c.Root); err == nil {
+	if cfg, err := config.LoadProject(c.Worktree, c.Root); err == nil {
 		if project, err := projectSlug(cfg, c.Root); err == nil {
 			label, _ = naming.Label(d.Host.LabelTemplate, naming.Vars{Project: project, User: d.User.Name, Name: c.Name})
 		}
@@ -180,7 +180,7 @@ func teardown(ctx context.Context, d Deps, c wtctx.Context) *StepResult {
 		r.Err = err
 		return r
 	}
-	cfg, _, err := config.LoadProject(c.Worktree, c.Root)
+	cfg, err := config.LoadProject(c.Worktree, c.Root)
 	if err != nil {
 		r.Err = err
 		return r

@@ -99,7 +99,7 @@ func TestCommandFlagsReachTheCommand(t *testing.T) {
 	}
 	// Globals after the command word, mixed with command flags, still apply.
 	errb.Reset()
-	if code := Main([]string{"version", "-v", "--json"}, &out, &errb, getenv); code != 0 {
+	if code := Main([]string{"version", "--json"}, &out, &errb, getenv); code != 0 {
 		t.Fatalf("code=%d err=%q", code, errb.String())
 	}
 }

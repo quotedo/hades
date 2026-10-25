@@ -182,12 +182,6 @@ func checkSiteManifest(manifestsDir, label, sitePath string, uid int) error {
 	return nil
 }
 
-// ValidateSites checks every *.caddy file in h.SitesDir as Reload does.
-func ValidateSites(h *config.Host) error {
-	_, err := readSites(h)
-	return err
-}
-
 // mirror makes liveDir hold exactly the given site files.
 func mirror(liveDir string, sites map[string][]byte) error {
 	for label, content := range sites {

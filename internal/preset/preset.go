@@ -29,7 +29,6 @@ type Preset struct {
 	Web      bool
 	Setup    []string
 	AppName  string
-	HasEcto  bool
 	Tidewave bool
 
 	// dir is the directory Detect looked at; Apply uses it to re-derive
@@ -101,7 +100,6 @@ func Detect(dir string) (Preset, error) {
 			return Preset{}, err
 		}
 		p.AppName = app
-		p.HasEcto = mixHasDep(mix, "ecto_sql")
 		if mixHasDep(mix, "phoenix") {
 			p.Kind = Phoenix
 		}

@@ -245,11 +245,8 @@ func checkRabbit(bg context.Context, r *config.RabbitMQ) check {
 }
 
 // toolLookup resolves a tool the way `up` runs commands: the version-manager
-// directories first, then PATH. A Deps.LookPath override wins (tests).
+// directories first, then PATH.
 func toolLookup(d lifecycle.Deps, path string) func(string) (string, error) {
-	if d.LookPath != nil {
-		return d.LookPath
-	}
 	prepend := execx.ToolPrepend(d.User.Home, d.Host.ToolPaths)
 	return func(name string) (string, error) { return execx.LookPath(name, prepend, path) }
 }

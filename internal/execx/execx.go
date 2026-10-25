@@ -17,10 +17,9 @@ import (
 
 // Cmd describes one command invocation.
 type Cmd struct {
-	Argv  []string
-	Dir   string
-	Env   []string // replaces the environment when non-nil, inherited when nil
-	Stdin io.Reader
+	Argv []string
+	Dir  string
+	Env  []string // replaces the environment when non-nil, inherited when nil
 }
 
 // Result is the captured outcome of a command.
@@ -51,8 +50,7 @@ type Runner interface {
 
 // Real runs commands with os/exec.
 type Real struct {
-	Prepend []string  // directories prepended to PATH when they exist on disk
-	Log     io.Writer // when set, receives a line per command
+	Prepend []string // directories prepended to PATH when they exist on disk
 }
 
 // ToolPrepend returns the directories where version-managed tools live, in
@@ -81,14 +79,10 @@ func (r *Real) Run(ctx context.Context, c Cmd) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if r.Log != nil {
-		fmt.Fprintf(r.Log, "+ %s\n", strings.Join(c.Argv, " "))
-	}
 
 	cmd := exec.CommandContext(ctx, bin, c.Argv[1:]...)
 	cmd.Dir = c.Dir
 	cmd.Env = env
-	cmd.Stdin = c.Stdin
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -192,41 +186,13 @@ func (f *Fake) Run(_ context.Context, c Cmd) (Result, error) {
 	return h(c)
 }
 
-// DryRun prints mutating commands instead of running them and forwards
-// read-only ones to Next.
+// DryRun prints every command instead of running it.
 type DryRun struct {
-	Out  io.Writer
-	Next Runner
-}
-
-// readOnly reports whether c is safe to execute during a dry run. Extend this
-// as more read-only commands are needed.
-func readOnly(c Cmd) bool {
-	if len(c.Argv) == 0 || c.Argv[0] != "git" {
-		return false
-	}
-	args := c.Argv[1:]
-	for len(args) >= 2 && args[0] == "-C" { // skip "-C <dir>"
-		args = args[2:]
-	}
-	if len(args) == 0 {
-		return false
-	}
-	switch args[0] {
-	case "rev-parse":
-		return true
-	case "branch":
-		// Only listing forms; `git branch <name>` or `-D` would mutate.
-		return len(args) == 1 || args[1] == "--show-current" || args[1] == "--list"
-	}
-	return false
+	Out io.Writer
 }
 
 // Run implements Runner.
-func (d *DryRun) Run(ctx context.Context, c Cmd) (Result, error) {
-	if readOnly(c) {
-		return d.Next.Run(ctx, c)
-	}
+func (d *DryRun) Run(_ context.Context, c Cmd) (Result, error) {
 	fmt.Fprintf(d.Out, "would run: %s (in %s)\n", strings.Join(c.Argv, " "), c.Dir)
-	return Result{ExitCode: 0}, nil
+	return Result{}, nil
 }

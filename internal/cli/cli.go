@@ -16,7 +16,7 @@ import (
 // Globals are the flags accepted by every command.
 type Globals struct {
 	Root, Worktree, Name, ADE string
-	JSON, Verbose             bool
+	JSON                      bool
 }
 
 // Context carries the process environment into a command.
@@ -63,7 +63,6 @@ func Main(args []string, stdout, stderr io.Writer, getenv func(string) string) i
 	fs.StringVar(&g.Name, "name", "", "worktree name")
 	fs.StringVar(&g.ADE, "ade", "", "ADE that invoked hades")
 	fs.BoolVar(&g.JSON, "json", false, "print the result as JSON on stdout")
-	fs.BoolVar(&g.Verbose, "v", false, "verbose output")
 
 	if err := fs.Parse(args); err != nil {
 		return usage(stderr, err)
@@ -122,7 +121,7 @@ func usage(w io.Writer, err error) int {
 		names = append(names, n)
 	}
 	sort.Strings(names)
-	fmt.Fprintf(w, "usage: hades [--root DIR] [--worktree DIR] [--name NAME] [--ade ADE] [--json] [-v] <%s> [args]\n", strings.Join(names, "|"))
+	fmt.Fprintf(w, "usage: hades [--root DIR] [--worktree DIR] [--name NAME] [--ade ADE] [--json] <%s> [args]\n", strings.Join(names, "|"))
 	if err == nil {
 		return 0
 	}

@@ -17,13 +17,13 @@ import (
 
 // Inputs is everything Compute needs to derive a worktree's environment.
 type Inputs struct {
-	Port                                          int
-	Label, Host, URL, Suffix, Name, Project, User string
-	Preset                                        preset.Preset
-	HostCfg                                       config.Host
-	Vhost                                         string
-	Extra                                         map[string]string
-	ExistingSecret                                string
+	Port                                    int
+	Label, Host, URL, Suffix, Name, Project string
+	Preset                                  preset.Preset
+	HostCfg                                 config.Host
+	Vhost                                   string
+	Extra                                   map[string]string
+	ExistingSecret                          string
 }
 
 var placeholderRe = regexp.MustCompile(`\{\{[^{}]*\}\}`)

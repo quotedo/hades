@@ -44,13 +44,6 @@ var gitignoreEntries = []string{".env.worktree", ".envrc"}
 func initCmd(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	// --ade is also a global flag, so Main usually consumes it before init
-	// sees the arguments; the flag here covers the `--` escape.
-	defaultADE := "paseo,orca"
-	if ctx.Flags.ADE != "" {
-		defaultADE = ctx.Flags.ADE
-	}
-	ades := fs.String("ade", defaultADE, "ADEs to wire: paseo, orca, wt")
 	force := fs.Bool("force", false, "overwrite existing hades.toml, paseo.json and orca.yaml")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(ctx.Stderr, "init: %v\n%s\n", err, initUsage)
@@ -60,8 +53,12 @@ func initCmd(ctx *Context, args []string) int {
 		fmt.Fprintf(ctx.Stderr, "init: unexpected arguments %q\n%s\n", fs.Args(), initUsage)
 		return 2
 	}
+	ades := ctx.Flags.ADE // the global --ade flag; init reads it as the list of ADEs to wire
+	if ades == "" {
+		ades = "paseo,orca"
+	}
 	want := map[string]bool{}
-	for _, a := range strings.Split(*ades, ",") {
+	for _, a := range strings.Split(ades, ",") {
 		a = strings.TrimSpace(a)
 		if a != "paseo" && a != "orca" && a != "wt" {
 			fmt.Fprintf(ctx.Stderr, "init: unknown ADE %q\n%s\n", a, initUsage)

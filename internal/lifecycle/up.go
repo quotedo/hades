@@ -34,7 +34,6 @@ type Outcome struct {
 	Manifest *registry.Manifest
 	Env      []envfile.KV
 	URL      string // empty for a preset without a web port
-	Steps    []string
 }
 
 // ErrLabelTaken reports a label whose manifest belongs to another user or
@@ -83,7 +82,6 @@ type upRun struct {
 	existing    *registry.Manifest // this worktree's manifest from an earlier up
 	m           *registry.Manifest
 	env         []envfile.KV
-	steps       []string
 }
 
 // Up brings the worktree's environment up (spec 6.4 steps 1 to 10). A failure
@@ -97,7 +95,7 @@ func Up(ctx context.Context, d Deps, c wtctx.Context, opt UpOptions) (*Outcome, 
 		d.Now = time.Now
 	}
 	if opt.DryRun {
-		d.Run = &execx.DryRun{Out: d.Log, Next: d.Run}
+		d.Run = &execx.DryRun{Out: d.Log}
 	}
 	u := &upRun{ctx: ctx, d: d, c: c, opt: opt}
 
@@ -141,10 +139,7 @@ func Up(ctx context.Context, d Deps, c wtctx.Context, opt UpOptions) (*Outcome, 
 		}
 	}
 
-	out := &Outcome{Manifest: u.m, Env: u.env, URL: u.url()}
-	err := u.setup() // 10
-	out.Steps = u.steps
-	return out, err
+	return &Outcome{Manifest: u.m, Env: u.env, URL: u.url()}, u.setup() // 10
 }
 
 // rollback runs the undo stack newest first, carrying on past failures, and
@@ -165,18 +160,12 @@ func rollback(stack []undo, err error) error {
 }
 
 func (u *upRun) would(format string, args ...any) {
-	line := "would " + fmt.Sprintf(format, args...)
-	fmt.Fprintln(u.d.Log, line)
-	u.steps = append(u.steps, line)
-}
-
-func (u *upRun) did(format string, args ...any) {
-	u.steps = append(u.steps, fmt.Sprintf(format, args...))
+	fmt.Fprintln(u.d.Log, "would "+fmt.Sprintf(format, args...))
 }
 
 // detect is step 1a: project config and preset.
 func (u *upRun) detect() error {
-	cfg, _, err := config.LoadProject(u.c.Worktree, u.c.Root)
+	cfg, err := config.LoadProject(u.c.Worktree, u.c.Root)
 	if err != nil {
 		return err
 	}
@@ -404,7 +393,6 @@ func (u *upRun) url() string {
 func (u *upRun) claimPort() (*undo, error) {
 	if u.existing != nil && u.existing.Port != 0 && !u.reclaimPort {
 		u.setAddress(u.existing.Port)
-		u.did("reused port %d", u.existing.Port)
 		return nil, nil
 	}
 	if !u.preset.Web {
@@ -426,7 +414,6 @@ func (u *upRun) claimPort() (*undo, error) {
 		return nil, fmt.Errorf("claim port: %w", err)
 	}
 	u.setAddress(port)
-	u.did("claimed port %d", port)
 	return &undo{
 		action: fmt.Sprintf("release port %d", port),
 		fn:     func() error { return reg.ReleasePort(port, wt) },
@@ -454,7 +441,6 @@ func (u *upRun) writeManifest() (*undo, error) {
 	if err := reg.WriteManifest(u.m); err != nil {
 		return nil, fmt.Errorf("write manifest: %w", err)
 	}
-	u.did("wrote manifest %s", u.m.Label)
 	if prev := u.existing; prev != nil {
 		return &undo{
 			action: "restore manifest " + prev.Label,
@@ -484,7 +470,6 @@ func (u *upRun) computeEnv() (*undo, error) {
 		Suffix:         u.m.DBSuffix,
 		Name:           u.m.Name,
 		Project:        u.m.Project,
-		User:           u.d.User.Name,
 		Preset:         u.preset,
 		HostCfg:        *u.d.Host,
 		Vhost:          u.vhost,
@@ -514,7 +499,6 @@ func (u *upRun) writeEnv() (*undo, error) {
 		if err := envfile.UpdateEnvrc(envrc, u.env); err != nil {
 			return nil, fmt.Errorf("update .envrc: %w", err)
 		}
-		u.did("wrote .env.worktree and .envrc")
 	}
 	if _, err := u.d.lookPath("direnv"); err != nil {
 		fmt.Fprintln(u.d.Log, "up: direnv not installed; skipping direnv allow")
@@ -522,9 +506,7 @@ func (u *upRun) writeEnv() (*undo, error) {
 	}
 	if _, err := u.d.Run.Run(u.ctx, execx.Cmd{Argv: []string{"direnv", "allow", wt}, Dir: wt}); err != nil {
 		fmt.Fprintf(u.d.Log, "up: direnv allow failed (continuing): %v\n", err)
-		return nil, nil
 	}
-	u.did("ran direnv allow")
 	return nil, nil
 }
 
@@ -539,7 +521,6 @@ func (u *upRun) revealSecrets() (*undo, error) {
 	if _, err := u.d.Run.Run(u.ctx, execx.Cmd{Argv: []string{"git", "secret", "reveal", "-f"}, Dir: wt}); err != nil {
 		return nil, fmt.Errorf("git secret reveal -f: %w; %s", err, gitSecretRemedy)
 	}
-	u.did("revealed git secrets")
 	return nil, nil
 }
 
@@ -565,7 +546,6 @@ func (u *upRun) ensureVhost() (*undo, error) {
 	if err := u.d.Rabbit.Ensure(u.ctx, vhost); err != nil {
 		return un, fmt.Errorf("ensure vhost %s: %w", vhost, err)
 	}
-	u.did("ensured vhost %s", vhost)
 	return un, nil
 }
 
@@ -604,11 +584,7 @@ func (u *upRun) publishSite() (*undo, error) {
 			},
 		}
 	}
-	if err := caddy.SudoReload(u.ctx, u.d.Run, u.d.Bin); err != nil {
-		return un, err
-	}
-	u.did("published %s", u.url())
-	return un, nil
+	return un, caddy.SudoReload(u.ctx, u.d.Run, u.d.Bin)
 }
 
 // rewireMCP is step 9.
@@ -624,14 +600,8 @@ func (u *upRun) rewireMCP() (*undo, error) {
 		u.would("rewire agent MCP configs in %s (tidewave %q, chrome %q)", u.c.Worktree, t.TidewaveURL, t.ChromePath)
 		return nil, nil
 	}
-	edited, err := mcp.Rewire(u.ctx, u.c.Worktree, t, u.d.Run)
-	if err != nil {
-		return nil, err
-	}
-	if len(edited) > 0 {
-		u.did("rewired %s", strings.Join(edited, ", "))
-	}
-	return nil, nil
+	_, err := mcp.Rewire(u.ctx, u.c.Worktree, t, u.d.Run)
+	return nil, err
 }
 
 // setup is step 10: the project's own setup commands, from the worktree, with
@@ -653,7 +623,6 @@ func (u *upRun) setup() error {
 			return &SetupError{Command: command, Err: err}
 		}
 		io.WriteString(u.d.Log, res.Stderr)
-		u.did("ran %s", command)
 	}
 	return nil
 }
