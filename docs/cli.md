@@ -89,7 +89,7 @@ which ADE's variables to read.
 | `doctor` | Checks host config (`loaded <path> (domain <domain or none>)` or `no host config: laptop defaults`), registry directories, Postgres, RabbitMQ, git, tools, direnv, ADE hooks, manifests, and manifests written by another hades version. Prints `ok`, `WARN` or `FAIL` per check; every FAIL ends with its fix. A repository without `paseo.json` or `orca.yaml` is a WARN. Exit 0 when nothing fails. | `--json` |
 | `gc` | Releases the claims of worktrees whose directory vanished, and port links to vanished directories; reloads Caddy once when a site file went. | `--dry-run` |
 | `version` | Prints the version. | |
-| `join` | On a laptop: `hades join <host>` makes the box reachable over SSH, then runs `ssh -t <alias> hades-onboard <alias>`. The steps are in the [developer guide](developer.md#join). | `--as LOGIN` (default `$USER`), `--alias NAME` (default: the host's first DNS label; required for an IP), `--github LOGIN` (default: `gh`'s login) |
+| `join` | On a laptop: `hades join <host>` writes the SSH aliases `<alias>-via-host` (through the box) and `<alias>` (over your tailnet when this laptop reaches your VM there) and runs `hades-onboard` in your VM. See [`join`](#join). | `--as LOGIN` (default `$USER`), `--alias NAME` (default: the host's first DNS label; required for an IP), `--github LOGIN` (default: `gh`'s login) |
 
 How a worktree is identified: `--root`/`--worktree`/`--name` flags, else Paseo's `PASEO_*`
 variables, else Orca's `ORCA_*`, else git. The name is the branch (Paseo, git; the directory name on
@@ -98,6 +98,26 @@ at most 63 characters (the name is shortened to fit). The name, label and hostna
 first `up` and recorded in the manifest; a renamed branch keeps them. `down` then `up` gives a fresh
 label. A label held by the manifest of another worktree path fails `up` with
 `label <l> taken by <user> for <path>`.
+
+## `join`
+
+Steps, in order. Every ssh that `join` runs, except the hand-off, has `-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10`; `<key>` is the private key file, for a key on disk.
+
+| Step | Action |
+|---|---|
+| Key, GitHub | As in the [developer guide](developer.md#join). |
+| Address | `ssh [-i <key>] -l hades <host>`: the box's jump account prints your VM's address. |
+| `<alias>-via-host` | Writes the alias, then logs in once: `ssh <alias>-via-host true`. |
+| Hand-off | `ssh -t <alias>-via-host hades-onboard <alias>` on your terminal. |
+| `<alias>` | Only after `hades-onboard` exits 0. Reads `tailscale status --json` in the VM; with `BackendState` `Running`, logs in once over the tailnet: `ssh -l <login> [-i <key>] <name> true`, `<name>` being `Self.DNSName` without the trailing dot. Then writes the alias. |
+
+| Alias | `HostName` | `ProxyCommand` | Written when |
+|---|---|---|---|
+| `<alias>-via-host` | the VM's address | `ssh -W %h:%p -l hades -o StrictHostKeyChecking=accept-new [-i <key>] <host>` | every run |
+| `<alias>` | `<name>` | none | the tailnet login worked; prints `daily: ssh <alias> (tailnet); fallback: ssh <alias>-via-host` |
+| `<alias>` | the VM's address | as `<alias>-via-host` | otherwise; with Tailscale `Running`, prints `<alias> goes through the box: this laptop does not reach <name> on your tailnet` |
+
+Each alias is a block between `# hades:begin <name>` and `# hades:end <name>` in `~/.ssh/config`, also holding `User <login>`, `ForwardAgent yes`, `StrictHostKeyChecking accept-new` and `IdentityFile <key>` for a key on disk. `wrote Host <name> to ~/.ssh/config` is printed only when a block changed.
 
 ## Exit codes
 
@@ -111,9 +131,9 @@ label. A label held by the manifest of another worktree path fails `up` with
 
 | Code | When |
 |---|---|
-| hades-onboard's code | The login worked: 0 when onboarding completed. A box without `hades-onboard` gives 0 and prints `next: ssh <alias>`. |
-| 2 | `not authorised yet`: the box refused the key. Also a usage error. |
-| 1 | Any other failure, as `join: <reason>`; an unreachable host or a refused host key is `join: ssh: <ssh's message>`. |
+| hades-onboard's code | The login through `<alias>-via-host` worked: 0 when onboarding completed. A VM without `hades-onboard` gives 0 and prints `next: ssh <alias>-via-host`. |
+| 2 | `not authorised yet`: the jump account or the VM refused the key. Also a usage error. |
+| 1 | Any other failure, as `join: <reason>`; an unreachable host or a refused host key is `join: ssh: <ssh's message>`, jump-account output that is no address `join: ssh -l hades <host> printed "<output>", not an address`. |
 
 ## Server scripts and files
 

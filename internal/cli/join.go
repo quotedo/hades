@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,10 +53,12 @@ func (k sshKey) blob() string {
 	return ""
 }
 
-// join prepares this laptop to reach a hades box: an SSH key on GitHub, a
-// block in ~/.ssh/config, a test login, then hades-onboard on the box. It
-// exits with hades-onboard's code once the login works, 2 while the box does
-// not accept the key yet and 1 on errors.
+// join prepares this laptop to reach the developer's VM: an SSH key on GitHub,
+// the VM's address from the box's jump account, <alias>-via-host through the
+// box, a test login, hades-onboard in the VM, then <alias> over the tailnet
+// when this laptop reaches the VM there. It exits with hades-onboard's code
+// once the login works, 2 while the box does not accept the key yet and 1 on
+// errors.
 func join(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("join", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -167,27 +171,20 @@ func join(ctx *Context, args []string) int {
 	}
 
 	identity := strings.TrimSuffix(key.file, ".pub")
-	changed, err := envfile.UpsertBlock(filepath.Join(sshDir, "config"), "# hades:begin "+alias+"\n", "# hades:end "+alias+"\n", sshConfigBlock(alias, host, *login, identity))
-	if err != nil {
-		return failf("%v", err)
+	var idArg []string
+	if identity != "" {
+		idArg = []string{"-i", identity}
 	}
-	if changed {
-		fmt.Fprintf(ctx.Stderr, "wrote Host %s to ~/.ssh/config\n", alias)
-	}
-
-	_, err = run.Run(bg, execx.Cmd{Argv: []string{"ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10", alias, "true"}})
-	var xe *execx.ExitError
-	errors.As(err, &xe)
-	switch {
-	case err == nil:
-		fmt.Fprintf(ctx.Stdout, "connected: %s@%s\n", *login, alias)
-		code := handOff([]string{"ssh", "-t", alias, "hades-onboard", alias})
-		if code == 127 {
-			fmt.Fprintf(ctx.Stdout, "next: ssh %s\n", alias)
-			return 0
+	batch := []string{"ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10"}
+	// sshFailed reports a failed ssh through the box; a refused key exits 2.
+	sshFailed := func(err error) int {
+		var xe *execx.ExitError
+		switch {
+		case !errors.As(err, &xe):
+			return failf("%v", err)
+		case !strings.Contains(xe.Result.Stderr, "Permission denied"):
+			return failf("ssh: %s", strings.TrimSpace(xe.Result.Stderr))
 		}
-		return code
-	case xe != nil && strings.Contains(xe.Result.Stderr, "Permission denied"):
 		fmt.Fprint(ctx.Stderr, xe.Result.Stderr)
 		fmt.Fprintln(ctx.Stdout, "not authorised yet: the box does not accept your key.")
 		if onGitHub {
@@ -197,11 +194,66 @@ func join(ctx *Context, args []string) int {
 		}
 		fmt.Fprintf(ctx.Stdout, "Then run again: hades join %s\n", strings.Join(args, " "))
 		return 2
-	case xe != nil:
-		return failf("ssh: %s", strings.TrimSpace(xe.Result.Stderr))
-	default:
+	}
+	upsert := func(name, hostName, proxy string) error {
+		changed, err := envfile.UpsertBlock(filepath.Join(sshDir, "config"), "# hades:begin "+name+"\n", "# hades:end "+name+"\n", sshConfigBlock(name, hostName, *login, proxy, identity))
+		if changed {
+			fmt.Fprintf(ctx.Stderr, "wrote Host %s to ~/.ssh/config\n", name)
+		}
+		return err
+	}
+
+	// The jump account's forced command prints the VM's address.
+	res, err := run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, idArg, []string{"-l", "hades", host})})
+	if err != nil {
+		return sshFailed(err)
+	}
+	addr := strings.TrimSpace(res.Stdout)
+	if net.ParseIP(addr) == nil {
+		return failf("ssh -l hades %s printed %q, not an address", host, addr)
+	}
+	via := alias + "-via-host"
+	jump := strings.Join(slices.Concat([]string{"ssh", "-W", "%h:%p", "-l", "hades", "-o", "StrictHostKeyChecking=accept-new"}, idArg, []string{host}), " ")
+	if err := upsert(via, addr, jump); err != nil {
 		return failf("%v", err)
 	}
+	if _, err := run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, []string{via, "true"})}); err != nil {
+		return sshFailed(err)
+	}
+	fmt.Fprintf(ctx.Stdout, "connected: %s@%s\n", *login, alias)
+	code := handOff([]string{"ssh", "-t", via, "hades-onboard", alias})
+	if code == 127 {
+		fmt.Fprintf(ctx.Stdout, "next: ssh %s\n", via)
+		return 0
+	}
+	if code != 0 {
+		return code
+	}
+
+	// Daily use goes over the developer's tailnet when this laptop reaches the
+	// VM there; otherwise <alias> goes through the box like <alias>-via-host.
+	var st struct {
+		BackendState string
+		Self         struct{ DNSName string }
+	}
+	res, _ = run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, []string{via, "tailscale", "status", "--json"})})
+	json.Unmarshal([]byte(res.Stdout), &st) // no tailnet when this fails
+	tsName, hostName, proxy := strings.TrimSuffix(st.Self.DNSName, "."), addr, jump
+	if st.BackendState == "Running" {
+		if _, err := run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, []string{"-l", *login}, idArg, []string{tsName, "true"})}); err == nil {
+			hostName, proxy = tsName, ""
+		}
+	}
+	if err := upsert(alias, hostName, proxy); err != nil {
+		return failf("%v", err)
+	}
+	switch {
+	case proxy == "":
+		fmt.Fprintf(ctx.Stdout, "daily: ssh %s (tailnet); fallback: ssh %s\n", alias, via)
+	case st.BackendState == "Running":
+		fmt.Fprintf(ctx.Stdout, "%s goes through the box: this laptop does not reach %s on your tailnet\n", alias, tsName)
+	}
+	return 0
 }
 
 // joinTarget returns the host to connect to and its ~/.ssh/config alias: the
@@ -244,11 +296,16 @@ func fetchKeys(login string) (string, error) {
 	return string(b), err
 }
 
-// sshConfigBlock is the ~/.ssh/config entry for the box, written between
-// "# hades:begin <alias>" and "# hades:end <alias>". identity is the private
-// key file, "" for a key only in the agent.
-func sshConfigBlock(alias, host, login, identity string) string {
-	b := "Host " + alias + "\n  HostName " + host + "\n  User " + login + "\n  ForwardAgent yes\n  StrictHostKeyChecking accept-new\n"
+// sshConfigBlock is the ~/.ssh/config entry for name, written between
+// "# hades:begin <name>" and "# hades:end <name>". proxy is the ProxyCommand,
+// "" for a direct connection; identity is the private key file, "" for a key
+// only in the agent.
+func sshConfigBlock(name, hostName, login, proxy, identity string) string {
+	b := "Host " + name + "\n  HostName " + hostName + "\n  User " + login + "\n"
+	if proxy != "" {
+		b += "  ProxyCommand " + proxy + "\n"
+	}
+	b += "  ForwardAgent yes\n  StrictHostKeyChecking accept-new\n"
 	if identity != "" {
 		b += "  IdentityFile " + identity + "\n"
 	}
