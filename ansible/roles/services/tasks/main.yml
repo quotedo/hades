@@ -1,22 +1,5 @@
 ---
-# preflight.yml is untagged and skipped by `--tags services`, so this role checks its own inputs.
-# site.yml runs it only when dev_services lists something: compose refuses an empty project.
-- name: Assert the variables this role consumes
-  ansible.builtin.assert:
-    that:
-      - dev_services is sequence
-      - dev_services is not string
-      - dev_services | difference(['rabbitmq', 'localstack', 'redis']) | length == 0
-      - services_ports | map('string') | reject('match', '^[0-9]+$') | list | length == 0
-      - localstack_buckets is sequence
-      - localstack_buckets is not string
-      - localstack_buckets | reject('match', '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') | list | length == 0
-    fail_msg: >-
-      dev_services must be a list drawn from rabbitmq, localstack and redis, every service port an
-      integer and localstack_buckets a list of S3 bucket names (they reach a shell loop)
-    quiet: true
-  vars:
-    services_ports: "{{ [rabbitmq_amqp_port, rabbitmq_management_port, rabbitmq_mqtt_port, localstack_port, redis_port] }}"
+# site.yml runs this role only when dev_services lists something: compose refuses an empty project.
 
 # A host that already runs Docker (any install method) keeps it exactly as it is.
 - name: Check for Docker Compose

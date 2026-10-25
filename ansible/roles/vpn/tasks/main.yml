@@ -8,19 +8,6 @@
     fail_msg: the vpn role installs AmneziaWG from the vendor PPA, which covers Ubuntu only
     quiet: true
 
-# Preflight's checks again, because `--tags vpn` skips preflight: no resolvconf is installed, so
-# a DNS line would fail the tunnel, and a full tunnel would take the default route.
-- name: Assert the VPN config is set, a split tunnel and without DNS
-  ansible.builtin.assert:
-    that:
-      - vpn_conf | length > 0
-      - vpn_conf is not search('(?i)AllowedIPs\\s*=.*(?<![\\w.:])(0\\.0\\.0\\.0/[01]|128\\.0\\.0\\.0/1|::/[01]|8000::/1)(?!\\d)')
-      - vpn_conf is not search('(?im)^\\s*DNS\\s*=')
-    fail_msg: "{{ vpn_conf_env }} must hold the AmneziaWG config, only intranet subnets in AllowedIPs, no DNS line"
-    quiet: true
-  vars:
-    vpn_conf: "{{ lookup('ansible.builtin.env', vpn_conf_env) if vpn_conf_env else '' }}"
-
 # ppa:amnezia/ppa, signed by the key whose fingerprint Launchpad publishes for it. The keyserver
 # refuses HEAD, so get_url cannot preview it in check mode; this module fetches with GET.
 - name: Add the AmneziaWG PPA

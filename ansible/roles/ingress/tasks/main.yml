@@ -1,22 +1,4 @@
 ---
-# preflight.yml is untagged and skipped by `--tags ingress`, so this role checks its own inputs.
-- name: Assert the variables this role consumes
-  ansible.builtin.assert:
-    that:
-      - hades_domain is string
-      - hades_domain | length > 0
-      - hades_label_template is string
-      - caddy_port | string is match('^[0-9]+$')
-      - caddy_port | int < 65536
-      - caddy_config is match('^/.+')
-      - hades_live_dir is match('^/.+')
-      - hades_config_dir is match('^/.+')
-      - tailscale_enabled is boolean
-    fail_msg: >-
-      hades_domain must be a non-empty string, caddy_port a port, caddy_config, hades_live_dir and
-      hades_config_dir absolute paths and tailscale_enabled a boolean
-    quiet: true
-
 # First, so that a run without Cloudflare credentials stops before it changes anything.
 - name: Cloudflare tunnel, DNS record and Access application
   ansible.builtin.import_tasks: cloudflare.yml

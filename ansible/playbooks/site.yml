@@ -13,6 +13,7 @@
 #   4. A project's key holder runs `git secret tell` for the new users.
 - name: Preflight
   ansible.builtin.import_playbook: preflight.yml
+  tags: [always]
 
 - name: Provision dev servers
   hosts: dev_servers

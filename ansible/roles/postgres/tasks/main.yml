@@ -1,28 +1,4 @@
 ---
-# preflight.yml is untagged and skipped by `--tags postgres`, so this role checks its own inputs.
-- name: Assert the variables this role consumes
-  ansible.builtin.assert:
-    that:
-      - dev_pg_port | int > 0
-      - dev_pg_port | int < 65536
-      - dev_pg_major | int > 0
-      - dev_pg_user is string
-      - dev_pg_user | length > 0
-      - dev_pg_password is string
-      - dev_pg_password | length > 0
-      - dev_pg_cluster is match('^[a-z0-9_]+$')
-      - dev_pg_os_user is string
-      - dev_pg_os_user | length > 0
-      - postgres_listen_addresses is sequence
-      - postgres_listen_addresses is not string
-      - postgres_listen_addresses | length > 0
-      - postgres_settings is mapping
-    fail_msg: >-
-      dev_pg_port must be a port, dev_pg_major a Postgres major version, dev_pg_user,
-      dev_pg_password and dev_pg_os_user non-empty strings, dev_pg_cluster a cluster name,
-      postgres_listen_addresses a non-empty list and postgres_settings a mapping
-    quiet: true
-
 # An existing PGDG source (any file, any format) is left exactly as it is.
 - name: Find an existing PGDG source
   ansible.builtin.find:
