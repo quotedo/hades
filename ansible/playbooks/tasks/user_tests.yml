@@ -242,6 +242,17 @@
   loop_control:
     label: "{{ item.name }}"
 
+- name: Read each administrator's password status
+  ansible.builtin.command: passwd -S {{ item.name }}
+  become: true
+  register: user_test_admin_status
+  changed_when: false
+  when: item.admin | default(false)
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# Only while the generated file exists: after `passwd` the administrator deletes it.
 # The redirect runs as root, so the password passes through no variable and no command line.
 - name: Sudo as each administrator with the stored password
   ansible.builtin.shell: >-
@@ -252,9 +263,10 @@
   changed_when: false
   failed_when: false
   no_log: true
-  when: item.admin | default(false)
+  when: item.admin | default(false) and user_test_admin_file.results[i].stat.exists | default(false)
   loop: "{{ user_present }}"
   loop_control:
+    index_var: i
     label: "{{ item.name }}"
 
 - name: Assert each dev user's keys, login list, welcome and administrator password
@@ -270,9 +282,10 @@
       - user_test_shell.results[i].rc == 0
       - user_test_shell.results[i].stdout == ''
       - (user_test_interactive.results[i].stdout is search('^Welcome to ', multiline=True)) == user_test_welcome.results[i].stat.exists
-      - not item.admin | default(false) or (user_test_admin_file.results[i].stat.exists
-        and user_test_admin_file.results[i].stat.pw_name == 'root' and user_test_admin_file.results[i].stat.mode == '0600')
-      - not item.admin | default(false) or user_test_admin_sudo.results[i].rc == 0
+      - not item.admin | default(false) or user_test_admin_status.results[i].stdout.split()[1] == 'P'
+      - not user_test_admin_file.results[i].stat.exists | default(false)
+        or (user_test_admin_file.results[i].stat.pw_name == 'root' and user_test_admin_file.results[i].stat.mode == '0600')
+      - not user_test_admin_file.results[i].stat.exists | default(false) or user_test_admin_sudo.results[i].rc == 0
     fail_msg: |-
       {{ item.name }}: {{ user_test_github_keys | reject('in', user_test_keys) | list | length }} of
       {{ user_test_github_keys | length }} GitHub keys and {{ item.ssh_keys | default([]) | reject('in', user_test_keys) | list | length }}
@@ -282,7 +295,8 @@
       {{ 'present' if user_test_onboarded.results[i].stat.exists else 'absent' }};
       non-interactive output: {{ user_test_shell.results[i].stdout_lines | join(' | ') or 'none' }};
       interactive output: {{ user_test_interactive.results[i].stdout_lines | first | default('none') }};
-      admin password file {{ user_test_admin_file.results[i].stat.mode | default('absent') }}
+      admin password status {{ (user_test_admin_status.results[i].stdout | default('')).split()[1:2] | join or 'n/a' }},
+      file {{ user_test_admin_file.results[i].stat.mode | default('absent') }}
       {{ user_test_admin_file.results[i].stat.pw_name | default('') }}, sudo -S rc {{ user_test_admin_sudo.results[i].rc | default('n/a') }}
     quiet: true
   loop: "{{ user_present }}"

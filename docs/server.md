@@ -158,7 +158,7 @@ ansible-playbook -i inventory.yml playbooks/verify.yml --tags vpn
 
 - `admin: true` → group `sudo`; the distribution's rule asks for the user's password, so an agent cannot escalate.
 - While the administrator's password is locked or unset, the apply generates one, stores it in `/etc/hades/admin-password.<name>` (root 0600) and prints it once: `<name>'s sudo password, stored only in /etc/hades/admin-password.<name>: <password>`. A set password is never touched, so later applies print nothing. The account Ansible connects with can read the file again.
-- To change it, the administrator runs `passwd`. `verify.yml --tags user` runs `sudo` with the stored password, so write the new one into the file too, or that check fails.
+- Change it with `passwd`, then delete `/etc/hades/admin-password.<name>`.
 - sshd must have `AllowAgentForwarding yes` and, while any administrator exists, `PasswordAuthentication no` and `KbdInteractiveAuthentication no`; otherwise the `user` group stops. Set them in your own sshd drop-in. Hosts using `AllowUsers` need the dev logins added by hand.
 - The administrator can read every home.
 
@@ -228,7 +228,7 @@ Rules: `state: absent` acts only on accounts the role created (group `hades`, ma
 | Move everyone to a new ADE or CLI version | Change `paseo_version`, `orca_version` or a pinned `agent_clis` entry; apply `--tags host,user`. |
 | Upgrade the hades CLI | Change `hades_version` to a published release, or rebuild into `hades_local_binary_dir`; apply `--tags host`. |
 | Refresh SSH keys now | `hades-keys.timer` runs `hades-keys` hourly. `sudo systemctl start hades-keys.service` runs it now; `sudo hades-keys <login>` for one user. Each line ends `updated`, `unchanged`, `fetch failed, kept`, `no home, skipped` or `write failed, kept`; `sudo hades-status` shows the last run. |
-| Rotate the admin password | The administrator runs `passwd`; then update `/etc/hades/admin-password.<name>` (see [Administrator](#administrator)). |
+| Rotate the admin password | The administrator runs `passwd`, then deletes `/etc/hades/admin-password.<name>` (see [Administrator](#administrator)). |
 | Add a system package | `host_extra_packages`, apply `--tags host`. |
 | Vanished worktrees | `hades-gc.timer` runs `hades gc` as root weekly; `sudo hades gc` runs it now. |
 | Restore a user's ADE state | Stop the user's ADE unit, `sudo tar -xzf <backup_dir>/<user>-<date>.tar.gz -C /home/<user>`, start it. |

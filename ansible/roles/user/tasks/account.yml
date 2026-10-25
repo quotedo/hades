@@ -102,7 +102,7 @@
   ansible.builtin.command: "{{ hades_bin_dir }}/hades-keys {{ user.name }}"
   register: user_keys
   changed_when: "'updated' in user_keys.stdout"
-  failed_when: "'fetch failed' in user_keys.stdout and user.github is defined"
+  failed_when: "user_keys.rc != 0 or 'write failed' in user_keys.stdout or ('fetch failed' in user_keys.stdout and user.github is defined)"
 
 # A locked or unset password only: the role never touches a set one. Generated on the host,
 # printed once below, then readable by root alone.
