@@ -19,32 +19,30 @@
     mode: "0755"
   loop: [/var/lib/hades-jump, /var/lib/hades-jump/.ssh, "{{ hades_config_dir }}/ssh-keys"]
 
-# sshd adds up every AllowUsers line it reads. Where another file restricts logins with one, the
-# drop-in admits the jump account too; elsewhere it is removed. Only the last grep's status counts.
+# sshd adds up every AllowUsers line it reads: where another file restricts logins with one, the
+# drop-in admits the jump account too. Only the last grep's status counts. The jump account may
+# open local TCP forwards only (permitopen limits them); no remote or Unix-socket forwards.
 - name: Look for an AllowUsers line outside the hades drop-in # noqa: risky-shell-pipe
   ansible.builtin.shell: >-
     grep -lis '^[[:space:]]*AllowUsers' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf
-    | grep -v /hades-allowusers.conf
+    | grep -v /hades.conf
   register: host_allowusers
   changed_when: false
   failed_when: host_allowusers.rc > 1
   check_mode: false
 
-- name: Write the sshd AllowUsers drop-in
+- name: Write the sshd drop-in
   ansible.builtin.copy:
     content: |
       # Ansible managed
+      {% if host_allowusers.rc == 0 %}
       AllowUsers hades
-    dest: /etc/ssh/sshd_config.d/hades-allowusers.conf
+      {% endif %}
+      Match User hades
+          AllowTcpForwarding local
+          AllowStreamLocalForwarding no
+    dest: /etc/ssh/sshd_config.d/hades.conf
     mode: "0644"
-  when: host_allowusers.rc == 0
-  notify: sshd reload
-
-- name: Remove the sshd AllowUsers drop-in
-  ansible.builtin.file:
-    path: /etc/ssh/sshd_config.d/hades-allowusers.conf
-    state: absent
-  when: host_allowusers.rc != 0
   notify: sshd reload
 
 - name: Install hades-keys

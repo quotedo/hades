@@ -66,17 +66,23 @@
         jump_test_probes:
           address: "{{ jump_test_ssh }} -l hades {{ ansible_host }}"
           other: "{{ jump_test_ssh }} -W {{ jump_test_other }}:22 -l hades {{ ansible_host }}"
+          socket: "{{ jump_test_ssh }} -W /run/systemd/journal/stdout -l hades {{ ansible_host }}"
+          remote: "{{ jump_test_ssh }} -o ExitOnForwardFailure=yes -R 127.0.0.1:0:127.0.0.1:9 -l hades {{ ansible_host }}"
           tunnel: >-
             {{ jump_test_ssh }} -o ProxyCommand='{{ jump_test_ssh }} -W %h:%p -l hades {{ ansible_host }}'
             {{ jump_test_dev.name }}@{{ jump_test_dev.address }} true
           shell: "{{ jump_test_ssh }} -tt -l hades {{ ansible_host }} /bin/sh"
 
+    # Every account may connect to the journal's socket, so only a refused forward fails (sshd
+    # reports a refusal as `connect failed: open failed`).
     # ssh -tt gives up on a refused terminal, mostly before the address arrives.
     - name: Assert the jump prints the test VM's address, tunnels only to its SSH and runs no shell
       ansible.builtin.assert:
         that:
           - jump_test_p.address.rc == 0 and jump_test_p.address.stdout == jump_test_dev.address
           - jump_test_p.other.rc != 0 and jump_test_p.other.stderr is search('administratively prohibited')
+          - jump_test_p.socket.rc != 0 and jump_test_p.socket.stderr is search('open failed')
+          - jump_test_p.remote.rc != 0 and jump_test_p.remote.stderr is search('remote port forwarding failed')
           - jump_test_p.tunnel.rc == 0
           - jump_test_p.shell.stderr is search('PTY allocation request failed')
           - jump_test_p.shell.stdout | trim in ['', jump_test_dev.address]
