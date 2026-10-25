@@ -319,8 +319,8 @@
     quiet: true
 
 # Review focus: a fetch that fails says so and writes nothing; hades-keys fetches before it
-# looks at any home.
-- name: Probe hades-keys with a GitHub login that does not exist
+# looks at any home. A login with an empty github field is not fetched at all.
+- name: Probe hades-keys with a GitHub login that does not exist and an empty one
   become: true
   block:
     - name: Create the probe login list
@@ -330,7 +330,7 @@
 
     - name: Write the probe login list
       ansible.builtin.copy:
-        content: "nouser:this-login-does-not-exist-404\n"
+        content: "nouser:this-login-does-not-exist-404\nnostatic:\n"
         dest: "{{ host_test_keys_list.path }}"
         mode: "0600"
 
@@ -343,7 +343,7 @@
 
     - name: Assert the failed fetch kept authorized_keys
       ansible.builtin.assert:
-        that: "host_test_keys_run.stdout_lines == ['nouser: fetch failed, kept']"
+        that: "host_test_keys_run.stdout_lines == ['nouser: fetch failed, kept', 'nostatic: no home, skipped']"
         fail_msg: "hades-keys printed {{ host_test_keys_run.stdout_lines }}"
         quiet: true
   always:
