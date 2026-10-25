@@ -4,6 +4,9 @@
 
 vm_home: /home/{{ dev.name }}
 
+# Orca's port; Paseo's is 6767, the one Paseo Desktop dials by default.
+orca_port: 6768
+
 # Chrome for Testing; the binary is <chrome_root>/chrome, a link into <chrome_root>/<version>/.
 # chrome_channel names a channel of the Chrome for Testing index (stable, beta, dev, canary).
 chrome_root: /opt/chrome-for-testing

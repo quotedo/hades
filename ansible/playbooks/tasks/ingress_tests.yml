@@ -17,7 +17,7 @@
   changed_when: false
 
 # Every caddy_port listener is on the loopback address, Caddy listens nowhere else (no 80/443),
-# and nothing holds Caddy's default API port: the API is on the unix socket only.
+# and nothing holds Caddy's default API port: there is no API.
 - name: Assert Caddy listens on the loopback caddy_port only
   ansible.builtin.assert:
     that:
@@ -33,78 +33,46 @@
     ingress_test_bind: " {{ hades_loopback_address | regex_escape }}:{{ caddy_port }} "
     ingress_test_port_lines: "{{ ingress_test_ss.stdout_lines | select('search', ':' ~ caddy_port ~ ' ') | list }}"
 
-- name: Stat Caddy's API socket
-  ansible.builtin.stat:
-    path: "{{ ingress_caddy_api_socket }}"
-  become: true
-  register: ingress_test_api_socket
-
-- name: Assert only the caddy account can use Caddy's API socket
-  ansible.builtin.assert:
-    that:
-      - ingress_test_api_socket.stat.issock | default(false)
-      - ingress_test_api_socket.stat.pw_name == 'caddy'
-      - ingress_test_api_socket.stat.mode == '0200'
-    fail_msg: >-
-      {{ ingress_caddy_api_socket }} must be a socket owned by caddy with mode 0200, got
-      {{ ingress_test_api_socket.stat.pw_name | default('nothing') }} {{ ingress_test_api_socket.stat.mode | default('') }}
-    quiet: true
-
-- name: Query the catch-all site
+# Through the host's Caddy: unknown names, the plain one and each developer's (which their VM's
+# Caddy answers), redirect to the apex.
+- name: Request unknown names through Caddy
   ansible.builtin.uri:
     url: http://{{ hades_loopback_address }}:{{ caddy_port }}/
     headers:
-      Host: nothing.{{ hades_domain }}
+      Host: "{{ item }}.{{ hades_domain }}"
     status_code: 302
     follow_redirects: none
-  register: ingress_test_catchall
-  become: true
+  register: ingress_test_unknown
+  loop: "{{ ['nothing'] + dev_present | map(attribute='name') | product(['-nothing']) | map('join') | list }}"
 
-- name: Assert an unknown host name redirects to the apex
+- name: Assert unknown names redirect to the apex
   ansible.builtin.assert:
-    that: ingress_test_catchall.location == 'https://' ~ hades_domain
-    fail_msg: "catch-all Location is {{ ingress_test_catchall.location | default('missing') }}"
+    that: ingress_test_unknown.results | map(attribute='location') | unique == ['https://' ~ hades_domain]
+    fail_msg: "Location: {{ ingress_test_unknown.results | map(attribute='location') | unique }}"
     quiet: true
 
-- name: Probe a gated path through a temporary worktree site
+- name: Assert a gated path without the Access header is refused
+  ansible.builtin.uri:
+    url: http://{{ hades_loopback_address }}:{{ caddy_port }}/dev/x
+    headers:
+      Host: nothing.{{ hades_domain }}
+    status_code: 403
+
+# The VM's 302 looks like the host's own, so each VM's Caddy stops for one request: a 502 shows
+# the host sent that developer's names to that VM.
+- name: Request each developer's names with their VM's Caddy stopped
+  ansible.builtin.shell: >-
+    incus exec {{ item.name }} -- systemctl stop caddy;
+    curl -s -o /dev/null -w '%{http_code}' -H 'Host: {{ item.name }}-nothing.{{ hades_domain }}'
+    http://{{ hades_loopback_address }}:{{ caddy_port }}/;
+    incus exec {{ item.name }} -- systemctl start caddy
   become: true
-  block:
-    - name: Write the probe site
-      ansible.builtin.copy:
-        content: "import worktree probe.{{ hades_domain }} 65000\n"
-        dest: "{{ hades_live_dir }}/probe.caddy"
-        mode: "0644"
-
-    - name: Reload Caddy with the probe site
-      ansible.builtin.command:
-        argv: "{{ caddy_reload_command }}"
-      changed_when: false
-
-    - name: Assert a gated path without the Access header is refused
-      ansible.builtin.uri:
-        url: http://{{ hades_loopback_address }}:{{ caddy_port }}/dev/mailbox
-        headers:
-          Host: probe.{{ hades_domain }}
-        status_code: 403
-
-    # Nothing listens on the probe port, so 502 means the gate let it through and Caddy dialled it.
-    - name: Assert a gated path with the Access header is proxied
-      ansible.builtin.uri:
-        url: http://{{ hades_loopback_address }}:{{ caddy_port }}/dev/mailbox
-        headers:
-          Host: probe.{{ hades_domain }}
-          Cf-Access-Jwt-Assertion: probe
-        status_code: 502
-  always:
-    - name: Remove the probe site
-      ansible.builtin.file:
-        path: "{{ hades_live_dir }}/probe.caddy"
-        state: absent
-
-    - name: Reload Caddy without the probe site
-      ansible.builtin.command:
-        argv: "{{ caddy_reload_command }}"
-      changed_when: false
+  register: ingress_test_stopped
+  changed_when: false
+  failed_when: ingress_test_stopped.rc != 0 or ingress_test_stopped.stdout != '502'
+  loop: "{{ dev_present }}"
+  loop_control:
+    label: "{{ item.name }}"
 
 # Skipped without Cloudflare credentials unless the tag is requested: a host with no zone runs no
 # tunnel.

@@ -1,27 +1,29 @@
 # {{ ansible_managed }}
-# The Cloudflare tunnel terminates TLS, so Caddy serves plain HTTP on loopback only. Its API
-# socket is set in the unit (CADDY_ADMIN).
+# The Cloudflare tunnel terminates TLS, so Caddy serves plain HTTP on loopback only. Only the
+# inventory changes this configuration, so there is no admin API.
 {
 	auto_https off
+	admin off
 	default_bind {{ hades_loopback_address }}
 }
 
-# `import worktree <host> <port>`, written by `hades caddy-reload` into {{ hades_live_dir }}.
-# The dev paths need the header Cloudflare Access adds; without it they answer 403.
-(worktree) {
-	http://{args[0]}:{{ caddy_port }} {
-		@gated {
-			path /dev* /tidewave* /phoenix/live_reload*
-			not header Cf-Access-Jwt-Assertion *
-		}
-		respond @gated 403
-		reverse_proxy {{ hades_loopback_address }}:{args[1]}
-	}
-}
-
-import {{ hades_live_dir }}/*.caddy
-
-# Unknown host names say nothing about this server: a redirect to the apex.
 http://:{{ caddy_port }} {
-	redir https://{{ hades_domain }} 302
+	# The dev paths need the header Cloudflare Access adds. Developer names have no dash, so no
+	# developer's matcher is this one or matches another developer's names.
+	@gated-path {
+		path /dev* /tidewave* /phoenix/live_reload*
+		not header Cf-Access-Jwt-Assertion *
+	}
+{% for dev in dev_present %}
+	@{{ dev.name }} header_regexp Host ^{{ dev.name }}-
+{% endfor %}
+	# In this order: the gate, each developer's names to their VM's Caddy, then a redirect to the
+	# apex, so unknown names say nothing about this server.
+	route {
+		respond @gated-path 403
+{% for dev in dev_present %}
+		reverse_proxy @{{ dev.name }} {{ dev.address }}:{{ caddy_port }}
+{% endfor %}
+		redir https://{{ hades_domain }} 302
+	}
 }

@@ -1,0 +1,47 @@
+---
+# Run as the developer: a user unit for each ADE the developer lists, and none for the others.
+#
+# Paseo's password is generated in the VM once and kept, also when edited by hand; it never
+# touches the controller's disk. hades-onboard shows it.
+- name: Generate the Paseo password, once
+  ansible.builtin.shell: |
+    umask 077
+    printf 'PASEO_PASSWORD=%s\n' "$(openssl rand -hex 16)" > {{ (vm_home ~ '/.config/hades/paseo.env') | quote }}
+  args:
+    creates: "{{ vm_home }}/.config/hades/paseo.env"
+  register: vm_paseo_password
+  no_log: true
+  when: "'paseo' in dev.ades"
+
+- name: Write the ADE units
+  ansible.builtin.template:
+    src: ade.service.j2
+    dest: "{{ vm_home }}/.config/systemd/user/{{ ade }}.service"
+    mode: "0644"
+  loop: "{{ dev.ades }}"
+  loop_control:
+    loop_var: ade
+  register: vm_ade_units
+
+- name: Enable and start the ADEs, restarting them after a change
+  ansible.builtin.systemd_service:
+    name: "{{ item.ade }}.service"
+    scope: user
+    enabled: true
+    daemon_reload: "{{ vm_ade_units is changed }}"
+    state: "{{ 'restarted' if item is changed or (item.ade == 'paseo' and vm_paseo_password is changed) else 'started' }}"
+  loop: "{{ vm_ade_units.results }}"
+  loop_control:
+    label: "{{ item.ade }}"
+  # In check mode a new unit is not written yet, so systemd cannot find it.
+  when: not (ansible_check_mode and item is changed)
+
+- name: Stop and remove the units of the ADEs the developer no longer lists # noqa: command-instead-of-module
+  ansible.builtin.shell: >-
+    systemctl --user disable --now {{ item }}.service && rm ~/.config/systemd/user/{{ item }}.service
+    && systemctl --user daemon-reload
+  args:
+    removes: "{{ vm_home }}/.config/systemd/user/{{ item }}.service"
+  environment:
+    XDG_RUNTIME_DIR: /run/user/{{ dev.uid }}
+  loop: "{{ ['paseo', 'orca'] | difference(dev.ades) }}"

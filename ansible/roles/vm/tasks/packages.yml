@@ -1,7 +1,7 @@
 ---
-# Every package of the VM, never removed: the archive's, then Docker's and Tailscale's from their
-# own repositories. Their packages enable and start Docker, Postgres and tailscaled; the developer
-# logs Tailscale in during hades-onboard. The community.postgresql modules need psycopg2.
+# Every package of the VM, never removed: the archive's, then Docker's, Tailscale's and Caddy's
+# from their own repositories. Their packages start Docker, Postgres, tailscaled and Caddy; the
+# developer logs Tailscale in during hades-onboard. The postgresql modules need psycopg2.
 - name: Install the packages from the Ubuntu archive
   ansible.builtin.apt:
     name: >-
@@ -12,11 +12,11 @@
     cache_valid_time: 3600
     install_recommends: false
 
-- name: Add Docker's and Tailscale's repositories
+- name: Add Docker's, Tailscale's and Caddy's repositories
   ansible.builtin.deb822_repository:
     name: "{{ item.name }}"
     uris: "{{ item.uris }}"
-    suites: "{{ ansible_facts.distribution_release }}"
+    suites: "{{ item.suite | default(ansible_facts.distribution_release) }}"
     components: "{{ item.components }}"
     signed_by: "{{ item.key }}"
   loop:
@@ -28,15 +28,20 @@
       uris: https://pkgs.tailscale.com/stable/{{ vm_distro }}
       components: main
       key: https://pkgs.tailscale.com/stable/{{ vm_distro }}/{{ ansible_facts.distribution_release }}.noarmor.gpg
+    - name: caddy
+      uris: https://dl.cloudsmith.io/public/caddy/stable/deb/debian
+      suite: any-version
+      components: main
+      key: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
   loop_control:
     label: "{{ item.name }}"
   vars:
     vm_distro: "{{ ansible_facts.distribution | lower }}"
   register: vm_repos
 
-- name: Install Docker CE and Tailscale
+- name: Install Docker CE, Tailscale and Caddy
   ansible.builtin.apt:
-    name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin, docker-buildx-plugin, tailscale]
+    name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin, docker-buildx-plugin, tailscale, caddy]
     state: present
     update_cache: true
     cache_valid_time: "{{ 0 if vm_repos is changed else 3600 }}"

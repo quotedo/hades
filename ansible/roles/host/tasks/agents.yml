@@ -41,7 +41,8 @@
         dest: "{{ orca_root }}/orca-{{ orca_version }}.AppImage"
         mode: "0755"
 
-    # --appimage-extract-and-run unpacks to a temporary directory instead of mounting, so no FUSE.
+    # --appimage-extract-and-run unpacks to a temporary directory on the VM's disk instead of
+    # mounting: no FUSE, and no shared memory map of a file in the share, which the share refuses.
     - name: Write the orca-ide wrapper
       ansible.builtin.copy:
         content: |
@@ -64,3 +65,10 @@
       loop: "{{ host_orca_old.files }}"
       loop_control:
         label: "{{ item.path }}"
+
+- name: Remove Orca while no developer lists it
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: ["{{ orca_root }}", "{{ hades_bin_dir }}/orca-ide"]
+  when: not host_orca_wanted

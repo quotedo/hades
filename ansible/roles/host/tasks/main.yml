@@ -7,12 +7,12 @@
     cache_valid_time: 3600
     install_recommends: false
 
-- name: Create the share and the Caddy live directories
+- name: Create the share directories
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
     mode: "0755"
-  loop: ["{{ hades_share }}", "{{ hades_bin_dir }}", "{{ hades_live_dir | dirname }}", "{{ hades_live_dir }}"]
+  loop: ["{{ hades_share }}", "{{ hades_bin_dir }}"]
   register: host_dirs
 
 - name: Shared tool store

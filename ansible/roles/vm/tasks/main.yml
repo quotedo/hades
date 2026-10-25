@@ -33,6 +33,15 @@
 - name: Account and shell environment
   ansible.builtin.import_tasks: account.yml
 
+- name: Write the hades CLI's host config
+  ansible.builtin.template:
+    src: host.toml.j2
+    dest: "{{ hades_config_dir }}/host.toml"
+    mode: "0644"
+
+- name: Caddy
+  ansible.builtin.import_tasks: caddy.yml
+
 - name: GPG key
   ansible.builtin.import_tasks: gpg.yml
   when: dev.gpg_key | default(false)
@@ -48,3 +57,8 @@
     # Otherwise mise points both into the root-owned Elixir install (env.sh.j2).
     MIX_HOME: "{{ vm_home }}/.mix"
     MIX_ARCHIVES: "{{ vm_home }}/.mix/archives"
+
+- name: ADEs, as the developer
+  ansible.builtin.import_tasks: ades.yml
+  become: true
+  become_user: "{{ dev.name }}"

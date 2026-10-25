@@ -22,3 +22,12 @@
   ansible.builtin.command: docker compose -f {{ services_dir }}/docker-compose.yml up -d --force-recreate --remove-orphans
   changed_when: true
   listen: services recreate
+
+# A restart: the drop-in's account applies at start only. In check mode the unit may not exist yet.
+- name: Restart Caddy
+  ansible.builtin.systemd_service:
+    name: caddy.service
+    state: restarted
+    daemon_reload: true
+  when: not ansible_check_mode
+  listen: caddy restart

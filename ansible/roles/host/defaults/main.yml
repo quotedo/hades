@@ -50,11 +50,9 @@ vpn_enabled: false
 vpn_conf_env: ""
 vpn_probe: ""
 
-# Caddy (installed by the ingress role)
+# Caddy: the host's (ingress role) and each VM's (vm role)
 caddy_port: 8090
 caddy_config: /etc/caddy/Caddyfile
-caddy_reload_command: [systemctl, reload, caddy]
-hades_live_dir: /etc/caddy/hades-sites
 
 # Dev services in each VM (vm role)
 rabbitmq_management_port: 15672
@@ -93,7 +91,8 @@ orca_root: "{{ hades_share }}/orca"
 orca_packages: [libnotify4, libsecret-1-0, libxss1, libxtst6, xdg-utils]
 host_orca_wanted: "{{ dev_present | selectattr('ades', 'contains', 'orca') | list | length > 0 }}"
 
-# The loopback address the host's Caddy binds, and the one each VM publishes its dev services on.
+# The loopback address the host's Caddy binds, and the one each VM publishes its dev services and
+# its Caddy proxies worktrees on.
 hades_loopback_address: 127.0.0.1
 
 # Inside the VMs.

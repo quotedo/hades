@@ -36,7 +36,11 @@
   loop:
     - { path: "{{ vm_home }}/.config" }
     - { path: "{{ vm_home }}/.config/hades", mode: "0700" }
+    - { path: "{{ vm_home }}/.config/systemd" }
+    - { path: "{{ vm_home }}/.config/systemd/user" }
+    - { path: "{{ hades_config_dir }}", owner: root }
     - { path: /etc/systemd/system/user@.service.d, owner: root }
+    - { path: /etc/systemd/system/caddy.service.d, owner: root }
     - { path: /etc/systemd/user.conf.d, owner: root }
 
 # The open-file limit reaches the user manager and, through its default, its units (the ADEs).

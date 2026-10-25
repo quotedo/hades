@@ -60,3 +60,13 @@
     - name: VM tests
       ansible.builtin.import_tasks: tasks/vm_tests.yml
       tags: [vm]
+
+    - name: ADE tests
+      ansible.builtin.import_tasks: tasks/ade_tests.yml
+      tags: [ade]
+
+    # Opt-in: it writes into acceptance_user's home, so only a throwaway developer.
+    - name: Acceptance tests
+      ansible.builtin.import_tasks: tasks/acceptance_tests.yml
+      tags: [acceptance]
+      when: dev.name == acceptance_user | default('')

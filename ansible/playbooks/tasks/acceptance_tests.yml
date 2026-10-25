@@ -1,186 +1,137 @@
 ---
-# End to end as acceptance_user, a throwaway dev user given with -e: the sample project gets a
-# worktree, `hades up` and `hades down`, checked through the registry, Caddy, the dev Postgres
-# and loopback isolation. After `hades down`, the worktree pins a Node version missing from the
-# store, and `hades up` must fail with mise's not-installed error.
-- name: Read the user's passwd entry
-  ansible.builtin.getent:
-    database: passwd
-    key: "{{ acceptance_user }}"
-
-# Before the block: its clean-up deletes ~/sample and ~/sample-wt in this user's home.
-- name: Assert the user is a present dev user
-  ansible.builtin.assert:
-    that:
-      - acceptance_user in dev_present | map(attribute='name')
-    fail_msg: "acceptance_user {{ acceptance_user }} is not a present dev user"
-    quiet: true
-
+# End to end in acceptance_user's VM (a throwaway developer given with -e): the sample project gets
+# `hades init`, a worktree, `hades up` and `hades down`, checked through the box's Caddy, the VM's
+# Postgres and the developer's registry. After `hades down`, the worktree pins a Node version
+# missing from the store, and `hades up` must fail with mise's not-installed error.
 - name: Bring a sample worktree up and down
-  become: true
   vars:
-    acceptance_repo: "{{ ansible_facts.getent_passwd[acceptance_user][4] }}/sample"
+    acceptance_repo: "{{ vm_home }}/sample"
     acceptance_wt: "{{ acceptance_repo }}-wt"
+    acceptance_state: "{{ vm_home }}/.local/state/hades"
     acceptance_entry: "{{ acceptance_ls.stdout | from_json | selectattr('Worktree', 'eq', acceptance_wt) | first | default({}) }}"
-    acceptance_port: "{{ acceptance_entry.Port }}"
     acceptance_db: sample_dev{{ acceptance_entry.DBSuffix }}
-    acceptance_psql: psql -h {{ hades_loopback_address }} -p {{ dev_pg_port }} -U {{ dev_pg_user }} -d postgres -tAc 'SELECT datname FROM pg_database'
+    acceptance_psql: psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -tAc 'SELECT datname FROM pg_database'
+    acceptance_curl: >-
+      curl -s -o /dev/null -w '%{http_code}' -H 'Host: {{ acceptance_entry.Host }}'
+      http://{{ hades_loopback_address }}:{{ caddy_port }}/
   block:
     - name: Copy the sample project
       ansible.builtin.copy:
         src: "{{ playbook_dir }}/../tests/sample-project/"
         dest: "{{ acceptance_repo }}/"
-        owner: "{{ acceptance_user }}"
-        group: "{{ acceptance_user }}"
+        owner: "{{ dev.name }}"
+        group: "{{ dev.name }}"
         mode: "0644"
         directory_mode: "0755"
 
-    - name: Commit it and add a worktree
+    - name: Run hades init, commit and add a worktree
       ansible.builtin.command:
         argv:
           - runuser
           - -l
-          - "{{ acceptance_user }}"
+          - "{{ dev.name }}"
           - -c
           - >-
-            cd {{ acceptance_repo }} && git init -q -b main && git add -A
+            cd {{ acceptance_repo }} && git init -q -b main && hades init && git add -A
             && git -c user.name=hades -c user.email=hades@example.invalid commit -qm sample
             && git worktree add -q {{ acceptance_wt }} -b feature/acc
       changed_when: true
 
     - name: Run hades up in the worktree
-      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ acceptance_wt }} && hades up --ade shell'
+      ansible.builtin.command: runuser -l {{ dev.name }} -c 'cd {{ acceptance_wt }} && hades up --ade shell'
       changed_when: true
 
     - name: List the worktrees
-      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'hades ls --json'
+      ansible.builtin.command: runuser -l {{ dev.name }} -c 'hades ls --json'
       register: acceptance_ls
       changed_when: false
 
-    - name: Assert the worktree is listed with a port and a host name
+    - name: Read the site file
+      ansible.builtin.slurp:
+        src: "{{ acceptance_state }}/sites/{{ acceptance_entry.Label | default('missing') }}.caddy"
+      register: acceptance_site
+      failed_when: false
+
+    - name: Assert the worktree is listed under the developer's name and its site routes to its port
       ansible.builtin.assert:
         that:
-          - acceptance_entry != {}
-          - acceptance_entry.Project == 'sample'
+          - acceptance_entry.Project | default('') == 'sample'
           - acceptance_entry.Preset == 'phoenix'
           - acceptance_entry.ADE == 'shell'
           - acceptance_entry.Port > 0
+          - acceptance_entry.Label.startswith(dev.name ~ '-sample-')
           - acceptance_entry.Host == acceptance_entry.Label ~ '.' ~ hades_domain
-        fail_msg: "hades ls --json has no proper entry for {{ acceptance_wt }}: {{ acceptance_ls.stdout }}"
+          - acceptance_site.content | default('') | b64decode == 'import worktree ' ~ acceptance_entry.Host ~ ' ' ~ acceptance_entry.Port ~ '\n'
+        fail_msg: "hades ls --json: {{ acceptance_ls.stdout }}; site file: {{ acceptance_site.content | default('') | b64decode or acceptance_site.msg }}"
         quiet: true
 
-    - name: Read the site file and its live copy
-      ansible.builtin.slurp:
-        src: "{{ item }}/{{ acceptance_entry.Label }}.caddy"
-      register: acceptance_sites
-      loop:
-        - "{{ hades_registry_root }}/sites"
-        - "{{ hades_live_dir }}"
-
-    - name: Assert both route the host name to the port
-      ansible.builtin.assert:
-        that:
-          - item.content | b64decode == 'import worktree ' ~ acceptance_entry.Host ~ ' ' ~ acceptance_port ~ '\n'
-        fail_msg: "{{ item.source }}: {{ item.content | b64decode }}"
-        quiet: true
-      loop: "{{ acceptance_sites.results }}"
-      loop_control:
-        label: "{{ item.source }}"
-
-    - name: Serve the worktree on its port as the user
+    - name: Serve the worktree on its port as the developer
       ansible.builtin.command: >-
-        systemd-run --unit=hades-acceptance-http.service --collect --uid={{ acceptance_user }}
-        python3 -m http.server --bind {{ hades_loopback_address }} --directory {{ acceptance_wt }} {{ acceptance_port }}
+        systemd-run --unit=hades-acceptance-http.service --collect --uid={{ dev.name }}
+        python3 -m http.server --bind {{ hades_loopback_address }} --directory {{ acceptance_wt }} {{ acceptance_entry.Port }}
       changed_when: true
 
     - name: Wait for the server
       ansible.builtin.wait_for:
         host: "{{ hades_loopback_address }}"
-        port: "{{ acceptance_port | int }}"
+        port: "{{ acceptance_entry.Port }}"
         timeout: 10
 
-    - name: Assert Caddy routes the host name to the worktree
-      ansible.builtin.uri:
-        url: http://{{ hades_loopback_address }}:{{ caddy_port }}/
-        headers:
-          Host: "{{ acceptance_entry.Host }}"
-        status_code: 200
+    - name: Request the worktree's name through the box's Caddy # noqa: command-instead-of-module
+      ansible.builtin.command: "{{ acceptance_curl }}"
+      delegate_to: "{{ hades_box }}"
+      register: acceptance_web_up
+      changed_when: false
 
     - name: List the dev databases
       ansible.builtin.command: "{{ acceptance_psql }}"
-      environment:
-        PGPASSWORD: "{{ dev_pg_password }}"
       register: acceptance_dbs_up
       changed_when: false
 
-    - name: Connect to the worktree port as the probe account and as the user
-      ansible.builtin.command: runuser -u {{ item }} -- nc -z -w 3 {{ hades_loopback_address }} {{ acceptance_port }}
-      register: acceptance_nc
-      changed_when: false
-      failed_when: false
-      loop: ["{{ verify_unprivileged_user }}", "{{ acceptance_user }}"]
-
-    - name: Run hades doctor as the user
-      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'hades doctor'
+    - name: Run hades doctor as the developer
+      ansible.builtin.command: runuser -l {{ dev.name }} -c 'hades doctor'
       register: acceptance_doctor
       changed_when: false
       failed_when: false
 
-    - name: Assert the database exists, isolation holds and doctor passes
-      ansible.builtin.assert:
-        that:
-          - acceptance_db in acceptance_dbs_up.stdout_lines
-          - acceptance_nc.results[0].rc != 0
-          - acceptance_nc.results[1].rc == 0
-          - acceptance_doctor.rc == 0
-        fail_msg: >-
-          {{ acceptance_db }} listed: {{ acceptance_db in acceptance_dbs_up.stdout_lines }};
-          port {{ acceptance_port }} probe rc {{ acceptance_nc.results[0].rc }} (expected refused),
-          user rc {{ acceptance_nc.results[1].rc }} (expected 0);
-          doctor rc {{ acceptance_doctor.rc }}: {{ acceptance_doctor.stdout_lines | select('match', '^(FAIL|WARN) ') | join(' | ') }}
-        quiet: true
-
     - name: Run hades down in the worktree
-      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ acceptance_wt }} && hades down --strict'
+      ansible.builtin.command: runuser -l {{ dev.name }} -c 'cd {{ acceptance_wt }} && hades down --strict'
       changed_when: true
 
-    - name: Assert Caddy no longer routes the host name
-      ansible.builtin.uri:
-        url: http://{{ hades_loopback_address }}:{{ caddy_port }}/
-        headers:
-          Host: "{{ acceptance_entry.Host }}"
-        status_code: 302
-        follow_redirects: none
+    - name: Request the worktree's name through the box's Caddy again # noqa: command-instead-of-module
+      ansible.builtin.command: "{{ acceptance_curl }}"
+      delegate_to: "{{ hades_box }}"
+      register: acceptance_web_down
+      changed_when: false
 
-    - name: Stat the site files and the port claim
+    - name: Stat the site file and the port claim
       ansible.builtin.stat:
         path: "{{ item }}"
         follow: false
       register: acceptance_gone
       loop:
-        - "{{ hades_registry_root }}/sites/{{ acceptance_entry.Label }}.caddy"
-        - "{{ hades_live_dir }}/{{ acceptance_entry.Label }}.caddy"
-        - "{{ hades_registry_root }}/ports/{{ acceptance_port }}"
+        - "{{ acceptance_state }}/sites/{{ acceptance_entry.Label }}.caddy"
+        - "{{ acceptance_state }}/ports/{{ acceptance_entry.Port }}"
 
     - name: List the dev databases again
       ansible.builtin.command: "{{ acceptance_psql }}"
-      environment:
-        PGPASSWORD: "{{ dev_pg_password }}"
       register: acceptance_dbs_down
       changed_when: false
 
-    - name: Run hades gc as root
-      ansible.builtin.command: hades gc
-      changed_when: false
-
-    - name: Assert hades down removed the sites, the port claim and the database
+    - name: Assert up served the worktree, doctor passed and down removed its name, site, port and database
       ansible.builtin.assert:
         that:
+          - acceptance_web_up.stdout == '200'
+          - acceptance_db in acceptance_dbs_up.stdout_lines
+          - acceptance_doctor.rc == 0
+          - acceptance_web_down.stdout == '302'
           - acceptance_gone.results | selectattr('stat.exists') | list == []
           - acceptance_db not in acceptance_dbs_down.stdout_lines
         fail_msg: >-
-          left behind: {{ acceptance_gone.results | selectattr('stat.exists') | map(attribute='item') | list }}
-          {{ acceptance_db if acceptance_db in acceptance_dbs_down.stdout_lines else '' }}
+          through the box: {{ acceptance_web_up.stdout }} up (want 200), {{ acceptance_web_down.stdout }} down (want 302);
+          {{ acceptance_db }} listed up/down: {{ acceptance_db in acceptance_dbs_up.stdout_lines }}/{{ acceptance_db in acceptance_dbs_down.stdout_lines }};
+          left behind: {{ acceptance_gone.results | selectattr('stat.exists') | map(attribute='item') | list }};
+          doctor rc {{ acceptance_doctor.rc }}: {{ acceptance_doctor.stdout_lines | select('match', '^(FAIL|WARN) ') | join(' | ') }}
         quiet: true
 
     # The sample's setup never runs node, so this hades.toml does.
@@ -188,8 +139,8 @@
       ansible.builtin.copy:
         dest: "{{ acceptance_wt }}/{{ item.name }}"
         content: "{{ item.content }}"
-        owner: "{{ acceptance_user }}"
-        group: "{{ acceptance_user }}"
+        owner: "{{ dev.name }}"
+        group: "{{ dev.name }}"
         mode: "0644"
       loop:
         - {name: .tool-versions, content: "node 1.0.0\n"}
@@ -198,13 +149,13 @@
         label: "{{ item.name }}"
 
     - name: Run hades up in the worktree pinning node 1.0.0
-      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ acceptance_wt }} && hades up --ade shell'
+      ansible.builtin.command: runuser -l {{ dev.name }} -c 'cd {{ acceptance_wt }} && hades up --ade shell'
       register: acceptance_bad_up
       changed_when: true
       failed_when: false
 
-    - name: List the user's Node versions there
-      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ acceptance_wt }} && mise ls --json node'
+    - name: List the developer's Node versions there
+      ansible.builtin.command: runuser -l {{ dev.name }} -c 'cd {{ acceptance_wt }} && mise ls --json node'
       register: acceptance_bad_node
       changed_when: false
 
@@ -228,7 +179,7 @@
       failed_when: false
 
     - name: Release whatever the worktree still holds
-      ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'cd {{ acceptance_wt }} && hades down'
+      ansible.builtin.command: runuser -l {{ dev.name }} -c 'cd {{ acceptance_wt }} && hades down'
       changed_when: false
       failed_when: false
 

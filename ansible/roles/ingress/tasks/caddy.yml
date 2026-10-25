@@ -8,22 +8,11 @@
     signed_by: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
   register: ingress_caddy_repo
 
-- name: Create Caddy's unit drop-in directory
+- name: Create Caddy's config directory
   ansible.builtin.file:
-    path: /etc/systemd/system/caddy.service.d
+    path: "{{ caddy_config | dirname }}"
     state: directory
     mode: "0755"
-
-# Read by `caddy run` and by `caddy reload` (ExecReload): Caddy's API on a unix socket that only
-# the caddy account can connect to, instead of TCP 2019 open to every local user.
-- name: Give Caddy its API socket
-  ansible.builtin.copy:
-    content: |
-      [Service]
-      Environment=CADDY_ADMIN=unix/{{ ingress_caddy_api_socket }}
-    dest: /etc/systemd/system/caddy.service.d/hades.conf
-    mode: "0644"
-  notify: caddy restart
 
 # The package's own Caddyfile serves :80 and its postinst starts Caddy, so ours goes first: dpkg
 # keeps an existing conffile. Every later change goes through the validated task below.

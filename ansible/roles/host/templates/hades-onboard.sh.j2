@@ -1,7 +1,7 @@
 #!/bin/sh
 # {{ ansible_managed }}
-# hades-onboard [HOST]: a developer's first-login steps on the box; HOST, the name the developer
-# reaches it by, only appears in the Paseo Desktop address. Safe to run again: each step says
+# hades-onboard [ALIAS]: a developer's first-login steps in their VM; ALIAS, the name their laptop
+# reaches the VM by, only appears in the Paseo Desktop address. Safe to run again: each step says
 # "already done" or does its work. hades doctor decides whether onboarding is complete; every
 # complete run prints the connection details.
 set -u
@@ -40,6 +40,20 @@ if [ -n "$failed" ]; then
   exit 1
 fi
 
+# The developer's tailnet carries Paseo on the phone and Orca. tailscale up prints the login link
+# and waits for it. Orca pairs on the tailnet address, so it starts again once there is one.
+tailnet() { tailscale status --json 2>/dev/null | jq -r "$1"; }
+if [ "$(tailnet .BackendState)" = Running ]; then
+  echo "tailscale: already done"
+elif ! sudo tailscale up --hostname={{ inventory_hostname }}; then
+  echo "onboarding incomplete: tailscale up failed; run hades-onboard again"
+  exit 1
+fi
+since=$(date '+%Y-%m-%d %H:%M:%S')
+if systemctl --user cat orca.service >/dev/null 2>&1; then
+  systemctl --user reset-failed orca.service; systemctl --user restart orca.service
+fi
+
 if ! {{ hades_bin_dir }}/hades doctor; then
   echo "onboarding incomplete: fix the FAIL lines above and run hades-onboard again"
   exit 1
@@ -47,16 +61,20 @@ fi
 mkdir -p "$dir" && touch "$dir/onboarded"
 echo "onboarding complete"
 
-# Paseo Desktop dials Paseo's default port, 6767, unless the address names another.
+ts=$(tailnet '.Self.DNSName | rtrimstr(".")')
 if systemctl --user cat paseo.service >/dev/null 2>&1; then
-  port=$(systemctl --user show -p Environment --value paseo.service | sed -n 's/.*PASEO_LISTEN=[^ ]*:\([0-9]*\).*/\1/p')
-  query="?daemonPort=$port"
-  [ "$port" != 6767 ] || query=
   echo "Paseo Desktop: Settings > Add host > Remote SSH"
-  echo "  ssh://$(id -un)@$host$query"
+  echo "  ssh://$(id -un)@$host"
   echo "  Daemon password: $(sed -n 's/^PASEO_PASSWORD=//p' "$dir/paseo.env")"
+  echo "Paseo on your phone (Tailscale on): $ts:6767, same password"
 fi
+# Orca prints its pairing URL once it is up.
 if systemctl --user cat orca.service >/dev/null 2>&1; then
-  url=$(journalctl --user -u orca.service -o cat | grep -o 'https://[^ ]*' | tail -1)
-  if [ -n "$url" ]; then echo "Orca pairing: $url"; else echo "Orca pairing URL: journalctl --user -u orca.service"; fi
+  for _ in $(seq 60); do
+    url=$(journalctl --user -u orca.service --since "$since" -o cat | sed -n 's/^Pairing URL: //p' | tail -1)
+    [ -z "$url" ] || break
+    sleep 1
+  done
+  echo "Orca pairing: ${url:-not printed yet, see journalctl --user -u orca.service}"
 fi
+echo "Tailscale: disable key expiry for $ts in your Tailscale admin console, or it leaves your tailnet after 180 days."

@@ -1,109 +1,53 @@
 ---
-# Per present dev user and listed ADE. Root may reach every dev port through loopback isolation,
-# so the probes run as root.
-- name: Read each listed ADE unit's state
-  ansible.builtin.command: systemctl --user -M {{ item.0.name }}@ show {{ item.1 }}.service -p ActiveState -p UnitFileState # noqa: command-instead-of-module
-  become: true
-  register: ade_test_unit
+# One developer's VM, as root inside it: a unit exactly for each ADE the developer lists, Paseo
+# running and answering on its port, Orca enabled (it starts once Tailscale is logged in).
+- name: Read the ADE units # noqa: command-instead-of-module
+  ansible.builtin.command: systemctl --user -M {{ dev.name }}@ show {{ item }}.service -p LoadState -p ActiveState -p UnitFileState
+  register: ade_test_units
   changed_when: false
-  failed_when: false
-  loop: "{{ dev_present | subelements('ades') }}"
-  loop_control:
-    label: "{{ item.0.name }} {{ item.1 }}"
+  loop: [paseo, orca]
 
-- name: Read each listed ADE's listeners
-  ansible.builtin.command: ss -Hltnpe 'sport = :{{ item.0[item.1 ~ '_port'] }}'
-  become: true
-  register: ade_test_ss
-  changed_when: false
-  loop: "{{ dev_present | subelements('ades') }}"
-  loop_control:
-    label: "{{ item.0.name }} {{ item.1 }}"
-
-# Every listener line must show the ADE's address and port, the user's uid and the user's unit
-# cgroup (ss prints them in that order). Paseo's node process renames itself "Paseo Daemon", so
-# the process name is not matched; Orca binds every address.
-- name: Assert each listed ADE runs enabled, from its user's unit, on its address only
+- name: Assert each listed ADE's unit is enabled, Paseo's active, and an unlisted one has none
   ansible.builtin.assert:
-    that:
-      - "'ActiveState=active' in ade_test_unit.results[i].stdout_lines"
-      - "'UnitFileState=enabled' in ade_test_unit.results[i].stdout_lines"
-      - ade_test_listeners | length > 0
-      - ade_test_listeners | select('search', ade_test_line) | list | length == ade_test_listeners | length
-    fail_msg: |-
-      {{ item.0.name }} {{ item.1 }}: {{ ade_test_unit.results[i].stdout_lines | join(', ') }} {{ ade_test_unit.results[i].stderr }}
-      expected listeners on {{ ade_test_address }}:{{ item.0[item.1 ~ '_port'] }} from uid {{ item.0.uid }}'s {{ item.1 }}.service:
-      {{ ade_test_listeners | join('\n') or 'none' }}
+    that: >-
+      item.stdout_lines is superset(['UnitFileState=enabled'] + (['ActiveState=active'] if item.item == 'paseo' else []))
+      if item.item in dev.ades else 'LoadState=not-found' in item.stdout_lines
+    fail_msg: "{{ dev.name }} lists {{ dev.ades }}; {{ item.item }}.service: {{ item.stdout_lines | join(', ') }}"
     quiet: true
-  loop: "{{ dev_present | subelements('ades') }}"
+  loop: "{{ ade_test_units.results }}"
   loop_control:
-    index_var: i
-    label: "{{ item.0.name }} {{ item.1 }}"
-  vars:
-    ade_test_listeners: "{{ ade_test_ss.results[i].stdout_lines }}"
-    ade_test_address: "{{ hades_loopback_address if item.1 == 'paseo' else '0.0.0.0' }}"
-    ade_test_line: >-
-      {{ '\s' ~ (ade_test_address | regex_escape) ~ ':' ~ item.0[item.1 ~ '_port'] ~ '\s.*\buid:' ~ item.0.uid
-         ~ '\b.*/user@' ~ item.0.uid ~ '\.service/app\.slice/' ~ item.1 ~ '\.service\b' }}
+    label: "{{ item.item }}"
 
-# One curl for both status codes; uri would need a request each.
-- name: Request Paseo's health and, without a token, its agents # noqa: command-instead-of-module
-  ansible.builtin.command: >-
-    curl -s -w '%{http_code}\n'
-    -o /dev/null http://{{ hades_loopback_address }}:{{ item.paseo_port }}/api/health
-    -o /dev/null http://{{ hades_loopback_address }}:{{ item.paseo_port }}/api/agents
-  become: true
-  register: ade_test_paseo_http
-  changed_when: false
-  failed_when: false
-  loop: "{{ dev_present | selectattr('ades', 'contains', 'paseo') }}"
-  loop_control:
-    label: "{{ item.name }}"
+- name: Check Paseo
+  when: "'paseo' in dev.ades"
+  block:
+    # One curl for both status codes; uri would need a request each.
+    - name: Request Paseo's health and, without a token, its agents # noqa: command-instead-of-module
+      ansible.builtin.command: >-
+        curl -s -w '%{http_code}\n'
+        -o /dev/null http://{{ hades_loopback_address }}:6767/api/health
+        -o /dev/null http://{{ hades_loopback_address }}:6767/api/agents
+      register: ade_test_paseo_http
+      changed_when: false
+      failed_when: false
+      # Paseo may still be starting after a restart.
+      until: ade_test_paseo_http.stdout_lines == ['200', '401']
+      retries: 10
+      delay: 3
 
-- name: Read each Paseo environment file
-  ansible.builtin.stat:
-    path: "{{ user_home_base }}/{{ item.name }}/.config/hades/paseo.env"
-  become: true
-  register: ade_test_paseo_env
-  loop: "{{ dev_present | selectattr('ades', 'contains', 'paseo') }}"
-  loop_control:
-    label: "{{ item.name }}"
+    - name: Stat Paseo's password file
+      ansible.builtin.stat:
+        path: "{{ vm_home }}/.config/hades/paseo.env"
+      register: ade_test_paseo_env
 
-- name: Assert Paseo answers health openly, refuses anonymous requests and keeps its password private
-  ansible.builtin.assert:
-    that:
-      - ade_test_paseo_http.results[i].stdout_lines == ['200', '401']
-      - ade_test_paseo_env.results[i].stat.exists
-      - ade_test_paseo_env.results[i].stat.mode == '0600'
-      - ade_test_paseo_env.results[i].stat.pw_name == item.name
-    fail_msg: >-
-      {{ item.name }}: health, agents = {{ ade_test_paseo_http.results[i].stdout_lines | join(', ') }} (want 200, 401);
-      paseo.env {{ ade_test_paseo_env.results[i].stat.mode | default('missing') }}
-      {{ ade_test_paseo_env.results[i].stat.pw_name | default('') }} (want 0600 {{ item.name }})
-    quiet: true
-  loop: "{{ dev_present | selectattr('ades', 'contains', 'paseo') }}"
-  loop_control:
-    index_var: i
-    label: "{{ item.name }}"
-
-- name: Look for every ADE unit file of each present user
-  ansible.builtin.stat:
-    path: "{{ user_home_base }}/{{ item.0.name }}/.config/systemd/user/{{ item.1 }}.service"
-  become: true
-  register: ade_test_unit_file
-  loop: "{{ dev_present | product(['paseo', 'orca']) }}"
-  loop_control:
-    label: "{{ item.0.name }} {{ item.1 }}"
-
-- name: Assert an ADE unit exists exactly for the ADEs a user lists
-  ansible.builtin.assert:
-    that:
-      - ade_test_unit_file.results[i].stat.exists == (item.1 in item.0.ades)
-    fail_msg: >-
-      {{ item.0.name }} lists {{ item.0.ades }}, but {{ item.1 }}.service
-      {{ 'exists' if ade_test_unit_file.results[i].stat.exists else 'is missing' }}
-    quiet: true
-  loop: "{{ dev_present | product(['paseo', 'orca']) }}"
-  loop_control:
-    index_var: i
-    label: "{{ item.0.name }} {{ item.1 }}"
+    - name: Assert Paseo answers health openly, refuses anonymous requests and keeps its password private
+      ansible.builtin.assert:
+        that:
+          - ade_test_paseo_http.stdout_lines == ['200', '401']
+          - ade_test_paseo_env.stat.mode | default('') == '0600'
+          - ade_test_paseo_env.stat.pw_name | default('') == dev.name
+        fail_msg: >-
+          {{ dev.name }}: health, agents = {{ ade_test_paseo_http.stdout_lines | join(', ') }} (want 200, 401);
+          paseo.env {{ ade_test_paseo_env.stat.mode | default('missing') }} {{ ade_test_paseo_env.stat.pw_name | default('') }}
+          (want 0600 {{ dev.name }})
+        quiet: true
