@@ -1,6 +1,6 @@
 # CLI reference
 
-`hades` sets up and tears down a git worktree for parallel development; `hades-port` prints a worktree's port for Paseo. Both are static binaries. They call `git` and `sh`; on a server also `sudo` and `caddy`; `direnv` is used when present.
+`hades` sets up and tears down a git worktree for parallel development; `hades-port` prints a worktree's port for Paseo. Both are static binaries. They call `git` and `sh`; on a server also `sudo` and `caddy`; `direnv` when present; `git secret` in a repository with `.gitsecret`; `join` calls `ssh`, `ssh-add`, `ssh-keygen` and `gh`.
 
 ## Install
 
@@ -55,34 +55,37 @@ hades [--root DIR] [--worktree DIR] [--name NAME] [--ade paseo|orca|wt|shell] [-
 ```
 
 `--root` is the main checkout, `--worktree` the worktree path, `--name` the worktree name, `--ade`
-which ADE's variables to read. All are usually detected.
+which ADE's variables to read.
 
 | Command | Does | Flags |
 |---|---|---|
-| `init` | Writes `hades.toml` (project name set, other keys commented out), the hook files for `--ade` (default `paseo,orca`) and `.gitignore` entries; prints the Phoenix config snippet. Existing files are left alone unless `--force`; a hook file that lacks hades gets the lines to add printed. Run once per project and commit the files. | `--ade paseo,orca,wt`, `--force` |
-| `up` | Claims a port, writes the manifest, the site file, `.env.worktree` and `.envrc` (`direnv allow` if direnv is installed), runs `git secret reveal -f` when `.gitsecret` exists, ensures the RabbitMQ vhost, publishes the site and reloads Caddy, points the MCP configs at this worktree, then runs the project's setup steps. It names the databases (`DB_SUFFIX`, `DATABASE_URL`); the setup steps create them, for example `mix setup`. Idempotent: a second run reuses the label and port. | `--dry-run`, `--skip-setup` |
+| `init` | Writes `hades.toml` (project name set, other keys commented out), the hook files for `--ade` (default `paseo,orca`) and `.gitignore` entries; prints the config snippet for `phoenix` and `elixir` projects and the worktrunk snippet for `--ade wt`. Existing files are left alone unless `--force`; a hook file that lacks hades gets the lines to add printed. Run once per project and commit the files. | `--ade paseo,orca,wt`, `--force` |
+| `up` | Claims a port (web projects), writes the manifest, the site file, `.env.worktree` and `.envrc` (`direnv allow` if direnv is installed), runs `git secret reveal -f` when `.gitsecret` exists, ensures the RabbitMQ vhost, publishes the site and reloads Caddy, points the MCP configs at this worktree, then runs the project's setup steps. It names the databases (`DB_SUFFIX`, `DATABASE_URL`); the setup steps create them, for example `mix setup`. Idempotent: a second run reuses the label and port. | `--dry-run`, `--skip-setup` |
 | `down` | Runs the project's teardown steps, drops the databases the manifest lists and its vhost, removes the site and reloads Caddy, releases the port, deletes the manifest. Best effort: every step is attempted, exit 0 unless `--strict`. | `--strict` |
 | `ls` | Every worktree known on this machine: label, port, host, path, owner. | `--mine`, `--json` |
 | `status` | Host summary: mode, port range and free ports, worktrees, Postgres and Caddy reachability. | `--json` |
-| `env` | The worktree's variables as export lines, in file order. | `--json` |
+| `env` | The worktree's variables as export lines, in file order. Before `up`: `hades: env: no .env.worktree in <path>; run hades up`. | `--json` |
 | `port` | The worktree's port and nothing else (what `hades-port` runs). | |
-| `doctor` | Checks host config, registry directories and permissions, Postgres, Caddy, RabbitMQ, git, tools, ADE hooks and manifests. Prints `ok`, `WARN` or `FAIL` per check; every FAIL ends with its fix. A repository without `paseo.json` or `orca.yaml` is a WARN. Exit 0 when nothing fails. | `--json` |
+| `doctor` | Checks host config, registry directories and permissions, Postgres, Caddy, RabbitMQ, git, tools, direnv, ADE hooks, manifests, and manifests written by another hades version. Prints `ok`, `WARN` or `FAIL` per check; every FAIL ends with its fix. A repository without `paseo.json` or `orca.yaml` is a WARN. Exit 0 when nothing fails. | `--json` |
 | `gc` | Releases the claims of worktrees whose directory vanished, or everything owned by a user. On a server it runs as root (a weekly timer runs it too); on a laptop as the user. | `--dry-run`, `--owner USER` |
 | `caddy-reload` | As root through sudo: validates every site file, mirrors them into Caddy's live directory, validates the Caddyfile, reloads Caddy. | `--check` |
 | `version` | Prints the version. | |
-| `join` | On a laptop: `hades join <host-or-ip>` makes the host reachable over SSH, then runs `ssh -t <alias> hades-onboard <alias>`. Writes a block between `# hades:begin <alias>` and `# hades:end <alias>` in `~/.ssh/config`, generates `~/.ssh/id_ed25519` when no key exists, and may upload a key with `gh ssh-key add`. The steps are in the [developer guide](developer.md#join). | `--as LOGIN` (default `$USER`), `--alias NAME` (default: the host's first DNS label; required for an IP), `--github LOGIN` (default: `gh`'s login) |
+| `join` | On a laptop: `hades join <host>` makes the box reachable over SSH, then runs `ssh -t <alias> hades-onboard <alias>`. The steps are in the [developer guide](developer.md#join). | `--as LOGIN` (default `$USER`), `--alias NAME` (default: the host's first DNS label; required for an IP), `--github LOGIN` (default: `gh`'s login) |
 
-How a worktree is identified: `--worktree`/`--name` flags, else Paseo's `PASEO_*` variables, else
-Orca's `ORCA_*` (the label is the workspace name), else git. The name, label and hostname are fixed
-at the first `up` and recorded in the manifest; a renamed branch keeps them. `down` then `up` gives a
-fresh label. A label another user already holds fails `up` with `label <l> taken by <user> for <path>`.
+How a worktree is identified: `--root`/`--worktree`/`--name` flags, else Paseo's `PASEO_*`
+variables, else Orca's `ORCA_*`, else git. The name is the branch (Paseo, git; the directory name on
+a detached HEAD) or the workspace name (Orca). The label is the host's `label_template` rendered,
+default `<project>-<name>`, at most 63 characters. The name, label and hostname are fixed at the
+first `up` and recorded in the manifest; a renamed branch keeps them. `down` then `up` gives a fresh
+label. A label held by another user, or by your own manifest for another worktree path, fails `up`
+with `label <l> taken by <user> for <path>`.
 
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | 0 | Success. `--help` and `-h` print the usage on stdout and exit 0, for `hades` and every command. |
-| 1 | Failure, usually as `hades: <command>: <reason>` on stderr. |
+| 1 | Failure, as `hades: <command>: <reason>` on stderr; `caddy-reload` prints `caddy-reload: <reason>`. |
 | 2 | Usage error: an unknown command, flag or argument. |
 
 `join` differs:
@@ -114,7 +117,7 @@ The Ansible collection installs these beside `hades`.
 | `<sites_dir>/<label>.caddy` | `import worktree <host> <port>`; `caddy-reload` mirrors it into Caddy's live directory. |
 | `.env.worktree` (in the worktree) | `KEY=VALUE` lines, fully owned by hades, rewritten each run. |
 | `.envrc` (in the worktree) | A block between `# hades:begin` and `# hades:end` for direnv; the rest of the file is left alone. |
-| MCP configs | In whichever of `.mcp.json`, `.codex/config.toml`, `.gemini/settings.json`, `.cursor/mcp.json`, `.grok/settings.json` exist: the chrome-devtools entry (server) and Tidewave at this worktree's port (web projects). Marked `skip-worktree`, so `git status` hides the edit; undo with `git update-index --no-skip-worktree <file>`. |
+| MCP configs | In whichever of `.mcp.json`, `.codex/config.toml`, `.gemini/settings.json`, `.cursor/mcp.json`, `.grok/settings.json` exist: a `tidewave` entry at this worktree's port, for web projects with Tidewave. `.mcp.json` also gets a `chrome-devtools` entry when the host config sets `chrome_path`. Marked `skip-worktree`, so `git status` hides the edit; undo with `git update-index --no-skip-worktree <file>`. |
 
 Variables (web projects get all of them; others get no `PORT`, `PHX_HOST`, `HADES_URL`):
 
@@ -147,7 +150,7 @@ databases = ["shop_dev", "shop_test"]   # base names; default from the Mix app n
 SHOP_ENDPOINT = "{{host}}"       # placeholders: host, port, url, suffix, name, project, label
 
 [services.rabbitmq]
-vhost = true                     # server mode: a vhost <label>, exported as RABBITMQ_VHOST and AMQP_URL
+vhost = true                     # a vhost <label>, exported as RABBITMQ_VHOST and AMQP_URL; skipped with a warning on a laptop or a host config without [rabbitmq]
 
 [mcp]
 tidewave = true                  # default: detected from mix.lock
@@ -203,7 +206,7 @@ Registry directories must be root-owned, setgid and sticky, group-writable by a 
 
 | ADE | File | Content |
 |---|---|---|
-| Paseo | `paseo.json` | `worktree.setup: ["hades up"]`, `worktree.teardown: ["hades down"]`, `servicePorts.portScript: "hades-port"` (Paseo runs it to learn the port of a declared service). A failing teardown aborts the removal; `down` exits 0 unless `--strict`. |
+| Paseo | `paseo.json` | `worktree.setup: ["hades up"]`, `worktree.teardown: ["hades down"]`, `worktree.servicePorts.portScript: "hades-port"` (Paseo runs it to learn the port of a declared service). A failing teardown aborts the removal; `down` exits 0 unless `--strict`. |
 | Orca | `orca.yaml` | `scripts.setup: hades up`, `scripts.archive: hades down`, `setupAgentStartupPolicy: wait-for-setup`. Orca aborts archiving on a failed hook unless `--allow-failed-archive-hook`. |
 | worktrunk | `.config/wt.toml` | `pre-start = "hades up --name {{ branch }}"`, `pre-remove = "hades down --name {{ branch }}"` (printed, not written). |
 
@@ -211,7 +214,7 @@ Hooks run in `bash` without profile files, so hades prepends to `PATH`, when pre
 
 ## Safety rules
 
-- `hades` never drops a database, releases a port, removes a site or deletes a vhost that the manifest it acts on does not list, and never acts on another user's manifest, except `gc` as root on vanished worktrees.
+- `hades` never drops a database, releases a port, removes a site or deletes a vhost that the manifest it acts on does not list, and never acts on another user's manifest, except as root: `gc` on vanished worktrees or with `--owner`, and `down` after checking the manifest's claims.
 - It modifies no tracked file other than the MCP configs, and never commits, pushes or changes branches.
 - `up` rolls back what it claimed in the failing run, nothing older; a failing setup step keeps the manifest and env files.
 - Credentials reach project commands only as the documented variables, written nowhere but the two env files in the worktree.

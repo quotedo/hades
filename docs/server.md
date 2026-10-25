@@ -1,28 +1,26 @@
 # Server reference
 
-For the operator of a hades server: the Ansible collection `quotedo.hades` in `ansible/`. The
+For the administrator of a hades server: the Ansible collection `quotedo.hades` in `ansible/`. The
 developer's side is in the [developer guide](developer.md); the CLI in the [CLI reference](cli.md).
 
 ## Rules the server enforces
 
 - One Linux account per developer, with its own home, ports, ADE daemon and credentials.
-- Among dev accounts, only those with `admin: true` are in group `sudo`, password required. The account Ansible connects with keeps its own sudo.
 - Developers cannot install software: tools and packages come from the inventory.
 - Agents run as the developer, with the developer's own credentials.
-- Secrets reach the host over a task's stdin, never through a file on the controller or a command line, except private Hex keys (see [Known limits](#known-limits)).
-- The roles never remove packages, never restart Docker, never touch workloads listed as protected, and never delete anything in Cloudflare.
-- In `/etc/ssh` the roles write one file, `sshd_config.d/hades-allowusers.conf` (see [Administrator and sshd](#administrator-and-sshd)).
+- Secrets reach the box over a task's stdin, never through a file on the controller or a command line, except private Hex keys (see [Known limits](#known-limits)).
+- The roles never remove packages, never restart Docker and never delete anything in Cloudflare.
 
 ## Requirements
 
 | | |
 |---|---|
-| Target | Ubuntu 24.04+ or Debian 13+, x86_64; tested on Ubuntu 26.04. The VPN role is Ubuntu only. |
-| Controller | `ansible-core` 2.17+ (for example `pipx install ansible-core`), then `ansible-galaxy collection install -r requirements.yml` in `ansible/`. |
+| Target | Ubuntu 24.04+ or Debian 13+, x86_64. The VPN role is Ubuntu only. |
+| Controller | `ansible-core` 2.17+ (for example `pipx install ansible-core`), then `ansible-galaxy collection install -r requirements.yml` in `ansible/`. `sha256sum` (GNU coreutils) on `PATH`: the host role checks the release with it. |
 | GitHub | `gh` logged in on the controller with read access to the hades repository: the host role downloads the private release with it. It ignores `GH_TOKEN`; without a keyring login, set `hades_local_binary_dir`. |
-| Access | A sudo-capable account on the host, key-only SSH. |
+| Access | A sudo-capable account on the box, key-only SSH. |
 | sshd | `AllowAgentForwarding yes`; with an `admin: true` user also `PasswordAuthentication no` and `KbdInteractiveAuthentication no`. Set them in your own sshd drop-in; preflight checks them. |
-| Cloudflare | The domain as a zone of your account. Zero Trust on the free plan, with One-time PIN login. An API token with Account › Cloudflare Tunnel Edit, Access: Apps and Policies Edit, Access: Organizations Edit, and Zone › DNS Edit. |
+| Cloudflare | The domain as a zone of your account. Zero Trust on the free plan; the role sets no login method, so enable One-time PIN under Zero Trust > Settings > Authentication. An API token with Account › Cloudflare Tunnel Edit, Access: Apps and Policies Edit, Access: Organizations Edit, and Zone › DNS Edit. |
 | Optional | Tailscale for Orca, with a pre-authorised auth key; an AmneziaWG config for the intranet VPN. |
 
 ## Apply and verify
@@ -38,8 +36,8 @@ ansible-playbook playbooks/site.yml
 ansible-playbook playbooks/verify.yml
 ```
 
-`site.yml` runs preflight first under every tag. Preflight checks the inventory on the controller,
-then sshd and `tools` on the host, so a wrong setup fails in seconds.
+`site.yml` runs preflight first under every tag. Preflight checks the inventory, `tools` included,
+on the controller, then sshd on the box, so a wrong setup fails in seconds.
 
 | Situation | What to do or expect |
 |---|---|
@@ -48,20 +46,19 @@ then sshd and `tools` on the host, so a wrong setup fails in seconds.
 | No Cloudflare variables | Add `--skip-tags cloudflared`. |
 | No VPN | `vpn_enabled: false` skips the `vpn` role. |
 | Part of the server | `--tags <tag>,...` from the table below. Preflight and loopback isolation run under any tag; `--skip-tags isolation` leaves isolation out. |
-| Check the inventory only | `ansible-playbook playbooks/preflight.yml`; it changes nothing. |
+| Check without changing anything | `ansible-playbook playbooks/preflight.yml`: the inventory, then sshd on the box. `--skip-tags sshd` checks the inventory alone. |
 | From a site repository | `ansible-galaxy collection install git+ssh://git@github.com/quotedo/hades.git#/ansible/`, then `import_playbook` `quotedo.hades.site` and `quotedo.hades.verify`, with `-i` naming your inventory. |
 
 | Tag | Installs |
 |---|---|
 | `host` | packages, kernel settings, hades CLI and registry, tool store, agent CLIs, Paseo, Orca, Chrome for Testing, backups, `hades-status`, weekly `hades gc`, hourly `hades-keys`, `hades-onboard`, and the `protected` tasks |
 | `protected` | resource floor and caps for pre-existing workloads; part of `host` |
-| `postgres` | dev cluster on loopback, `hades.slice` |
-| `services` | RabbitMQ (AMQP, MQTT, management) and LocalStack (S3) containers on loopback, Redis when listed; Docker log rotation in the compose file |
+| `postgres` | dev cluster on loopback from the PGDG repository, `hades.slice` |
+| `services` | RabbitMQ (AMQP, MQTT, management) and LocalStack (S3) containers on loopback, Redis when listed; Docker log rotation in the compose file; Docker CE from Docker's repository when `docker compose` is missing |
 | `ingress` | Caddy, Cloudflare tunnel, DNS and Access (tag `cloudflared`), Tailscale and its login (tag `tailscale`) |
-| `user` | accounts, SSH keys, the administrator's password, resource policy, ADE units, GPG keys, repository lists, the sshd `AllowUsers` drop-in; offboarding |
+| `user` | accounts, SSH keys, sudo passwords, resource policy, ADE units, GPG keys, repository lists, the sshd `AllowUsers` drop-in; offboarding |
 | `vpn` | AmneziaWG tunnel |
 | `isolation` | loopback isolation rules (nftables) |
-| `sshd` | preflight's sshd check on the host |
 
 ## Inventory
 
@@ -72,9 +69,10 @@ then sshd and `tools` on the host, so a wrong setup fails in seconds.
 | `ansible_host`, `ansible_user` | How Ansible reaches the box: a sudo-capable account. |
 | `hades_domain` | Worktree URLs are `https://<label>.<domain>`. A Cloudflare zone of the account, not a subdomain of one. |
 | `hades_label_template` | `!unsafe` string, default `{{project}}-{{name}}`. Use `{{project}}-{{user}}-{{name}}` when developers share projects, or two developers on one branch collide. |
-| `hades_version` | A published CLI release, default `0.1.0`. The controller downloads `hades_<version>_linux_amd64.tar.gz` and `checksums.txt`, checks the archive, and installs `hades` and `hades-port` when the host's version differs. |
+| `hades_version` | A published CLI release, default `0.1.0`, tagged `v<version>`. The controller downloads `hades_<version>_linux_amd64.tar.gz` and `checksums.txt`, checks the archive, and installs `hades` and `hades-port` when the box's version differs. |
 | `hades_local_binary_dir` | Instead of the release: a controller directory holding `hades` and `hades-port` built for linux/amd64. |
-| `dev_services` | Any of `rabbitmq`, `localstack`, `redis`; empty disables the stack. |
+| `dev_services`, `localstack_buckets` | Any of `rabbitmq`, `localstack`, `redis`; empty disables the stack. S3 buckets created at every LocalStack start, default `[]`. |
+| `dev_pg_major` | Dev Postgres major, default 18. A box whose PGDG suite lacks it needs the newest major it has. |
 | `dev_repos` | Clone URLs every developer gets, default `[]`; `hades-onboard` clones them after the developer's GitHub login. The apply clones nothing. |
 | `tools` | Tool to a list of exact versions; the first is the default. Keys are mise names (`node`, `erlang`, `elixir`, `python`, `go`, `kubectl`, `gh`); `erlang` before `elixir`. Must include `node` (the agent CLIs) and `gh` (`hades-onboard`). Default: `node` and `gh` only. |
 | `host_extra_packages` | Extra apt packages, for example `podman`. Never removed. |
@@ -84,14 +82,14 @@ then sshd and `tools` on the host, so a wrong setup fails in seconds.
 | `access_session` | Access session length, default `720h`, set on the application and on the account's Access organization. |
 | `cloudflare_team` | Zero Trust team name, used only when the role creates the Access organization. Default `hades-<domain with dots replaced by dashes>`. |
 | `tailscale_enabled` | Run `tailscaled`. Default: true exactly when a present user lists `orca`. |
-| `vpn_enabled`, `vpn_conf_env`, `vpn_probe` | Intranet VPN: on or off, the environment variable holding this host's config, one `<ip>:<port>` verify must reach. |
+| `vpn_enabled`, `vpn_conf_env`, `vpn_probe` | Intranet VPN: on or off, the environment variable holding this box's config, one `<ip>:<port>` verify must reach. |
 | `capped_cpu_weight`, `capped_memory_max` | Caps for `protected.capped_users` and `capped_units`. |
 | `protected` | `floor` (guarantee `system.slice` resources), `capped_users`, `capped_units`, `blocked_ports` (ports dev accounts may not reach, such as a production Postgres), `private_homes` (made 0750). Optional. |
 | `dev_users` | The developers; see below. |
 
 Resource numbers and ports can be overridden per host: `roles/host/defaults/main.yml`,
 `roles/postgres/defaults/main.yml` and `roles/services/defaults/main.yml`. Resource defaults assume
-a 128 GB host.
+a 128 GB box.
 
 A developer entry needs four keys:
 
@@ -107,11 +105,11 @@ dev_users:
 |---|---|---|
 | `name` | required | Login, `^[a-z][a-z0-9_-]{0,31}$`, unique after dropping characters outside `[a-z0-9]`. |
 | `uid` | required | Fixed uid, at least 1000. The role never takes over an existing account with another uid. |
-| `github` | required unless `ssh_keys` is set | `authorized_keys` follows `https://github.com/<github>.keys`. An apply fails with `GitHub served no keys for <github>` on a wrong login. |
+| `github` | required unless `ssh_keys` is set | `authorized_keys` follows `https://github.com/<github>.keys`. An apply fails with `GitHub served no keys for <github>` on a wrong GitHub login. |
 | `email` | required with Cloudflare | Their Cloudflare Access login. |
 | `ades` | `[paseo]` | `paseo`, `orca` or both. `orca` needs Tailscale. Removing an ADE stops and removes its unit at the next apply. |
-| `paseo_port` | uid + 10000 | Paseo's loopback port. Listed ports must be unique. |
-| `orca_port` | uid + 20000 | Orca's port, reachable on `lo` and `tailscale0` only. |
+| `paseo_port` | uid + 10000 | The Paseo port, on loopback. Listed ports must be unique. |
+| `orca_port` | uid + 20000 | The Orca port, reachable on `lo` and `tailscale0` only. |
 | `repos` | `dev_repos` | Replaces `dev_repos` for this developer. |
 | `state` | `present` | `absent` offboards the developer. |
 | `admin` | `false` | `true`: group `sudo`, password required. |
@@ -124,15 +122,15 @@ Exported in the controller's shell before any run; `.env.example` lists them.
 
 | Variable | Used for |
 |---|---|
-| `CF_ACCOUNT_ID`, `CF_API_TOKEN` | Cloudflare tunnel, DNS and Access. Without them, add `--skip-tags cloudflared`. |
-| The variable `vpn_conf_env` names, such as `AMNEZIA_WG_CONF_BOX` | The host's AmneziaWG config, multi-line: `export AMNEZIA_WG_CONF_BOX="$(cat box.conf)"`. |
+| `CF_ACCOUNT_ID`, `CF_API_TOKEN` | Cloudflare tunnel, DNS and Access. |
+| The variable `vpn_conf_env` names, such as `AMNEZIA_WG_CONF_BOX` | The box's AmneziaWG config, multi-line (see [VPN](#vpn-intranet)). |
 | `key_env`, `fingerprint_env` of each `hex_repos` entry | Private Hex repository keys. |
 | `TS_AUTHKEY` | Optional: a pre-authorised Tailscale auth key (see [Tailscale](#tailscale)). |
 
-Generated on the host and never printed by an apply: GPG keys, and each Paseo password in
-`~/.config/hades/paseo.env`, which `hades-onboard` shows its developer. The administrator's sudo
-password is printed once (see [Administrator and sshd](#administrator-and-sshd)). The dev Postgres
-credentials are `dev_pg_user`/`dev_pg_password`, default `postgres`/`postgres`.
+Generated on the box and never printed by an apply: GPG keys, and each Paseo password in
+`~/.config/hades/paseo.env`, which `hades-onboard` shows its developer. A sudo password is printed
+once (see [Sudo and sshd](#sudo-and-sshd)). The dev Postgres credentials are
+`dev_pg_user`/`dev_pg_password`, default `postgres`/`postgres`.
 
 ## Cloudflare
 
@@ -173,22 +171,22 @@ Orca pairs over Tailscale; Tailscale runs when a present user lists `orca`, or w
 
 | | |
 |---|---|
-| Installs | `ppa:amnezia/ppa`; `amneziawg` (DKMS kernel module), `amneziawg-tools`, the running kernel's headers. AmneziaWG 2.0 configs are accepted. |
+| Installs | `ppa:amnezia/ppa`; `amneziawg` (DKMS kernel module), `amneziawg-tools`, the running kernel's headers. |
 | Writes | `/etc/amnezia/amneziawg/intranet.conf` (root 0600) over stdin; unit `awg-quick@intranet`. A changed config restarts the tunnel. |
 | Guards | Preflight rejects `0.0.0.0/0`, `::/0`, their `/1` halves and any `DNS =` line. Verify asserts no default route uses the tunnel, a handshake under 180 s, the DKMS module for the running kernel, and `vpn_probe` answering. `sudo hades-status` prints the handshake age. |
 | Scope | Host-wide: every account reaches the intranet; identity there comes from each developer's own credentials. |
-| Kernel upgrade | The module is built for the running kernel only. After a reboot into a new kernel, apply `--tags vpn` again (verify fails until then). The vendor module can lag a new kernel; if its build fails, stay on the previous kernel until the PPA catches up. |
+| Kernel upgrade | The module is built for the running kernel only. After a reboot into a new kernel, apply `--tags vpn` again; verify fails until then. A kernel the PPA's module does not build for: boot the previous kernel. |
 | Rollback | `systemctl disable --now awg-quick@intranet`; `apt remove amneziawg amneziawg-dkms amneziawg-tools dkms` and the added `linux-headers-*`; delete `/etc/apt/sources.list.d/amnezia-ppa.sources` and `/etc/apt/keyrings/amnezia-ppa.asc`; set `vpn_enabled: false`. |
 
-## Administrator and sshd
+## Sudo and sshd
 
-- `admin: true` puts the user in group `sudo`; the distribution's rule asks for the user's password, so an agent cannot escalate.
-- While the administrator's password is locked or unset, the apply generates one and prints it once: `<name>'s sudo password, shown only now: <password>`. Nothing stores it.
-- A set password is never touched. The administrator changes it with `passwd`.
+- Among dev accounts, only those with `admin: true` are in group `sudo`; the distribution's rule asks for the user's password, so an agent cannot escalate. The account Ansible connects with keeps its own sudo.
+- While such a user's password is locked or unset, the apply generates one and prints it once: `<name>'s sudo password, shown only now: <password>`. Nothing stores it.
+- A set password is never touched. The user changes it with `passwd`.
 - A missed print: `sudo passwd -l <name>`, then apply `--tags user` again.
-- The administrator can read every home.
-- Where your own sshd files restrict logins with `AllowUsers`, the user role writes `/etc/ssh/sshd_config.d/hades-allowusers.conf` with `AllowUsers <present dev users>`; sshd adds it to yours. Elsewhere it removes that file.
-- A host that restricts logins with `AllowGroups` needs group `hades` added by you.
+- An `admin: true` user can read every home.
+- In `/etc/ssh` the roles write one file. Where your own sshd files restrict logins with `AllowUsers`, the user role writes `/etc/ssh/sshd_config.d/hades-allowusers.conf` with `AllowUsers <present dev users>`; sshd adds it to yours. Elsewhere it removes that file.
+- A box that restricts logins with `AllowGroups` needs group `hades` added by you.
 
 ## Tools
 
@@ -201,16 +199,12 @@ Orca pairs over Tailscale; Tailscale runs when a present user lists `orca`, or w
 
 1. Ask for their GitHub login and the email they will log in with.
 2. Add the four-key entry to `dev_users`, with `ades: [orca]` or `[paseo, orca]` for Orca.
-3. Apply `--tags user,ingress`; add `host` for the first Orca user.
+3. Apply `--tags user`, plus `ingress` when the entry has an `email` or is the box's first Orca user, plus `host` for the first Orca user.
 4. Verify `--tags user,ade,ingress`.
 5. Give them read access to the hades GitHub repository, so they can download the CLI.
 6. Send them the host name. They run `hades join <host>`; the [developer guide](developer.md) has the rest.
 7. Orca users: share the Tailscale machine with their account.
 8. Projects using git-secret: a key holder runs `git secret tell <name>+<inventory host>@<hades_domain>` with the key from `/etc/hades/keys/<name>.asc` (needs `gpg_key: true`).
-
-When they report `not authorised yet`, compare the GitHub login in the message with their entry, then
-run `sudo hades-keys <name>` on the box instead of waiting for the hourly refresh. A developer without
-GitHub sends the key `hades join` printed; it goes into `ssh_keys`.
 
 ## Offboarding a developer
 
@@ -231,7 +225,7 @@ interrupted before the account is deleted archives again under a new time stamp.
 ## Verify
 
 `verify.yml` with no tags runs every set below; `--tags <tag>` runs one. Every set is read-only
-except its own probes. The preflight fixtures in `tests/inventories/` run in CI.
+except its own probes.
 
 | Tag | Proves |
 |---|---|
@@ -241,8 +235,8 @@ except its own probes. The preflight fixtures in `tests/inventories/` run in CI.
 | `postgres` | dev cluster online on loopback, owner, unit in `hades.slice`, credentials, a wrong password refused |
 | `services` | containers on loopback in `hades.slice`, RabbitMQ and LocalStack answer, buckets exist |
 | `ingress` | Caddy on loopback, its API socket, apex redirect, gated paths, cloudflared, the edge redirects to the login, the Access policy equals the inventory, Tailscale running with `TS_AUTHKEY` |
-| `user` | accounts, lingering, resource policy, tools in a login shell, sudo only for administrators, blocked ports, `hades doctor`, every GitHub and static key in `authorized_keys`, the login list, the onboarding reminder in interactive shells only, administrators have a password, sshd admits every present user |
-| `ade` | each listed ADE unit and listener, Paseo's password, a unit exactly for each listed ADE |
+| `user` | accounts, lingering, resource policy, tools in a login shell, sudo only for `admin: true` users and each of them has a password, blocked ports, `hades doctor`, every GitHub and static key in `authorized_keys`, the login list, the onboarding reminder in interactive shells only, sshd admits every present user |
+| `ade` | each listed ADE unit and listener, the Paseo password, a unit exactly for each listed ADE |
 | `offboard` | absent users gone, nothing left behind, archived; GPG keys exported |
 | `protected` | floor, caps, private homes |
 | `vpn` | tunnel unit, no default route through it, handshake, DKMS module, probe |
@@ -255,18 +249,17 @@ After a reboot, run `verify.yml`.
 | Task | Do |
 |---|---|
 | Add or remove a developer | [Onboarding](#onboarding-a-developer), [Offboarding](#offboarding-a-developer). |
-| Add or remove an ADE for a developer | Edit `ades`, apply `--tags user` (add `host,ingress` for the first Orca user). A removed ADE's unit is stopped and deleted. |
+| Add or remove an ADE for a developer | Edit `ades`, apply with the tags of onboarding step 3. A removed ADE's unit is stopped and deleted. |
 | Add a tool version | Append to `tools`, apply `--tags host`; `--tags host,user` when the default Node changes. |
 | Move everyone to a new ADE or agent CLI version | Change `paseo_version`, `orca_version` or a pinned `agent_clis` entry; apply `--tags host,user`. |
 | Upgrade the hades CLI | Change `hades_version` to a published release, or rebuild into `hades_local_binary_dir`; apply `--tags host`. Developers reinstall the laptop CLI themselves. |
-| Refresh SSH keys now | `sudo hades-keys <login>` for one user, `sudo systemctl start hades-keys.service` for all. The timer runs hourly; `sudo hades-status` shows the last run. |
-| Rotate the administrator's password | The administrator runs `passwd`. |
+| Refresh SSH keys now | `sudo hades-keys <name>` for one user, `sudo systemctl start hades-keys.service` for all. The timer runs hourly; `sudo hades-status` shows the last run. |
 | Add a system package | `host_extra_packages`, apply `--tags host`. |
 | Vanished worktrees | `hades-gc.timer` runs `hades gc` as root weekly; `sudo hades gc` runs it now. |
-| Restore a user's ADE state | Stop the user's ADE unit, `sudo tar -xzf <backup_dir>/<user>-<date>.tar.gz -C /home/<user>`, start it. |
+| Restore a user's ADE state | Stop the user's ADE unit, `sudo tar -xzf <backup_dir>/<name>-<date>.tar.gz -C /home/<name>`, start it. |
 | Roll back an apply | Revert the inventory and apply again. Removed tool versions are reinstalled; packages the role installed stay. |
 | Protected workloads | `protected.floor`; caps in drop-ins named `20-hades-cap.conf`, so your `systemctl set-property` (`50-*`) still wins; `blocked_ports` enforced in `table inet hades`. |
-| Backups | Nightly at 03:30 per user: ADE state and agent logins in `backup_dir`, newest `host_backup_keep` (7) kept, root-only, on the box. |
+| Backups | Nightly between 03:30 and 04:00 per user: ADE state and agent logins in `backup_dir`, newest `host_backup_keep` (7) kept, root-only, on the box. |
 | Reboot | By hand; then run `verify.yml`. |
 | What is wrong | `sudo hades-status` (slices, pressure, OOM kills, disk, VPN handshake), `hades doctor` as a user, `verify.yml --tags <tag>`. |
 
@@ -278,4 +271,3 @@ After a reboot, run `verify.yml`.
 - Homes are not encrypted; use full-disk encryption at provisioning.
 - Isolation hooks the output path only: traffic from a container is not matched.
 - `hades-status` embeds the dev Postgres password, which every local account can read anyway.
-- The Orca unit has been verified with a headless smoke test, not in daily use.

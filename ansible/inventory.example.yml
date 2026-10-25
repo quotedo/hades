@@ -7,7 +7,7 @@ dev_servers:
       ansible_user: <SUDO_USER>
       hades_domain: <DOMAIN>
       hades_label_template: !unsafe '{{project}}-{{name}}'
-      # hades_version: "0.1.0"  # a published release, downloaded with the operator's gh
+      # hades_version: "0.1.0"  # a published release, tagged v<version>, downloaded with the administrator's gh
       # hades_local_binary_dir: /path/to/dist/linux_amd64  # development: a local linux/amd64 build instead of the release
       # Cloudflare Access admits every present dev user's email plus these emails or @domains.
       access_allow: []
@@ -44,8 +44,8 @@ dev_servers:
           # ades: [paseo]  # the default; paseo, orca or both
           # paseo_port: 12001  # the default: uid + 10000
           # orca_port: 22001  # the default: uid + 20000
-          # admin: false  # true: the box's one administrator, group sudo, password required
+          # admin: false  # true: group sudo, password required
           # ssh_keys: []  # static public keys, added to the GitHub ones
-          # gpg_key: false  # true: a signing key generated on the box
+          # gpg_key: false  # true: a GPG key for git-secret, generated on the box
           # repos: []  # the default: dev_repos
           # state: present  # absent offboards the developer
