@@ -8,7 +8,7 @@ hades_share: /opt/hades
 hades_bin_dir: "{{ hades_share }}/bin"
 
 # hades CLI
-hades_version: "0.1.0"
+hades_version: "0.2.0"
 # hades_local_binary_dir: a controller directory holding `hades` and `hades-port`; when set,
 # both are copied from there instead of fetching the release (development only).
 hades_config_dir: /etc/hades
