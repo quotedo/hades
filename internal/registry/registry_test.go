@@ -271,7 +271,7 @@ func chmodRegistry(t *testing.T, r *Registry, mode os.FileMode) {
 	if os.Getenv("CI") != "" {
 		skip = t.Fatalf
 	}
-	for _, d := range r.dirs() {
+	for _, d := range r.Dirs() {
 		if err := os.Chmod(d, mode); err != nil {
 			skip("cannot chmod %s here: %v", d, err)
 		}

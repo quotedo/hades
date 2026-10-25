@@ -16,8 +16,8 @@ func TestLoadHostValid(t *testing.T) {
 	if h.Domain != "example.test" || h.LabelTemplate != "{{project}}-{{name}}" || h.Postgres.Port != 5433 || h.RabbitMQ == nil {
 		t.Fatalf("%+v", h)
 	}
-	if r := h.Range(); r.Lo != 4100 || r.Hi != 4999 {
-		t.Fatal(r)
+	if h.Ports.Lo != 4100 || h.Ports.Hi != 4999 {
+		t.Fatal(h.Ports)
 	}
 }
 

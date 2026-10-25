@@ -288,7 +288,7 @@ func removeSite(ctx context.Context, d Deps, m *registry.Manifest, reload bool) 
 		return r, false
 	}
 	if reload {
-		r.Err = caddy.SudoReload(ctx, d.Run, d.Bin)
+		r.Err = caddy.SudoReload(ctx, d.Run, d.Bin, false)
 	}
 	return r, true
 }
@@ -340,16 +340,8 @@ func logResults(w io.Writer, prefix string, res []StepResult) {
 
 // failure names the failed steps when strict is set; nil otherwise.
 func failure(res []StepResult, strict bool) error {
-	if !strict {
-		return nil
-	}
-	var failed []string
-	for _, r := range res {
-		if r.Err != nil {
-			failed = append(failed, r.Step)
-		}
-	}
-	if len(failed) == 0 {
+	failed := failedSteps(res)
+	if !strict || len(failed) == 0 {
 		return nil
 	}
 	return fmt.Errorf("failed steps: %s", strings.Join(failed, ", "))

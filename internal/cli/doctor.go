@@ -97,7 +97,7 @@ func runChecks(bg context.Context, ctx *Context) []check {
 		checks = append(checks, checkRegistryPerms(d))
 	}
 	if d.Mode == config.Server {
-		if err := caddy.SudoCheck(bg, d.Run, d.Bin); err != nil {
+		if err := caddy.SudoReload(bg, d.Run, d.Bin, true); err != nil {
 			checks = append(checks, fail("caddy-reload", err))
 		} else {
 			checks = append(checks, pass("caddy-reload", "sudo -n "+d.Bin+" caddy-reload --check succeeded"))
@@ -189,15 +189,11 @@ func modeName(m config.Mode) string {
 	return "laptop"
 }
 
-func registryDirs(d lifecycle.Deps) []string {
-	return []string{d.Reg.PortsDir, d.Reg.SitesDir, d.Reg.ManifestsDir}
-}
-
 func checkRegistry(d lifecycle.Deps) check {
 	if err := d.Reg.Exists(); err != nil {
 		return fail("registry", err)
 	}
-	return pass("registry", strings.Join(registryDirs(d), ", "))
+	return pass("registry", strings.Join(d.Reg.Dirs(), ", "))
 }
 
 // checkRegistryPerms reports what a shared registry directory lacks (setgid,

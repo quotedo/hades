@@ -550,7 +550,7 @@ func (u *upRun) publishSite() (*undo, error) {
 	}
 	if u.opt.DryRun {
 		u.would("write site %s", path)
-		return nil, caddy.SudoReload(u.ctx, u.d.Run, u.d.Bin)
+		return nil, caddy.SudoReload(u.ctx, u.d.Run, u.d.Bin, false)
 	}
 	_, statErr := os.Lstat(path)
 	if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
@@ -568,11 +568,11 @@ func (u *upRun) publishSite() (*undo, error) {
 				if err := caddy.RemoveSite(sites, label); err != nil {
 					return err
 				}
-				return caddy.SudoReload(ctx, run, bin)
+				return caddy.SudoReload(ctx, run, bin, false)
 			},
 		}
 	}
-	return un, caddy.SudoReload(u.ctx, u.d.Run, u.d.Bin)
+	return un, caddy.SudoReload(u.ctx, u.d.Run, u.d.Bin, false)
 }
 
 // rewireMCP is step 9.

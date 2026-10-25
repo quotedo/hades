@@ -42,17 +42,18 @@ func New(h *config.Host) *Registry {
 		PortsDir:     h.PortsDir,
 		SitesDir:     h.SitesDir,
 		ManifestsDir: h.ManifestsDir,
-		Range:        h.Range(),
+		Range:        h.Ports,
 	}
 }
 
-func (r *Registry) dirs() []string {
+// Dirs lists the registry directories: ports, sites, manifests.
+func (r *Registry) Dirs() []string {
 	return []string{r.PortsDir, r.SitesDir, r.ManifestsDir}
 }
 
 // EnsureDirs creates the registry directories with the given mode (laptop mode).
 func (r *Registry) EnsureDirs(mode os.FileMode) error {
-	for _, d := range r.dirs() {
+	for _, d := range r.Dirs() {
 		if err := os.MkdirAll(d, mode); err != nil {
 			return err
 		}
@@ -101,7 +102,7 @@ func (r *Registry) PermProblems() ([]string, error) {
 		member[g] = true
 	}
 	var problems []string
-	for _, dir := range r.dirs() {
+	for _, dir := range r.Dirs() {
 		fi, err := os.Stat(dir)
 		if err != nil {
 			return nil, err
@@ -141,7 +142,7 @@ func (r *Registry) PermProblems() ([]string, error) {
 // Exists verifies that the registry directories exist. It never creates
 // anything.
 func (r *Registry) Exists() error {
-	for _, d := range r.dirs() {
+	for _, d := range r.Dirs() {
 		fi, err := os.Stat(d)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {

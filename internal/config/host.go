@@ -53,13 +53,14 @@ type RabbitMQ struct {
 // Host is what the machine offers: domain, registries, and shared services.
 type Host struct {
 	Domain        string
-	LabelTemplate string   `toml:"label_template"`
-	PortRange     string   `toml:"port_range"`
-	PortsDir      string   `toml:"ports_dir"`
-	SitesDir      string   `toml:"sites_dir"`
-	ManifestsDir  string   `toml:"manifests_dir"`
-	ToolPaths     []string `toml:"tool_paths"`
-	ChromePath    string   `toml:"chrome_path"`
+	LabelTemplate string    `toml:"label_template"`
+	PortRange     string    `toml:"port_range"`
+	Ports         PortRange `toml:"-"` // PortRange parsed
+	PortsDir      string    `toml:"ports_dir"`
+	SitesDir      string    `toml:"sites_dir"`
+	ManifestsDir  string    `toml:"manifests_dir"`
+	ToolPaths     []string  `toml:"tool_paths"`
+	ChromePath    string    `toml:"chrome_path"`
 	Caddy         Caddy
 	Postgres      Postgres
 	RabbitMQ      *RabbitMQ
@@ -71,16 +72,6 @@ func HostPath(getenv func(string) string) string {
 		return p
 	}
 	return defaultHostPath
-}
-
-// Range returns the parsed port range. It panics only if LoadHost validation
-// was bypassed.
-func (h *Host) Range() PortRange {
-	r, err := ParsePortRange(h.PortRange)
-	if err != nil {
-		panic(err)
-	}
-	return r
 }
 
 // LoadHost reads and validates the host config at path. It returns ErrNoHost
@@ -125,9 +116,11 @@ func LoadHost(path string) (*Host, error) {
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("%s: missing required keys: %s", path, strings.Join(missing, ", "))
 	}
-	if _, err := ParsePortRange(h.PortRange); err != nil {
+	ports, err := ParsePortRange(h.PortRange)
+	if err != nil {
 		return nil, fmt.Errorf("%s: port_range: %w", path, err)
 	}
+	h.Ports = ports
 	return &h, nil
 }
 
@@ -149,13 +142,15 @@ func LaptopHost(home string, getenv func(string) string) (*Host, error) {
 		port = n
 	}
 	portRange := or("HADES_PORT_RANGE", "4100-4999")
-	if _, err := ParsePortRange(portRange); err != nil {
+	ports, err := ParsePortRange(portRange)
+	if err != nil {
 		return nil, fmt.Errorf("HADES_PORT_RANGE: %w", err)
 	}
 	state := filepath.Join(home, ".local", "state", "hades")
 	return &Host{
 		LabelTemplate: naming.DefaultLabelTemplate,
 		PortRange:     portRange,
+		Ports:         ports,
 		PortsDir:      filepath.Join(state, "ports"),
 		SitesDir:      filepath.Join(state, "sites"),
 		ManifestsDir:  filepath.Join(state, "manifests"),

@@ -71,7 +71,7 @@ func newServerDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 	host := &config.Host{
 		Domain:        "example.test",
 		LabelTemplate: naming.DefaultLabelTemplate,
-		PortRange:     "4100-4119",
+		Ports:         config.PortRange{Lo: 4100, Hi: 4119},
 		PortsDir:      filepath.Join(state, "ports"),
 		SitesDir:      filepath.Join(state, "sites"),
 		ManifestsDir:  filepath.Join(state, "manifests"),

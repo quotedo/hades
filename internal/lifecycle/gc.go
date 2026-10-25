@@ -118,7 +118,7 @@ func GC(ctx context.Context, d Deps, owner string, dryRun bool) (GCReport, error
 	}
 
 	if reload {
-		if err := caddy.SudoReload(ctx, d.Run, d.Bin); err != nil {
+		if err := caddy.SudoReload(ctx, d.Run, d.Bin, false); err != nil {
 			rep.Errors = append(rep.Errors, err)
 		}
 	}

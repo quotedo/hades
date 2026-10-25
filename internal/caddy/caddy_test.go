@@ -99,9 +99,10 @@ func TestReloadRunsValidateThenReload(t *testing.T) {
 
 func TestSudoReloadArgv(t *testing.T) {
 	f := &execx.Fake{}
-	caddy.SudoReload(context.Background(), f, "/usr/local/bin/hades")
-	if !reflect.DeepEqual(f.Calls[0].Argv, []string{"sudo", "-n", "/usr/local/bin/hades", "caddy-reload"}) {
-		t.Fatal(f.Calls[0].Argv)
+	caddy.SudoReload(context.Background(), f, "/usr/local/bin/hades", false)
+	caddy.SudoReload(context.Background(), f, "/usr/local/bin/hades", true)
+	if !reflect.DeepEqual(f.Calls[0].Argv, []string{"sudo", "-n", "/usr/local/bin/hades", "caddy-reload"}) || !reflect.DeepEqual(f.Calls[1].Argv, []string{"sudo", "-n", "/usr/local/bin/hades", "caddy-reload", "--check"}) {
+		t.Fatal(f.Calls)
 	}
 }
 

@@ -78,7 +78,7 @@ func buildStatus(bg context.Context, ctx *Context, d lifecycle.Deps) (statusRepo
 	if err != nil {
 		return r, err
 	}
-	rng := d.Host.Range()
+	rng := d.Host.Ports
 	r.Ports = statusPorts{Range: d.Host.PortRange, Used: used, Free: max(rng.Hi-rng.Lo+1-used, 0)}
 
 	all, _, err := allManifests(d)
@@ -95,7 +95,7 @@ func buildStatus(bg context.Context, ctx *Context, d lifecycle.Deps) (statusRepo
 
 	if d.Mode == config.Server {
 		r.CaddyCheck = "ok"
-		if err := caddy.SudoCheck(bg, d.Run, d.Bin); err != nil {
+		if err := caddy.SudoReload(bg, d.Run, d.Bin, true); err != nil {
 			r.CaddyCheck = "error: " + err.Error()
 		}
 	}
