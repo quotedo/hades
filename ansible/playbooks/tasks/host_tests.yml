@@ -181,6 +181,6 @@
   ansible.builtin.assert:
     that:
       - host_test_onboard.rc == 2
-      - host_test_onboard.stderr is match('hades-onboard needs a terminal: ssh -t \\S+ hades-onboard$')
+      - "host_test_onboard.stderr is match('hades-onboard needs a terminal: ssh -t \\S+ hades-onboard$')"
     fail_msg: "hades-onboard </dev/null: rc {{ host_test_onboard.rc }}, {{ host_test_onboard.stderr }}"
     quiet: true
