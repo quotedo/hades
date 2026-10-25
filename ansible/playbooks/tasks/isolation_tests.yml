@@ -6,14 +6,23 @@
   changed_when: false
   failed_when: false
 
-- name: Assert the table drops the bridge's other input and its bridge-to-bridge forwarding
+# The rules as `nft list` prints them, without their counters.
+- name: Assert the table drops the bridge's other input and its forwarding to the bridge, Docker and published ports
   ansible.builtin.assert:
     that:
       - isolation_test_nft.rc == 0
-      - isolation_test_nft.stdout is search('iifname "' ~ vm_bridge ~ '" counter packets \\d+ bytes \\d+ drop')
-      - isolation_test_nft.stdout is search('iifname "' ~ vm_bridge ~ '" oifname "' ~ vm_bridge ~ '" counter packets \\d+ bytes \\d+ drop')
-    fail_msg: "table inet hades is missing or lacks the {{ vm_bridge }} drops: {{ isolation_test_nft.stdout }} {{ isolation_test_nft.stderr }}"
+      - isolation_test_missing == []
+    fail_msg: "table inet hades lacks {{ isolation_test_missing | to_json }}: {{ isolation_test_nft.stdout }} {{ isolation_test_nft.stderr }}"
     quiet: true
+  vars:
+    isolation_test_rules:
+      - iifname "{{ vm_bridge }}" drop
+      - iifname "{{ vm_bridge }}" oifname "{{ vm_bridge }}" drop
+      - iifname "{{ vm_bridge }}" oifname "docker0" drop
+      - iifname "{{ vm_bridge }}" oifname "br-*" drop
+      - iifname "{{ vm_bridge }}" ct status dnat drop
+    isolation_test_missing: >-
+      {{ isolation_test_rules | reject('in', isolation_test_nft.stdout | regex_replace(' counter packets [0-9]+ bytes [0-9]+', '')) | list }}
 
 - name: Read the state of the rules unit
   ansible.builtin.systemd_service:
