@@ -80,46 +80,11 @@
 
 # Only on hosts that run AppArmor; nothing is installed for it. Loads this one profile and
 # touches no other.
-- name: Find apparmor_parser
-  ansible.builtin.stat:
-    path: "{{ item }}"
-  loop: [/usr/sbin/apparmor_parser, /sbin/apparmor_parser]
-  register: host_apparmor_parsers
-
-- name: Stat the AppArmor profile directory
-  ansible.builtin.stat:
-    path: /etc/apparmor.d
-  register: host_apparmor_dir
-
-- name: Pick the AppArmor parser
-  ansible.builtin.set_fact:
-    host_apparmor_parser: >-
-      {{ (host_apparmor_parsers.results | selectattr('stat.exists') | map(attribute='item') | list + [''])[0] }}
-
-- name: Chrome for Testing AppArmor profile
-  when:
-    - host_apparmor_parser | length > 0
-    - host_apparmor_dir.stat.isdir | default(false)
-  block:
-    - name: Write the Chrome for Testing AppArmor profile
-      ansible.builtin.template:
-        src: apparmor-chrome-for-testing.j2
-        dest: /etc/apparmor.d/chrome-for-testing
-        mode: "0644"
-        validate: "{{ host_apparmor_parser }} -Q -K %s"
-      register: host_apparmor_profile
-
-    - name: Read the loaded AppArmor profiles
-      ansible.builtin.slurp:
-        src: /sys/kernel/security/apparmor/profiles
-      register: host_apparmor_loaded
-      failed_when: false
-
-    # Also repairs a load that failed on an earlier run, when the file itself no longer changes.
-    - name: Load the Chrome for Testing AppArmor profile
-      ansible.builtin.command: "{{ host_apparmor_parser }} -r -T -W /etc/apparmor.d/chrome-for-testing"
-      changed_when: true
-      when: >-
-        host_apparmor_profile is changed
-        or (host_apparmor_loaded.content is defined
-            and (host_apparmor_loaded.content | b64decode).splitlines() | select('match', '^chrome-for-testing ') | list | length == 0)
+- name: Write the Chrome for Testing AppArmor profile
+  ansible.builtin.template:
+    src: apparmor-chrome-for-testing.j2
+    dest: /etc/apparmor.d/chrome-for-testing
+    mode: "0644"
+    validate: apparmor_parser -Q -K %s
+  notify: apparmor load chrome
+  when: ansible_facts.apparmor.status | default('') == 'enabled'
