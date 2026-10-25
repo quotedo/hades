@@ -89,7 +89,7 @@ which ADE's variables to read.
 | `doctor` | Checks host config (`loaded <path> (domain <domain or none>)` or `no host config: laptop defaults`), registry directories, Postgres, RabbitMQ, Caddy (with a domain: `systemctl is-active caddy.service`, fix `sudo systemctl restart caddy`), git, tools, direnv, ADE hooks, manifests, and manifests written by another hades version. Prints `ok`, `WARN` or `FAIL` per check; every FAIL ends with its fix. A repository without `paseo.json` or `orca.yaml` is a WARN. Exit 0 when nothing fails. | `--json` |
 | `gc` | Releases the claims of worktrees whose directory vanished, and port links to vanished directories; reloads Caddy once when a site file went. | `--dry-run` |
 | `version` | Prints the version. | |
-| `join` | On a laptop: `hades join <host>` writes the SSH aliases `<alias>-via-host` (through the box) and `<alias>` (over your tailnet when this laptop reaches your VM there) and runs `hades-onboard` in your VM. See [`join`](#join). | `--as LOGIN` (default `$USER`), `--alias NAME` (default: the host's first DNS label; required for an IP or a host without a dot), `--github LOGIN` (default: `gh`'s login) |
+| `join` | On a laptop: `hades join <host>` writes the SSH aliases `<alias>-via-host` (through the box) and `<alias>` (over your tailnet when this laptop reaches your VM there) and runs `hades-onboard` in your VM. See [`join`](#join). | `--as LOGIN` (default: the login the box prints), `--alias NAME` (default: the host's first DNS label; required for an IP or a host without a dot), `--github LOGIN` (default: `gh`'s login) |
 
 How a worktree is identified: `--root`/`--worktree`/`--name` flags, else Paseo's `PASEO_*`
 variables, else Orca's `ORCA_*`, else git. The name is the branch (Paseo, git; the directory name on
@@ -105,24 +105,24 @@ from before a change of domain) fails `up` with
 
 The alias must differ from the host, compared without case, or ssh would take the alias's own block for the box: `hades join shop` exits 2 with `join: shop: the alias must differ from the host; pass --alias NAME` and the usage.
 
-Steps, in order. Every ssh that `join` runs, except the hand-off, has `-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10`; `<key>` is the private key file, for a key on disk.
+Steps, in order. Every ssh that `join` runs, except the hand-off, has `-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10`; `[<key>]` is `-i <key> -o IdentitiesOnly=yes`, `<key>` being the private key file, for a key on disk.
 
 | Step | Action |
 |---|---|
 | Key | The first key in `~/.ssh/*.pub` or your SSH agent that GitHub serves at `https://github.com/<GitHub login>.keys`. Without one: `~/.ssh/id_ed25519.pub`, else the first `~/.ssh/*.pub`, else a new `~/.ssh/id_ed25519` without a passphrase. |
-| GitHub | Uploads that key with `gh ssh-key add`, titled `hades <alias>`, only when GitHub serves none of your keys and `gh` is logged in as that GitHub login. |
-| Address | `ssh [-i <key>] -l hades <host>`: the box's jump account prints your VM's address. |
+| GitHub | Uploads that key with `gh ssh-key add`, titled `hades <alias>`, only when GitHub serves none of your keys and `gh` is logged in as that GitHub login. When `gh` is logged out or logged in as another account, says so only if the box refuses the key. |
+| Address | `ssh [<key>] -l hades <host>`: the box's jump account prints `<login>@<address>`, your login and your VM's address. `--as` overrides the login; a box that prints only the address needs `--as`. |
 | `<alias>-via-host` | Writes the alias, then logs in once: `ssh <alias>-via-host true`. |
-| Hand-off | `ssh -t <alias>-via-host hades-onboard <alias>` on your terminal. |
-| `<alias>` | Only after `hades-onboard` exits 0. Reads `tailscale status --json` in the VM; with `BackendState` `Running`, logs in once over the tailnet with the VM's host key from `<alias>-via-host`: `ssh -o HostKeyAlias=<alias> -l <login> [-i <key>] <name> true`, `<name>` being `Self.DNSName` without the trailing dot, then, if that fails, the first of `Self.TailscaleIPs` (for a laptop without Tailscale's DNS). Then writes the alias. |
+| Hand-off | `ssh -t -o LogLevel=ERROR <alias>-via-host hades-onboard <alias>` on your terminal. |
+| `<alias>` | Only after `hades-onboard` exits 0. Reads `tailscale status --json` in the VM; with `BackendState` `Running` and a `Self.DNSName`, logs in once over the tailnet with the VM's host key from `<alias>-via-host`: `ssh -o HostKeyAlias=<alias> -l <login> [<key>] <name> true`, `<name>` being `Self.DNSName` without the trailing dot, then, if that fails, the first of `Self.TailscaleIPs`, printing `this laptop does not resolve <name> (Tailscale DNS off): using <address>` when that one works. Then writes the alias. |
 
 | Alias | `HostName` | `ProxyCommand` | Written when |
 |---|---|---|---|
-| `<alias>-via-host` | the VM's address | `ssh -W %h:%p -l hades -o StrictHostKeyChecking=accept-new [-i <key>] <host>` | every run |
+| `<alias>-via-host` | the VM's address | `ssh -W %h:%p -l hades -o StrictHostKeyChecking=accept-new [<key>] <host>` | every run |
 | `<alias>` | `<name>` or the address | none | the tailnet login worked; prints `daily: ssh <alias> (tailnet); fallback: ssh <alias>-via-host` |
-| `<alias>` | the VM's address | as `<alias>-via-host` | otherwise; with Tailscale `Running`, prints `<alias> goes through the box: this laptop does not reach <name> on your tailnet` |
+| `<alias>` | the VM's address | as `<alias>-via-host` | otherwise; with Tailscale `Running` and a name, prints `<alias> goes through the box: this laptop does not reach <name> on your tailnet` |
 
-Each alias is a block between `# hades:begin <name>` and `# hades:end <name>` in `~/.ssh/config`, also holding `User <login>`, `HostKeyAlias <alias>` (both aliases store the VM's host key under `<alias>`, whatever the `HostName`), `ForwardAgent yes`, `StrictHostKeyChecking accept-new` and `IdentityFile <key>` for a key on disk. `wrote Host <name> to ~/.ssh/config` is printed only when a block changed.
+Each alias is a block between `# hades:begin <name>` and `# hades:end <name>` in `~/.ssh/config`, also holding `User <login>`, `HostKeyAlias <alias>` (both aliases store the VM's host key under `<alias>`, whatever the `HostName`), `ForwardAgent yes`, `StrictHostKeyChecking accept-new` and, for a key on disk, `IdentityFile <key>` and `IdentitiesOnly yes`. `wrote Host <name> to ~/.ssh/config` is printed only when a block was written.
 
 ## Exit codes
 
@@ -137,8 +137,8 @@ Each alias is a block between `# hades:begin <name>` and `# hades:end <name>` in
 | Code | When |
 |---|---|
 | hades-onboard's code | The login through `<alias>-via-host` worked: 0 when onboarding completed. A VM without `hades-onboard` gives 0 and prints `next: ssh <alias>-via-host`. |
-| 2 | `not authorised yet`: the jump account or the VM refused the key. Also a usage error. |
-| 1 | Any other failure, as `join: <reason>`; an unreachable host or a refused host key is `join: ssh: <ssh's message>`, jump-account output that is no address `join: ssh -l hades <host> printed "<output>", not an address`. |
+| 2 | `not authorised yet`: the jump account refused the key (`the box does not accept your key.`), or the VM refused the login (`the box accepted your key; the VM refused login <login>: pass --as <your inventory name>`). Also a usage error. |
+| 1 | Any other failure, as `join: <reason>`; an unreachable host or a refused host key is `join: ssh: <ssh's message>`, jump-account output that is no address `join: ssh -l hades <host> printed "<output>", not an address`, an address without a login and no `--as` `join: ssh -l hades <host> printed no login; pass --as LOGIN`. |
 
 ## VM scripts and files
 

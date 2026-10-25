@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -54,15 +55,15 @@ func (k sshKey) blob() string {
 }
 
 // join prepares this laptop to reach the developer's VM: an SSH key on GitHub,
-// the VM's address from the box's jump account, <alias>-via-host through the
-// box, a test login, hades-onboard in the VM, then <alias> over the tailnet
-// when this laptop reaches the VM there. It exits with hades-onboard's code
-// once the login works, 2 while the box does not accept the key yet and 1 on
-// errors.
+// the login and the VM's address from the box's jump account, <alias>-via-host
+// through the box, a test login, hades-onboard in the VM, then <alias> over
+// the tailnet when this laptop reaches the VM there. It exits with
+// hades-onboard's code once the login works, 2 while the box or the VM does
+// not accept the login yet and 1 on errors.
 func join(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("join", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	login := fs.String("as", ctx.Getenv("USER"), "Linux login on the box")
+	asFlag := fs.String("as", "", "login in the VM (default: the one the box prints)")
 	aliasFlag := fs.String("alias", "", "~/.ssh/config host alias")
 	githubFlag := fs.String("github", "", "GitHub login")
 	// Flags may come before or after the host.
@@ -86,12 +87,9 @@ func join(ctx *Context, args []string) int {
 		fmt.Fprintf(ctx.Stderr, "join: "+format+"\n", a...)
 		return 1
 	}
-	home := ctx.Getenv("HOME")
-	switch {
-	case home == "":
+	home, login := ctx.Getenv("HOME"), *asFlag
+	if home == "" {
 		return failf("HOME is not set")
-	case *login == "":
-		return failf("USER is not set; pass --as LOGIN")
 	}
 	host, alias, err := joinTarget(arg, *aliasFlag)
 	if err != nil {
@@ -135,7 +133,7 @@ func join(ctx *Context, args []string) int {
 	}
 
 	var key sshKey
-	onGitHub := false
+	onGitHub, ghHint := false, "" // ghHint is printed when the box refuses the key
 	for _, k := range keys {
 		if k.blob() != "" && served[k.blob()] {
 			key, onGitHub = k, true
@@ -164,9 +162,9 @@ func join(ctx *Context, args []string) int {
 			}
 		}
 		if ghUser == "" {
-			fmt.Fprintln(ctx.Stderr, "github: gh is not logged in; your key was not added. Run gh auth login, then hades join again, or add the key below at https://github.com/settings/keys.")
+			ghHint = "github: gh is not logged in; your key was not added. Run gh auth login, then hades join again, or add the key below at https://github.com/settings/keys."
 		} else if ghUser != ghLogin {
-			fmt.Fprintf(ctx.Stderr, "github: gh is logged in as %s, not %s; your key was not added. Add the key below at https://github.com/settings/keys.\n", ghUser, ghLogin)
+			ghHint = fmt.Sprintf("github: gh is logged in as %s, not %s; your key was not added. Add the key below at https://github.com/settings/keys.", ghUser, ghLogin)
 		} else if res, err := run.Run(bg, execx.Cmd{Argv: []string{"gh", "ssh-key", "add", key.file, "--title", "hades " + alias}}); err == nil {
 			onGitHub = true
 		} else if strings.Contains(res.Stdout+res.Stderr, "admin:public_key") {
@@ -179,11 +177,12 @@ func join(ctx *Context, args []string) int {
 	identity := strings.TrimSuffix(key.file, ".pub")
 	var idArg []string
 	if identity != "" {
-		idArg = []string{"-i", identity}
+		idArg = []string{"-i", identity, "-o", "IdentitiesOnly=yes"}
 	}
 	batch := []string{"ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10"}
 	// sshFailed reports a failed ssh through the box; a refused key exits 2.
-	sshFailed := func(err error) int {
+	// vmLogin is the login the VM refused, "" while the box has not answered.
+	sshFailed := func(err error, vmLogin string) int {
 		var xe *execx.ExitError
 		switch {
 		case !errors.As(err, &xe):
@@ -192,9 +191,16 @@ func join(ctx *Context, args []string) int {
 			return failf("ssh: %s", strings.TrimSpace(xe.Result.Stderr))
 		}
 		fmt.Fprint(ctx.Stderr, xe.Result.Stderr)
+		if vmLogin != "" {
+			fmt.Fprintf(ctx.Stdout, "not authorised yet: the box accepted your key; the VM refused login %s: pass --as <your inventory name>\n", vmLogin)
+			return 2
+		}
+		if ghHint != "" {
+			fmt.Fprintln(ctx.Stderr, ghHint)
+		}
 		fmt.Fprintln(ctx.Stdout, "not authorised yet: the box does not accept your key.")
 		if onGitHub {
-			fmt.Fprintf(ctx.Stdout, "Your key is on GitHub as %s: if the administrator has added you, the box picks it up within the hour (they can run: sudo hades-keys %s); otherwise ask them to add you with github: %s.\n", ghLogin, *login, ghLogin)
+			fmt.Fprintf(ctx.Stdout, "Your key is on GitHub as %s: if the administrator has added you, the box picks it up within the hour (they can run: sudo hades-keys %s); otherwise ask them to add you with github: %s.\n", ghLogin, cmp.Or(login, "<your inventory name>"), ghLogin)
 		} else {
 			fmt.Fprintf(ctx.Stdout, "Your key is not on GitHub: send the key below to the administrator, or add it at https://github.com/settings/keys.\n%s\n", key.line)
 		}
@@ -202,21 +208,29 @@ func join(ctx *Context, args []string) int {
 		return 2
 	}
 	upsert := func(name, hostName, proxy string) error {
-		changed, err := envfile.UpsertBlock(filepath.Join(sshDir, "config"), "# hades:begin "+name+"\n", "# hades:end "+name+"\n", sshConfigBlock(name, hostName, *login, alias, proxy, identity))
-		if changed {
+		changed, err := envfile.UpsertBlock(filepath.Join(sshDir, "config"), "# hades:begin "+name+"\n", "# hades:end "+name+"\n", sshConfigBlock(name, hostName, login, alias, proxy, identity))
+		if err == nil && changed {
 			fmt.Fprintf(ctx.Stderr, "wrote Host %s to ~/.ssh/config\n", name)
 		}
 		return err
 	}
 
-	// The jump account's forced command prints the VM's address.
+	// The jump account's forced command prints <login>@<address>; an older
+	// box prints the address alone.
 	res, err := run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, idArg, []string{"-l", "hades", host})})
 	if err != nil {
-		return sshFailed(err)
+		return sshFailed(err, "")
 	}
-	addr := strings.TrimSpace(res.Stdout)
+	out := strings.TrimSpace(res.Stdout)
+	printed, addr, found := strings.Cut(out, "@")
+	if !found {
+		printed, addr = "", out
+	}
 	if net.ParseIP(addr) == nil {
-		return failf("ssh -l hades %s printed %q, not an address", host, addr)
+		return failf("ssh -l hades %s printed %q, not an address", host, out)
+	}
+	if login = cmp.Or(login, printed); login == "" {
+		return failf("ssh -l hades %s printed no login; pass --as LOGIN", host)
 	}
 	via := alias + "-via-host"
 	jump := strings.Join(slices.Concat([]string{"ssh", "-W", "%h:%p", "-l", "hades", "-o", "StrictHostKeyChecking=accept-new"}, idArg, []string{host}), " ")
@@ -224,10 +238,10 @@ func join(ctx *Context, args []string) int {
 		return failf("%v", err)
 	}
 	if _, err := run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, []string{via, "true"})}); err != nil {
-		return sshFailed(err)
+		return sshFailed(err, login)
 	}
-	fmt.Fprintf(ctx.Stdout, "connected: %s@%s\n", *login, alias)
-	code := handOff([]string{"ssh", "-t", via, "hades-onboard", alias})
+	fmt.Fprintf(ctx.Stdout, "connected: %s@%s\n", login, alias)
+	code := handOff([]string{"ssh", "-t", "-o", "LogLevel=ERROR", via, "hades-onboard", alias})
 	if code == 127 {
 		fmt.Fprintf(ctx.Stdout, "next: ssh %s\n", via)
 		return 0
@@ -248,15 +262,19 @@ func join(ctx *Context, args []string) int {
 	res, _ = run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, []string{via, "tailscale", "status", "--json"})})
 	json.Unmarshal([]byte(res.Stdout), &st) // no tailnet when this fails
 	tsName, hostName, proxy := strings.TrimSuffix(st.Self.DNSName, "."), addr, jump
-	if st.BackendState == "Running" {
+	running := st.BackendState == "Running" && tsName != ""
+	if running {
 		// The name needs Tailscale's DNS on this laptop; the first address does not.
 		hosts := []string{tsName}
 		if ips := st.Self.TailscaleIPs; len(ips) > 0 {
 			hosts = append(hosts, ips[0])
 		}
-		for _, h := range hosts {
+		for i, h := range hosts {
 			// The VM's host key is known under the alias since the test login.
-			if _, err := run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, []string{"-o", "HostKeyAlias=" + alias, "-l", *login}, idArg, []string{h, "true"})}); err == nil {
+			if _, err := run.Run(bg, execx.Cmd{Argv: slices.Concat(batch, []string{"-o", "HostKeyAlias=" + alias, "-l", login}, idArg, []string{h, "true"})}); err == nil {
+				if i > 0 {
+					fmt.Fprintf(ctx.Stdout, "this laptop does not resolve %s (Tailscale DNS off): using %s\n", tsName, h)
+				}
 				hostName, proxy = h, ""
 				break
 			}
@@ -268,7 +286,7 @@ func join(ctx *Context, args []string) int {
 	switch {
 	case proxy == "":
 		fmt.Fprintf(ctx.Stdout, "daily: ssh %s (tailnet); fallback: ssh %s\n", alias, via)
-	case st.BackendState == "Running":
+	case running:
 		fmt.Fprintf(ctx.Stdout, "%s goes through the box: this laptop does not reach %s on your tailnet\n", alias, tsName)
 	}
 	return 0
@@ -326,7 +344,7 @@ func sshConfigBlock(name, hostName, login, keyAlias, proxy, identity string) str
 	}
 	b += "  ForwardAgent yes\n  StrictHostKeyChecking accept-new\n"
 	if identity != "" {
-		b += "  IdentityFile " + identity + "\n"
+		b += "  IdentityFile " + identity + "\n  IdentitiesOnly yes\n"
 	}
 	return b
 }
