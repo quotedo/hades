@@ -5,6 +5,7 @@
 set -u
 dir=$HOME/.config/hades
 
+command -v gh >/dev/null 2>&1 || { echo "gh: not installed; the administrator adds gh to tools"; exit 1; }
 if gh auth status >/dev/null 2>&1; then echo "gh: already done"; else gh auth login; fi
 gh auth setup-git && echo "git: gh is the GitHub credential helper"
 

@@ -63,6 +63,7 @@ mise_store: /usr/local/share/mise # noqa: var-naming[no-role-prefix]
 mise_shims: "{{ mise_store }}/shims" # noqa: var-naming[no-role-prefix]
 tools: # noqa: var-naming[no-role-prefix]
   node: ["24.22.1"]
+  gh: ["2.103.1"]
 # `tool@version` for every tools entry, and for every installed record under the store in
 # host_tools_ls (`mise ls --json`, registered by the role and by verify). mise also lists versions
 # a config requests but nobody installed, and root's own installs: neither counts.
