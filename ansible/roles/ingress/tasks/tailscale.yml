@@ -40,3 +40,39 @@
     direction: in
     interface: tailscale0
   when: ingress_ufw.stat.exists
+
+- name: Read the Tailscale status
+  ansible.builtin.command: tailscale status --json
+  register: ingress_tailscale_status
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# The auth key travels over stdin into a root-only file that tailscale reads and that is removed
+# right after, so it is on no command line and in no file that outlives the task.
+- name: Log Tailscale in
+  when: (ingress_tailscale_status.stdout | default('{}', true) | from_json).BackendState | default('') != 'Running'
+  block:
+    - name: Log Tailscale in with TS_AUTHKEY
+      when: lookup('ansible.builtin.env', 'TS_AUTHKEY') | length > 0
+      block:
+        - name: Write the auth key
+          ansible.builtin.shell: set -e; umask 077; cat > /run/hades-ts-authkey
+          args:
+            stdin: "{{ lookup('ansible.builtin.env', 'TS_AUTHKEY') }}"
+          changed_when: true
+          no_log: true
+
+        - name: Run tailscale up
+          ansible.builtin.command: tailscale up --auth-key=file:/run/hades-ts-authkey --hostname {{ inventory_hostname }}
+          changed_when: true
+      always:
+        - name: Remove the auth key
+          ansible.builtin.file:
+            path: /run/hades-ts-authkey
+            state: absent
+
+    - name: Report the manual Tailscale login
+      ansible.builtin.debug:
+        msg: "Tailscale is installed but not logged in: export TS_AUTHKEY and apply again, or run: sudo tailscale up"
+      when: lookup('ansible.builtin.env', 'TS_AUTHKEY') | length == 0

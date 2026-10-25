@@ -5,12 +5,9 @@
 
 # hades CLI
 hades_version: "0.1.0" # noqa: var-naming[no-role-prefix]
-hades_release_base_url: "https://github.com/quotedo/hades/releases/download/v{{ hades_version }}" # noqa: var-naming[no-role-prefix]
-hades_release_platform: linux_amd64 # noqa: var-naming[no-role-prefix]
-hades_download_dir: /var/cache/hades # noqa: var-naming[no-role-prefix]
 hades_bin_dir: /usr/local/bin # noqa: var-naming[no-role-prefix]
 # hades_local_binary_dir: a controller directory holding `hades` and `hades-port`; when set,
-# both are copied from there instead of downloading the release (development only).
+# both are copied from there instead of fetching the release (development only).
 
 # Host contract (/etc/hades/host.toml)
 hades_group: hades # noqa: var-naming[no-role-prefix]
@@ -26,6 +23,9 @@ dev_services: [] # noqa: var-naming[no-role-prefix]
 # present dev users' emails, and the session length (Cloudflare's maximum).
 access_allow: [] # noqa: var-naming[no-role-prefix]
 access_session: 720h # noqa: var-naming[no-role-prefix]
+# The Zero Trust team name the ingress role creates the Access organization with, when the
+# account has none yet: <cloudflare_team>.cloudflareaccess.com.
+cloudflare_team: "hades-{{ hades_domain | replace('.', '-') }}" # noqa: var-naming[no-role-prefix]
 
 # Intranet VPN (vpn role): vpn_conf_env names the operator's environment variable holding the
 # host's AmneziaWG config; vpn_probe ("<host>:<port>") is one intranet TCP endpoint verify reaches.

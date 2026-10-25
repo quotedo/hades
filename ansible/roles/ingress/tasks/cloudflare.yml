@@ -150,11 +150,38 @@
       changed_when: true
       when: ingress_cf_app == {}
 
+    # An account without Zero Trust answers with an error: the organization is then created, which
+    # enables Zero Trust where the account allows it through the API.
     - name: Read the Access organization
       ansible.builtin.uri:
         url: "{{ ingress_cf_account }}/access/organizations"
+        status_code: [200, 400, 403, 404]
       register: ingress_cf_org
       check_mode: false
+
+    - name: Create the Access organization
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/access/organizations"
+        method: POST
+        body:
+          name: hades
+          auth_domain: "{{ cloudflare_team }}.cloudflareaccess.com"
+          session_duration: "{{ access_session }}"
+        status_code: [200, 201, 400, 403, 404, 409]
+      register: ingress_cf_org_new
+      changed_when: true
+      when: ingress_cf_org.status != 200
+
+    - name: Fail when the Access organization could not be created
+      ansible.builtin.fail:
+        msg: >-
+          Zero Trust could not be created through the API: enable it once in the Cloudflare dashboard,
+          then apply again (Cloudflare: {{ (ingress_cf_org.json.errors | default([]) + ingress_cf_org_new.json.errors
+          | default([])) | map(attribute='message') | join('; ') }})
+      no_log: false
+      when:
+        - ingress_cf_org_new is not skipped
+        - not ingress_cf_org_new.json.success | default(false)
 
     # The organization caps every application's session, so both carry access_session.
     - name: Set the Access organization's session length
@@ -166,7 +193,9 @@
           auth_domain: "{{ ingress_cf_org.json.result.auth_domain }}"
           session_duration: "{{ access_session }}"
       changed_when: true
-      when: ingress_cf_org.json.result.session_duration != access_session
+      when:
+        - ingress_cf_org.status == 200
+        - ingress_cf_org.json.result.session_duration != access_session
 
     - name: Set the Access application's session length and login flags
       ansible.builtin.uri:

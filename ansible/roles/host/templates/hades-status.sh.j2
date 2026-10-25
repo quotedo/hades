@@ -70,6 +70,12 @@ elif n=$(PGPASSWORD="$pg_password" PGCONNECT_TIMEOUT=3 psql -w -X -At -h "$pg_ho
 else
   echo "dev postgres connections: unavailable ($(head -n 1 <<<"$n"))"
 fi
+keys_started=$(systemctl show hades-keys.service -p ExecMainStartTimestamp --value 2>/dev/null)
+if [ -n "$keys_started" ]; then
+  echo "keys: last run $keys_started, $(systemctl show hades-keys.service -p Result --value)"
+else
+  echo "keys: unavailable"
+fi
 
 {% if vpn_enabled %}
 echo

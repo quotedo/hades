@@ -1,0 +1,33 @@
+#!/bin/sh
+# {{ ansible_managed }}
+# hades-onboard: a developer's first-login steps on the box. Safe to run again: each step says
+# "already done" or does its work. hades doctor decides whether onboarding is complete.
+set -u
+dir=$HOME/.config/hades
+
+if gh auth status >/dev/null 2>&1; then echo "gh: already done"; else gh auth login; fi
+gh auth setup-git && echo "git: gh is the GitHub credential helper"
+
+if command -v claude >/dev/null 2>&1; then
+  if claude auth status >/dev/null 2>&1; then echo "claude: already done"; else claude auth login; fi
+fi
+if command -v codex >/dev/null 2>&1; then
+  if codex login status >/dev/null 2>&1; then echo "codex: already done"; else codex login --device-auth; fi
+fi
+
+if [ -f "$dir/repos" ]; then
+  while read -r url; do
+    [ -n "$url" ] || continue
+    name=$(basename "$url" .git)
+    if [ -d "$HOME/$name" ]; then echo "clone $name: already done"; else git clone "$url" "$HOME/$name" </dev/null; fi
+  done < "$dir/repos"
+fi
+
+if {{ hades_bin_dir }}/hades doctor; then
+  rm -f "$dir/welcome"
+  mkdir -p "$dir" && touch "$dir/onboarded"
+  echo "onboarding complete"
+else
+  echo "onboarding incomplete: fix the FAIL lines above and run hades-onboard again"
+  exit 1
+fi

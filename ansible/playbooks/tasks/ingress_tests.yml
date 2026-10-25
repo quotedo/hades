@@ -182,3 +182,21 @@
         ingress_test_policies: >-
           {{ ingress_test_apps.json.result | selectattr('domain', 'eq', '*.' ~ hades_domain)
              | map(attribute='policies') | flatten }}
+
+- name: Check Tailscale is logged in when the operator provides TS_AUTHKEY
+  when:
+    - tailscale_enabled | bool
+    - lookup('ansible.builtin.env', 'TS_AUTHKEY') | length > 0
+  tags: [tailscale]
+  block:
+    - name: Read the Tailscale status
+      ansible.builtin.command: tailscale status --json
+      register: ingress_test_tailscale
+      changed_when: false
+      failed_when: false
+
+    - name: Assert Tailscale is running
+      ansible.builtin.assert:
+        that: (ingress_test_tailscale.stdout | default('{}', true) | from_json).BackendState | default('') == 'Running'
+        fail_msg: "tailscale status: {{ ingress_test_tailscale.stdout | default(ingress_test_tailscale.stderr, true) | truncate(200) }}"
+        quiet: true
