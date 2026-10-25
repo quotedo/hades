@@ -1,11 +1,15 @@
 # {{ ansible_managed }}
 # Host ports are published on {{ dev_services_host }} only; the container-side ports are the images' own.
 name: hades
+x-logging: &logging
+  driver: json-file
+  options: { max-size: 50m, max-file: "3" }
 services:
 {% if 'rabbitmq' in dev_services %}
   rabbitmq:
     image: {{ rabbitmq_image }}
     restart: unless-stopped
+    logging: *logging
     cgroup_parent: hades.slice
     environment:
       RABBITMQ_DEFAULT_USER: {{ rabbitmq_user | to_json }}
@@ -21,6 +25,7 @@ services:
   localstack:
     image: {{ localstack_image }}
     restart: unless-stopped
+    logging: *logging
     cgroup_parent: hades.slice
     environment:
       SERVICES: s3
@@ -35,6 +40,7 @@ services:
   redis:
     image: {{ redis_image }}
     restart: unless-stopped
+    logging: *logging
     cgroup_parent: hades.slice
     ports:
       - "{{ dev_services_host }}:{{ redis_port }}:6379"

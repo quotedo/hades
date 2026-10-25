@@ -23,14 +23,3 @@
     name: systemd-journald.service
     state: restarted
   listen: journald restart
-
-# Only when the operator opted in (docker_restart_on_change) and Docker is installed. On a fresh
-# host the services role installs Docker later and it reads the merged daemon.json at first start.
-- name: Restart Docker
-  ansible.builtin.systemd_service:
-    name: docker.service
-    state: restarted
-  when:
-    - docker_restart_on_change | bool
-    - host_dockerd.stat.exists | default(false)
-  listen: docker restart

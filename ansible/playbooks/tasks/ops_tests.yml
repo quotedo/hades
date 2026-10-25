@@ -80,29 +80,6 @@
     fail_msg: "/etc/systemd/journald.conf.d/hades.conf must set SystemMaxUse={{ journald_system_max_use }}"
     quiet: true
 
-- name: Stat the Docker daemon config
-  ansible.builtin.stat:
-    path: /etc/docker/daemon.json
-  register: host_test_docker_stat
-
-- name: Read the Docker daemon config
-  ansible.builtin.slurp:
-    src: /etc/docker/daemon.json
-  register: host_test_docker
-  when: host_test_docker_stat.stat.exists
-
-- name: Assert Docker rotates container logs
-  ansible.builtin.assert:
-    that:
-      - host_test_docker_stat.stat.exists
-      - host_test_docker_conf['log-driver'] | default('') == 'json-file'
-      - host_test_docker_conf['log-opts']['max-size'] | default('') == docker_log_max_size
-      - host_test_docker_conf['log-opts']['max-file'] | default('') == docker_log_max_file | string
-    fail_msg: "/etc/docker/daemon.json must set json-file logs with max-size {{ docker_log_max_size }} and max-file {{ docker_log_max_file }}"
-    quiet: true
-  vars:
-    host_test_docker_conf: "{{ host_test_docker.content | default('e30=') | b64decode | from_json }}"
-
 - name: Source the profile script as an account outside group hades
   ansible.builtin.shell: . /etc/profile.d/hades.sh && echo "${CHROME_PATH-unset} ${ERL_FLAGS-unset}"
   become: true

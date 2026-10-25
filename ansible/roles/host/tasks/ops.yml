@@ -1,6 +1,6 @@
 ---
-# Ops: gc, backup and keys timers, hades-status, hades-onboard, journal and Docker
-# log caps, and the login environment of group hades.
+# Ops: gc, backup and keys timers, hades-status, hades-onboard, the journal cap and the
+# login environment of group hades.
 - name: Create the backup directory
   ansible.builtin.file:
     path: "{{ backup_dir }}"
@@ -53,74 +53,6 @@
     dest: /etc/systemd/journald.conf.d/hades.conf
     mode: "0644"
   notify: journald restart
-
-# Docker log rotation is merged into an existing daemon.json, never written over it, and the
-# file is touched only when the merged settings differ from what is there. A log-driver the host
-# already chose is kept: with `local`, which takes the same options, only log-opts are merged;
-# with any other driver the file is left alone, since max-size/max-file would stop dockerd from
-# starting. Docker is restarted only when docker_restart_on_change is set.
-- name: Check whether Docker is installed
-  ansible.builtin.stat:
-    path: /usr/bin/dockerd
-  register: host_dockerd
-
-- name: Stat the Docker daemon config
-  ansible.builtin.stat:
-    path: /etc/docker/daemon.json
-  register: host_docker_conf_stat
-
-- name: Read the Docker daemon config
-  ansible.builtin.slurp:
-    src: /etc/docker/daemon.json
-  register: host_docker_conf
-  when: host_docker_conf_stat.stat.exists
-
-- name: Create the Docker config directory
-  ansible.builtin.file:
-    path: /etc/docker
-    state: directory
-    mode: "0755"
-  when: not host_docker_conf_stat.stat.exists
-
-- name: Compute the merged Docker daemon config
-  ansible.builtin.set_fact:
-    host_docker_current: "{{ host_docker_read }}"
-    host_docker_merged: "{{ host_docker_read | combine(host_docker_patch, recursive=true) }}"
-  vars:
-    host_docker_text: "{{ (host_docker_conf.content | b64decode) if host_docker_conf_stat.stat.exists else '' }}"
-    host_docker_read: "{{ (host_docker_text | trim | length > 0) | ternary(host_docker_text, '{}') | from_json }}"
-    host_docker_driver: "{{ host_docker_read['log-driver'] | default('') }}"
-    host_docker_wanted: "{{ lookup('ansible.builtin.template', 'docker-daemon-log.json.j2') | from_json }}"
-    host_docker_patch: >-
-      {{ host_docker_wanted if host_docker_driver in ['', host_docker_wanted['log-driver']]
-         else ({'log-opts': host_docker_wanted['log-opts']} if host_docker_driver == 'local' else {}) }}
-
-- name: Report a Docker log driver this role leaves alone
-  ansible.builtin.debug:
-    msg: >-
-      /etc/docker/daemon.json sets log-driver {{ host_docker_current['log-driver'] }}; log rotation
-      was not merged. Configure that driver's own limits.
-  when: host_docker_current['log-driver'] | default('json-file') not in ['json-file', 'local']
-
-- name: Merge log rotation into the Docker daemon config
-  ansible.builtin.copy:
-    content: "{{ host_docker_merged | to_nice_json(indent=2) }}\n"
-    dest: /etc/docker/daemon.json
-    mode: "0644"
-  when: host_docker_merged != host_docker_current
-  register: host_docker_written
-  notify: docker restart
-
-- name: Report the pending Docker restart
-  ansible.builtin.debug:
-    msg: >-
-      /etc/docker/daemon.json changed. The new log defaults apply to containers created after the
-      next `systemctl restart docker`; this role does not restart Docker unless
-      docker_restart_on_change is true.
-  when:
-    - host_docker_written is changed
-    - not (docker_restart_on_change | bool)
-    - host_dockerd.stat.exists
 
 - name: Set the login environment of group hades
   ansible.builtin.template:
