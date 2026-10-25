@@ -3,7 +3,6 @@ package naming
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"strconv"
 	"strings"
 	"testing"
@@ -19,10 +18,10 @@ func TestSanitize(t *testing.T) {
 }
 
 func TestSlugErrors(t *testing.T) {
-	if _, err := Slug("???"); !errors.Is(err, ErrEmptyName) {
+	if _, err := Slug("???"); err == nil || !strings.Contains(err.Error(), "empty") {
 		t.Fatal(err)
 	}
-	if _, err := Slug(strings.Repeat("a", 31)); !errors.Is(err, ErrSlugTooLong) {
+	if _, err := Slug(strings.Repeat("a", 31)); err == nil || !strings.Contains(err.Error(), "longer than 30") {
 		t.Fatal(err)
 	}
 }
@@ -47,7 +46,7 @@ func TestLabel(t *testing.T) {
 	if _, err := Label("{{bogus}}", Vars{}); err == nil {
 		t.Fatal("unknown placeholder accepted")
 	}
-	if _, err := Label(DefaultLabelTemplate, Vars{Project: "shop", Name: "???"}); !errors.Is(err, ErrEmptyName) {
+	if _, err := Label(DefaultLabelTemplate, Vars{Project: "shop", Name: "???"}); err == nil || !strings.Contains(err.Error(), "empty") {
 		t.Fatal(err)
 	}
 }
@@ -121,7 +120,7 @@ func TestSuffix(t *testing.T) {
 
 func TestCheckPlain(t *testing.T) {
 	for _, l := range []string{"", ".", "..", "../x", "a/b", "/abs", "x/", "../../../../escape"} {
-		if err := CheckPlain(l); !errors.Is(err, ErrNotPlain) {
+		if err := CheckPlain(l); err == nil || !strings.Contains(err.Error(), "plain file name") {
 			t.Errorf("%q: %v", l, err)
 		}
 	}

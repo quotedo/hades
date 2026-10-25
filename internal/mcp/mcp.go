@@ -151,7 +151,7 @@ func editJSON(fn func(map[string]any, Targets) error) func(string, Targets) erro
 		if err != nil {
 			return err
 		}
-		return writeAtomic(path, append(out, '\n'))
+		return os.WriteFile(path, append(out, '\n'), 0o644)
 	}
 }
 
@@ -165,7 +165,7 @@ func editCodex(path string, t Targets) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(path, []byte(setCodexURL(string(b), t.TidewaveURL)))
+	return os.WriteFile(path, []byte(setCodexURL(string(b), t.TidewaveURL)), 0o644)
 }
 
 func setCodexURL(src, url string) string {
@@ -189,7 +189,7 @@ func setCodexURL(src, url string) string {
 			break
 		}
 		if urlLine.MatchString(lines[i]) {
-			lines[i] = newLine + lineEnding(lines[i])
+			lines[i] = newLine + "\n"
 			return strings.Join(lines, "")
 		}
 	}
@@ -198,38 +198,4 @@ func setCodexURL(src, url string) string {
 	}
 	lines[header] += newLine + "\n"
 	return strings.Join(lines, "")
-}
-
-func lineEnding(l string) string {
-	switch {
-	case strings.HasSuffix(l, "\r\n"):
-		return "\r\n"
-	case strings.HasSuffix(l, "\n"):
-		return "\n"
-	}
-	return ""
-}
-
-// writeAtomic replaces path via a temp file and rename, keeping its mode.
-func writeAtomic(path string, data []byte) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".hades-mcp-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name()) // no-op after a successful rename
-	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmp.Name(), info.Mode().Perm()); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
 }

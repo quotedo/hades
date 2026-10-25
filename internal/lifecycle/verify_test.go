@@ -363,33 +363,6 @@ func TestUpReclaimsPortWhenRecordedLinkIsGoneOrForeign(t *testing.T) {
 	}
 }
 
-// A down that finds no manifest of its own names the ignored file that is
-// probably the worktree's.
-func TestDownNamesIgnoredManifestOfThisWorktree(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
-	path := plant(t, d, "demo-feature-x.toml", "not = [valid")
-	res, err := Down(context.Background(), d, c, true)
-	if err != nil || len(res) != 1 || !res[0].Skipped || !strings.Contains(res[0].Reason, "no manifest found") || !strings.Contains(res[0].Reason, "ignored manifest "+path+": ") {
-		t.Fatalf("%+v %v", res, err)
-	}
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
-	other := plant(t, d, "renamed.toml", fmt.Sprintf("label = \"something-else\"\nworktree = %q\n", c.Worktree))
-	res, _ = Down(context.Background(), d, c, true)
-	if !strings.Contains(res[0].Reason, "ignored manifest "+other+": ") {
-		t.Fatalf("%+v", res)
-	}
-	plant(t, d, "unrelated.toml", "not = [valid")
-	if err := os.Remove(other); err != nil {
-		t.Fatal(err)
-	}
-	res, _ = Down(context.Background(), d, c, true)
-	if strings.Contains(res[0].Reason, "ignored manifest") {
-		t.Fatalf("named an unrelated file: %+v", res)
-	}
-}
-
 // The port link must belong to the manifest's owner. Only root can create a
 // link owned by someone else, so this runs as root only.
 func TestGCRefusesPortLinkOfAnotherOwner(t *testing.T) {

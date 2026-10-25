@@ -114,21 +114,14 @@ var errNotRegular = errors.New("not a regular file")
 // readManifest reads the regular file at path without following a symlink
 // and records the file's owner. A missing file is fs.ErrNotExist.
 func readManifest(path string) (*Manifest, error) {
-	fi, err := os.Lstat(path)
-	if err != nil {
-		return nil, err
-	}
-	if !fi.Mode().IsRegular() {
-		return nil, fmt.Errorf("manifest %s: %w", path, errNotRegular)
-	}
-	// O_NOFOLLOW refuses a symlink swapped in since the Lstat; O_NONBLOCK
-	// keeps a FIFO swapped in from blocking the open.
+	// O_NOFOLLOW refuses a symlink; O_NONBLOCK keeps a FIFO from blocking
+	// the open.
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	fi, err = f.Stat()
+	fi, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}
@@ -265,30 +258,6 @@ func (r *Registry) RemoveManifest(label string) error {
 		return err
 	}
 	return os.Remove(path)
-}
-
-// ManifestOwner returns the uid owning the manifest file for label, which
-// must be a regular file. Ownership decisions use this (or
-// Manifest.OwnerUID), never the UID recorded inside the manifest.
-func (r *Registry) ManifestOwner(label string) (int, error) {
-	path, err := r.ManifestPath(label)
-	if err != nil {
-		return 0, err
-	}
-	return RegularFileOwner(path)
-}
-
-// RegularFileOwner returns the owner uid of the regular file at path, without
-// following a symlink.
-func RegularFileOwner(path string) (int, error) {
-	fi, err := os.Lstat(path)
-	if err != nil {
-		return 0, err
-	}
-	if !fi.Mode().IsRegular() {
-		return 0, fmt.Errorf("%s: %w", path, errNotRegular)
-	}
-	return ownerOf(fi, path)
 }
 
 func ownerOf(fi fs.FileInfo, path string) (int, error) {

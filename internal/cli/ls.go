@@ -16,30 +16,20 @@ import (
 	"github.com/quotedo/hades/internal/registry"
 )
 
-const lsUsage = "usage: hades ls [--mine] [--json]"
-
 // ls lists the manifests of the host registry.
 func ls(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
 	mine := fs.Bool("mine", false, "only the current user's worktrees")
-	if err := fs.Parse(args); err != nil {
-		fmt.Fprintf(ctx.Stderr, "ls: %v\n%s\n", err, lsUsage)
-		return 2
-	}
-	if fs.NArg() > 0 {
-		fmt.Fprintf(ctx.Stderr, "ls: unexpected arguments %q\n%s\n", fs.Args(), lsUsage)
-		return 2
+	if code, ok := parseArgs(ctx, fs, "usage: hades ls [--mine] [--json]", args); !ok {
+		return code
 	}
 	d, err := newDeps(ctx)
 	if err != nil {
-		fmt.Fprintf(ctx.Stderr, "hades: ls: %v\n", err)
-		return 1
+		return ctx.fail("ls", err)
 	}
 	all, problems, err := allManifests(d)
 	if err != nil {
-		fmt.Fprintf(ctx.Stderr, "hades: ls: %v\n", err)
-		return 1
+		return ctx.fail("ls", err)
 	}
 	for _, p := range problems {
 		fmt.Fprintf(ctx.Stderr, "hades: ls: %s\n", p)
@@ -53,8 +43,7 @@ func ls(ctx *Context, args []string) int {
 	}
 	if ctx.Flags.JSON {
 		if err := writeJSON(ctx.Stdout, list); err != nil {
-			fmt.Fprintf(ctx.Stderr, "hades: ls: %v\n", err)
-			return 1
+			return ctx.fail("ls", err)
 		}
 		return 0
 	}
@@ -65,8 +54,7 @@ func ls(ctx *Context, args []string) int {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", m.Label, m.User, strconv.Itoa(m.Port), m.Host, m.Worktree, age(now, m.CreatedAt))
 	}
 	if err := tw.Flush(); err != nil {
-		fmt.Fprintf(ctx.Stderr, "hades: ls: %v\n", err)
-		return 1
+		return ctx.fail("ls", err)
 	}
 	return 0
 }

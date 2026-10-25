@@ -2,6 +2,7 @@
 package testutil
 
 import (
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,21 +42,36 @@ func TempGitRepo(t *testing.T, rootName, branch string) (root, worktree string) 
 	return root, worktree
 }
 
+// CopyDir copies the regular files under src into dst, directories included.
+func CopyDir(t *testing.T, src, dst string) {
+	t.Helper()
+	err := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // StubTool writes an executable bash script named name into bindir.
 func StubTool(t *testing.T, bindir, name, script string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(bindir, name), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// StubPATH returns a getenv whose PATH is bindir followed by the system dirs.
-func StubPATH(t *testing.T, bindir string) func(string) string {
-	t.Helper()
-	return func(k string) string {
-		if k == "PATH" {
-			return bindir + ":/usr/bin:/bin"
-		}
-		return ""
 	}
 }

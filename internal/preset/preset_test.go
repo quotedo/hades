@@ -39,8 +39,8 @@ func writeFiles(t *testing.T, files map[string]string) string {
 }
 
 func TestDetectPhoenix(t *testing.T) {
-	p := detect(t, "testdata/phoenix") // mix.exs: app: :demo, deps {:phoenix, ...}, {:ecto_sql, ...}, aliases setup: [...]; mix.lock mentions "tidewave"
-	if p.Kind != Phoenix || !p.Web || p.AppName != "demo" || !p.HasEcto || !p.Tidewave || !slices.Equal(p.Setup, []string{"mix setup"}) {
+	p := detect(t, "testdata/phoenix") // mix.exs: app: :demo, deps {:phoenix, ...}, aliases setup: [...]; mix.lock mentions "tidewave"
+	if p.Kind != Phoenix || !p.Web || p.AppName != "demo" || !p.Tidewave || !slices.Equal(p.Setup, []string{"mix setup"}) {
 		t.Fatalf("%+v", p)
 	}
 }

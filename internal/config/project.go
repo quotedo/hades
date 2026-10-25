@@ -30,27 +30,26 @@ type Project struct {
 }
 
 // LoadProject reads <worktree>/hades.toml, else <root>/hades.toml. When
-// neither exists it returns an empty Project and from == "". Unknown keys are
-// an error.
-func LoadProject(worktree, root string) (p *Project, from string, err error) {
+// neither exists it returns an empty Project. Unknown keys are an error.
+func LoadProject(worktree, root string) (*Project, error) {
 	for _, dir := range []string{worktree, root} {
 		path := filepath.Join(dir, "hades.toml")
-		var q Project
-		md, err := toml.DecodeFile(path, &q)
+		var p Project
+		md, err := toml.DecodeFile(path, &p)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return nil, path, err
+			return nil, err
 		}
 		if un := md.Undecoded(); len(un) > 0 {
 			keys := make([]string, len(un))
 			for i, k := range un {
 				keys[i] = k.String()
 			}
-			return nil, path, fmt.Errorf("%s: unknown keys: %s", path, strings.Join(keys, ", "))
+			return nil, fmt.Errorf("%s: unknown keys: %s", path, strings.Join(keys, ", "))
 		}
-		return &q, path, nil
+		return &p, nil
 	}
-	return &Project{}, "", nil
+	return &Project{}, nil
 }

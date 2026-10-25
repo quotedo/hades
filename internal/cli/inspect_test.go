@@ -194,7 +194,7 @@ func TestEnvShellOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errs = runMain(getenv, args("env")...)
-	if code != 0 || out != "export NAME='it'\\''s'\nexport PORT='4100'\n" {
+	if code != 0 || out != "export PORT=4100\nexport NAME='it'\\''s'\n" {
 		t.Fatalf("shell: code=%d out=%q err=%q", code, out, errs)
 	}
 	code, out, _ = runMain(getenv, args("env", "--json")...)
@@ -211,26 +211,29 @@ func TestDoctorFailsOnMissingRegistryDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errs := runMain(getenv, "doctor")
-	if code != 1 || !strings.Contains(out+errs, missing) || !strings.Contains(out+errs, "FAIL registry") {
+	if code != 1 || !strings.Contains(out, "FAIL registry: registry directory missing: "+missing+": ask the administrator to apply --tags host\n") {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
 	}
 }
 
-type doctorCheck struct {
-	Name   string `json:"name"`
-	OK     bool   `json:"ok"`
-	Warn   bool   `json:"warn"`
-	Detail string `json:"detail"`
+func TestDoctorLaptopRegistryCreatedAtFirstUp(t *testing.T) {
+	stubProbe(t)
+	_, _, getenv := laptopUpFixture(t, "phoenix")
+	t.Chdir(t.TempDir())
+	_, checks, _ := doctorChecks(t, getenv)
+	if c := checks["registry"]; !c.OK || c.Detail != "created at first up" || !checks["manifests"].OK {
+		t.Fatalf("checks = %+v", checks)
+	}
 }
 
-func doctorChecks(t *testing.T, getenv func(string) string) (int, map[string]doctorCheck, []string) {
+func doctorChecks(t *testing.T, getenv func(string) string) (int, map[string]check, []string) {
 	t.Helper()
 	code, out, errs := runMain(getenv, "doctor", "--json")
-	var list []doctorCheck
+	var list []check
 	if err := json.Unmarshal([]byte(out), &list); err != nil {
 		t.Fatalf("doctor --json: %v: out=%q err=%q", err, out, errs)
 	}
-	byName := map[string]doctorCheck{}
+	byName := map[string]check{}
 	var order []string
 	for _, c := range list {
 		byName[c.Name] = c
@@ -254,7 +257,7 @@ func TestDoctorRegistryPermsFailWithoutSetgid(t *testing.T) {
 	if c := checks["caddy-reload"]; !c.OK {
 		t.Fatalf("caddy-reload = %+v", c)
 	}
-	if c := checks["postgres"]; c.OK || c.Warn {
+	if c := checks["postgres"]; c.OK || c.Warn || !strings.Contains(c.Detail, ": ask the administrator about Postgres on ") {
 		t.Fatalf("postgres = %+v", c)
 	}
 	if !checks["direnv"].Warn && checks["direnv"].OK == false {
@@ -477,10 +480,18 @@ func TestDoctorWarnOnlyFailuresKeepExitZero(t *testing.T) {
 	}
 }
 
+func TestDoctorWarnsWithoutADEConfig(t *testing.T) {
+	getenv, _, wt, _ := phoenixDoctorFixture(t, true)
+	code, out, errs := runMain(getenv, "--root", filepath.Dir(wt), "--worktree", wt, "--name", "feature/x", "doctor")
+	if code != 0 || !strings.Contains(out, "WARN ade-hooks: no paseo.json or orca.yaml: run hades init and commit\n") {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+	}
+}
+
 func TestDoctorToolsFailWhenMixMissing(t *testing.T) {
 	getenv, _, wt, _ := phoenixDoctorFixture(t, false)
 	code, out, errs := runMain(getenv, "--root", filepath.Dir(wt), "--worktree", wt, "--name", "feature/x", "doctor")
-	if code != 1 || !strings.Contains(out, "FAIL tools: phoenix preset needs mix") {
+	if code != 1 || !strings.Contains(out, "FAIL tools: phoenix preset needs mix") || !strings.Contains(out, ": install mix\n") {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
 	}
 }

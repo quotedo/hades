@@ -4,33 +4,30 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
-	"net/url"
-	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 
 	"github.com/quotedo/hades/internal/config"
+	"github.com/quotedo/hades/internal/naming"
+	"github.com/quotedo/hades/internal/pg"
 	"github.com/quotedo/hades/internal/preset"
 	"github.com/quotedo/hades/internal/rabbit"
 )
 
 // Inputs is everything Compute needs to derive a worktree's environment.
 type Inputs struct {
-	Port                                          int
-	Label, Host, URL, Suffix, Name, Project, User string
-	Preset                                        preset.Preset
-	HostCfg                                       config.Host
-	Vhost                                         string
-	Extra                                         map[string]string
-	ExistingSecret                                string
+	Port                                    int
+	Label, Host, URL, Suffix, Name, Project string
+	Preset                                  preset.Preset
+	HostCfg                                 config.Host
+	Vhost                                   string
+	Extra                                   map[string]string
+	ExistingSecret                          string
 }
-
-var placeholderRe = regexp.MustCompile(`\{\{[^{}]*\}\}`)
 
 // Compute returns the worktree environment in a stable order.
 func Compute(in Inputs) ([]KV, error) {
-	pg := in.HostCfg.Postgres
+	db := in.HostCfg.Postgres
 	port := strconv.Itoa(in.Port)
 
 	secret := in.ExistingSecret
@@ -49,21 +46,16 @@ func Compute(in Inputs) ([]KV, error) {
 
 	kv := []KV{
 		{"PORT", port},
-		{"DB_HOST", pg.Host},
-		{"DB_PORT", strconv.Itoa(pg.Port)},
-		{"DB_USER", pg.User},
-		{"DB_PASSWORD", pg.Password},
+		{"DB_HOST", db.Host},
+		{"DB_PORT", strconv.Itoa(db.Port)},
+		{"DB_USER", db.User},
+		{"DB_PASSWORD", db.Password},
 		{"DB_SUFFIX", in.Suffix},
 	}
 	if app := in.Preset.AppName; app != "" {
-		base := (&url.URL{
-			Scheme: "postgres",
-			User:   url.UserPassword(pg.User, pg.Password),
-			Host:   pg.Host + ":" + strconv.Itoa(pg.Port),
-		}).String()
 		kv = append(kv,
-			KV{"DATABASE_URL", base + "/" + app + "_dev" + in.Suffix},
-			KV{"TEST_DATABASE_URL", base + "/" + app + "_test" + in.Suffix},
+			KV{"DATABASE_URL", pg.DSN(db, app+"_dev"+in.Suffix)},
+			KV{"TEST_DATABASE_URL", pg.DSN(db, app+"_test"+in.Suffix)},
 		)
 	}
 	kv = append(kv,
@@ -95,27 +87,11 @@ func Compute(in Inputs) ([]KV, error) {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		v, err := render(in.Extra[k], vars)
+		v, err := naming.Render(in.Extra[k], vars)
 		if err != nil {
 			return nil, fmt.Errorf("env %s: %w", k, err)
 		}
 		kv = append(kv, KV{k, v})
 	}
 	return kv, nil
-}
-
-func render(tmpl string, vars map[string]string) (string, error) {
-	var bad string
-	out := placeholderRe.ReplaceAllStringFunc(tmpl, func(m string) string {
-		name := strings.TrimSpace(m[2 : len(m)-2])
-		v, ok := vars[name]
-		if !ok && bad == "" {
-			bad = m
-		}
-		return v
-	})
-	if bad != "" {
-		return "", fmt.Errorf("unknown placeholder %s", bad)
-	}
-	return out, nil
 }

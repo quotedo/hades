@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -25,15 +26,6 @@ func mustExec(t *testing.T, dsn, stmt string) {
 	if _, err := conn.Exec(ctx, stmt); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 func TestMatch(t *testing.T) {
@@ -105,7 +97,7 @@ func TestClientListAndDrop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !contains(names, name) {
+	if !slices.Contains(names, name) {
 		t.Fatal(names)
 	}
 	if err := c.Drop(ctx, name); err != nil {
@@ -115,7 +107,7 @@ func TestClientListAndDrop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if contains(names, name) {
+	if slices.Contains(names, name) {
 		t.Fatal("still there")
 	}
 }

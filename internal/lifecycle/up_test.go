@@ -8,12 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/envfile"
 	"github.com/quotedo/hades/internal/execx"
+	"github.com/quotedo/hades/internal/testutil"
 )
 
 func TestUpPhoenixServerHappyPath(t *testing.T) {
@@ -33,15 +35,15 @@ func TestUpPhoenixServerHappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	env, _ := envfile.ReadEnvWorktree(filepath.Join(c.Worktree, ".env.worktree"))
-	if env["PORT"] != "4100" || env["PHX_HOST"] != m.Host {
+	if !slices.Contains(env, envfile.KV{Key: "PORT", Value: "4100"}) || !slices.Contains(env, envfile.KV{Key: "PHX_HOST", Value: m.Host}) {
 		t.Fatal(env)
 	}
 	calls := argvs(d.Run.(*execx.Fake))
-	if !hasCall(calls, "sudo -n /usr/local/bin/hades caddy-reload") || !hasCallPrefix(calls, "sh -c mix setup") {
+	if !slices.Contains(calls, "sudo -n /usr/local/bin/hades caddy-reload") || !slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "sh -c mix setup") }) {
 		t.Fatalf("%v", calls)
 	}
 	setup := lastCallWithPrefix(d.Run.(*execx.Fake), "sh")
-	if !envHas(setup.Env, "PORT=4100") || setup.Dir != c.Worktree {
+	if !slices.Contains(setup.Env, "PORT=4100") || setup.Dir != c.Worktree {
 		t.Fatalf("%+v", setup)
 	}
 }
@@ -74,7 +76,7 @@ func TestUpLabelTakenByOtherWorktree(t *testing.T) {
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	other := c
 	other.Worktree = t.TempDir()
-	copyDir(t, filepath.Join("..", "preset", "testdata", "phoenix"), other.Worktree)
+	testutil.CopyDir(t, filepath.Join("..", "preset", "testdata", "phoenix"), other.Worktree)
 	_, err := Up(context.Background(), d, other, UpOptions{SkipSetup: true})
 	var lt *ErrLabelTaken
 	if !errors.As(err, &lt) || !strings.Contains(err.Error(), c.Worktree) {
@@ -133,7 +135,7 @@ func TestUpLaptopModeNoSiteNoSudo(t *testing.T) {
 	if err != nil || toMap(out.Env)["HADES_URL"] != "http://localhost:4100" {
 		t.Fatal(err)
 	}
-	if hasCall(argvs(d.Run.(*execx.Fake)), "sudo -n /usr/local/bin/hades caddy-reload") {
+	if slices.Contains(argvs(d.Run.(*execx.Fake)), "sudo -n /usr/local/bin/hades caddy-reload") {
 		t.Fatal("sudo on laptop")
 	}
 }
@@ -275,7 +277,7 @@ func TestUpDirenvAllowOnlyWhenInstalledAndNotFatal(t *testing.T) {
 	if _, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true}); err != nil {
 		t.Fatal(err)
 	}
-	if hasCallPrefix(argvs(d.Run.(*execx.Fake)), "direnv") {
+	if slices.ContainsFunc(argvs(d.Run.(*execx.Fake)), func(c string) bool { return strings.HasPrefix(c, "direnv") }) {
 		t.Fatal("direnv run although not installed")
 	}
 
@@ -287,7 +289,7 @@ func TestUpDirenvAllowOnlyWhenInstalledAndNotFatal(t *testing.T) {
 	if _, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true}); err != nil {
 		t.Fatal(err)
 	}
-	if !hasCall(argvs(d.Run.(*execx.Fake)), "direnv allow "+c.Worktree) || !strings.Contains(log.String(), "direnv allow") {
+	if !slices.Contains(argvs(d.Run.(*execx.Fake)), "direnv allow "+c.Worktree) || !strings.Contains(log.String(), "direnv allow") {
 		t.Fatalf("%v\n%s", argvs(d.Run.(*execx.Fake)), log.String())
 	}
 }
@@ -295,7 +297,7 @@ func TestUpDirenvAllowOnlyWhenInstalledAndNotFatal(t *testing.T) {
 func TestUpGitSecretRevealOnlyWithGitsecretDir(t *testing.T) {
 	d, c := newServerDeps(t, "phoenix")
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
-	if hasCall(argvs(d.Run.(*execx.Fake)), "git secret reveal -f") {
+	if slices.Contains(argvs(d.Run.(*execx.Fake)), "git secret reveal -f") {
 		t.Fatal("reveal without .gitsecret")
 	}
 	os.MkdirAll(filepath.Join(c.Worktree, ".gitsecret"), 0o755)
@@ -324,7 +326,7 @@ func TestUpSetupEnvComputedWinsOverProcessEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	setup := lastCallWithPrefix(d.Run.(*execx.Fake), "sh")
-	if envHas(setup.Env, "PORT=1") || !envHas(setup.Env, "PORT=4100") || !envHas(setup.Env, "PATH="+os.Getenv("PATH")) {
+	if slices.Contains(setup.Env, "PORT=1") || !slices.Contains(setup.Env, "PORT=4100") || !slices.Contains(setup.Env, "PATH="+os.Getenv("PATH")) {
 		t.Fatalf("%v", setup.Env)
 	}
 }
@@ -353,19 +355,19 @@ func TestUpNonWebPresetGetsNoPortOrURL(t *testing.T) {
 		t.Fatal("site written for a non-web preset")
 	}
 	calls := argvs(d.Run.(*execx.Fake))
-	if hasCallPrefix(calls, "sudo") || !hasCall(calls, "sh -c go mod download") {
+	if slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "sudo") }) || !slices.Contains(calls, "sh -c go mod download") {
 		t.Fatalf("%v", calls)
 	}
 	env, _ := envfile.ReadEnvWorktree(filepath.Join(c.Worktree, ".env.worktree"))
-	for _, k := range []string{"PORT", "PHX_HOST", "HADES_URL"} {
-		if _, ok := env[k]; ok {
-			t.Errorf(".env.worktree has %s", k)
+	for _, e := range env {
+		if slices.Contains([]string{"PORT", "PHX_HOST", "HADES_URL"}, e.Key) {
+			t.Errorf(".env.worktree has %s", e.Key)
 		}
 	}
-	if env["HADES_LABEL"] != "demo-feature-x" {
+	if !slices.Contains(env, envfile.KV{Key: "HADES_LABEL", Value: "demo-feature-x"}) {
 		t.Fatal(env)
 	}
-	if setup := lastCallWithPrefix(d.Run.(*execx.Fake), "sh"); envHas(setup.Env, "HADES_URL=") {
+	if setup := lastCallWithPrefix(d.Run.(*execx.Fake), "sh"); slices.Contains(setup.Env, "HADES_URL=") {
 		t.Fatalf("%v", setup.Env)
 	}
 	if mcp, _ := os.ReadFile(filepath.Join(c.Worktree, ".mcp.json")); !strings.Contains(string(mcp), "localhost:4000") {
