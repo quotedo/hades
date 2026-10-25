@@ -70,32 +70,32 @@
     - name: Start a root listener on the probe port
       ansible.builtin.command: >-
         systemd-run --unit={{ host_test_probe_unit }} --collect
-        nc -dlk {{ host_loopback_address }} {{ host_test_probe_port }}
+        nc -dlk {{ hades_loopback_address }} {{ host_test_probe_port }}
       changed_when: true
 
     - name: Wait for the listener
       ansible.builtin.wait_for:
-        host: "{{ host_loopback_address }}"
+        host: "{{ hades_loopback_address }}"
         port: "{{ host_test_probe_port | int }}"
         timeout: 10
 
     # Vacuous for a port nothing listens on yet (dev Postgres before the postgres role, say); the
     # listener carries the real check.
     - name: Connect to the listener, dev Postgres, Caddy and the Paseo ports as the probe account
-      ansible.builtin.command: runuser -u {{ host_test_unprivileged_user }} -- nc -z -w 3 {{ host_loopback_address }} {{ item }}
+      ansible.builtin.command: runuser -u {{ verify_unprivileged_user }} -- nc -z -w 3 {{ hades_loopback_address }} {{ item }}
       register: host_test_probe_dev
       changed_when: false
       failed_when: false
       loop: "{{ [host_test_probe_port, dev_pg_port, caddy_port] + user_present | selectattr('paseo_port', 'defined') | map(attribute='paseo_port') | list }}"
 
     - name: Connect to the listener as root
-      ansible.builtin.command: nc -z -w 3 {{ host_loopback_address }} {{ host_test_probe_port }}
+      ansible.builtin.command: nc -z -w 3 {{ hades_loopback_address }} {{ host_test_probe_port }}
       register: host_test_probe_root
       changed_when: false
       failed_when: false
 
     - name: Connect to ssh as the probe account
-      ansible.builtin.command: runuser -u {{ host_test_unprivileged_user }} -- nc -z -w 3 {{ host_loopback_address }} {{ host_test_ssh_port }}
+      ansible.builtin.command: runuser -u {{ verify_unprivileged_user }} -- nc -z -w 3 {{ hades_loopback_address }} {{ ansible_port | default(22) }}
       register: host_test_probe_ssh
       changed_when: false
       failed_when: false

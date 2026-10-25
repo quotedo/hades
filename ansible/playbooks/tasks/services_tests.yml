@@ -41,12 +41,12 @@
   register: services_test_ss
   changed_when: false
 
-# Each port of a listed service has listeners, and every one of them is on dev_services_host.
-- name: Assert the service ports listen on dev_services_host only
+# Each port of a listed service has listeners, and every one of them is on hades_loopback_address.
+- name: Assert the service ports listen on hades_loopback_address only
   ansible.builtin.assert:
     that:
       - services_test_lines | length > 0
-      - services_test_lines | reject('search', ' ' ~ (dev_services_host | regex_escape) ~ ':' ~ item ~ ' ') | list | length == 0
+      - services_test_lines | reject('search', ' ' ~ (hades_loopback_address | regex_escape) ~ ':' ~ item ~ ' ') | list | length == 0
     fail_msg: "port {{ item }} listeners: {{ services_test_lines | join(' | ') or 'none' }}"
     quiet: true
   loop: >-
@@ -71,7 +71,7 @@
 # Retried while the broker or LocalStack is still starting.
 - name: Query the RabbitMQ management API with the contracted credentials
   ansible.builtin.uri:
-    url: http://{{ dev_services_host }}:{{ rabbitmq_management_port }}/api/overview
+    url: http://{{ hades_loopback_address }}:{{ rabbitmq_management_port }}/api/overview
     url_username: "{{ rabbitmq_user }}"
     url_password: "{{ rabbitmq_password }}"
     force_basic_auth: true
@@ -84,7 +84,7 @@
 
 - name: Query the LocalStack health endpoint
   ansible.builtin.uri:
-    url: http://{{ dev_services_host }}:{{ localstack_port }}/_localstack/health
+    url: http://{{ hades_loopback_address }}:{{ localstack_port }}/_localstack/health
   become: true
   register: services_test_localstack
   until: services_test_localstack.status == 200
@@ -94,7 +94,7 @@
 
 - name: Assert each LocalStack bucket exists
   ansible.builtin.uri:
-    url: http://{{ dev_services_host }}:{{ localstack_port }}/{{ item }}
+    url: http://{{ hades_loopback_address }}:{{ localstack_port }}/{{ item }}
     method: HEAD
   become: true
   loop: "{{ localstack_buckets }}"

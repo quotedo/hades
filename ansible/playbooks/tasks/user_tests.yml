@@ -79,7 +79,7 @@
 
 # Vacuous where nothing listens on a blocked port.
 - name: Connect to each blocked port as each dev user, which must be refused
-  ansible.builtin.command: runuser -u {{ item.0.name }} -- nc -z -w 3 {{ host_loopback_address }} {{ item.1 }}
+  ansible.builtin.command: runuser -u {{ item.0.name }} -- nc -z -w 3 {{ hades_loopback_address }} {{ item.1 }}
   become: true
   register: user_test_blocked
   changed_when: false

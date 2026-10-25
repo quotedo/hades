@@ -1,5 +1,5 @@
 ---
-# Ports, credentials, dev_services and dev_services_host are shared defaults in roles/host.
+# Ports, credentials, dev_services and hades_loopback_address are shared defaults in roles/host.
 services_dir: "{{ hades_registry_root }}/services"
 rabbitmq_image: rabbitmq:4-management
 # The last tag that runs without a LocalStack auth token; newer releases use calendar versions.

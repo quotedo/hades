@@ -131,7 +131,7 @@
     - name: Hand the scratch directory to the unprivileged account
       ansible.builtin.file:
         path: "{{ host_test_chrome_tmp.path }}"
-        owner: "{{ host_test_unprivileged_user }}"
+        owner: "{{ verify_unprivileged_user }}"
         mode: "0700"
 
     - name: Dump about:blank with Chrome as the unprivileged account, sandbox enabled
@@ -143,7 +143,7 @@
           - "60"
           - runuser
           - -u
-          - "{{ host_test_unprivileged_user }}"
+          - "{{ verify_unprivileged_user }}"
           - --
           - env
           - HOME={{ host_test_chrome_tmp.path }}
@@ -164,14 +164,14 @@
           - host_test_chrome_unpriv.rc == 0
           - "'<html' in host_test_chrome_unpriv.stdout"
         fail_msg: >-
-          Chrome as {{ host_test_unprivileged_user }} exited {{ host_test_chrome_unpriv.rc }}:
+          Chrome as {{ verify_unprivileged_user }} exited {{ host_test_chrome_unpriv.rc }}:
           {{ host_test_chrome_unpriv.stderr_lines | default([]) | select('search', 'sandbox|namespace|FATAL') | list | join(' | ') }}
         quiet: true
 
   always:
     # timeout signals runuser only; Chrome's zygote and renderers may outlive it.
     - name: Stop Chrome processes left by the test
-      ansible.builtin.command: pkill -u {{ host_test_unprivileged_user }} -f {{ host_test_chrome_tmp.path }}
+      ansible.builtin.command: pkill -u {{ verify_unprivileged_user }} -f {{ host_test_chrome_tmp.path }}
       changed_when: false
       failed_when: false
       when: host_test_chrome_tmp.path is defined

@@ -1,7 +1,7 @@
 ---
-# dev_users, hades_group, hades_tool_paths, erl_flags, chrome_root and the per-user resource
-# policy (dev_user_*, default_limit_nofile, hades_user_slice_dropin_name) are shared defaults in
-# roles/host, as are the toolchain store, agent CLI and ADE versions.
+# dev_users, hades_group, erl_flags, chrome_root and the per-user resource policy (dev_user_*,
+# default_limit_nofile) are shared defaults in roles/host, as are the toolchain store, agent CLI
+# and ADE versions.
 
 # Each user is combined onto {'state': 'present'}, so one without state counts as present.
 user_present: >-

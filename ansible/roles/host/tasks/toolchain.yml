@@ -24,7 +24,7 @@
     mode: "0644"
 
 # State comes from `mise ls --json`, never from directories: a failed install leaves no record,
-# so the next run tries it again (host_tools_listed and host_tools_installed: host defaults).
+# so the next run tries it again (host_tools_listed and host_tools_installed: main.yml).
 - name: Read the tool installs
   ansible.builtin.command: mise ls --json
   register: host_tools_ls

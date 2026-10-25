@@ -3,6 +3,9 @@
 - name: Verify the collection
   hosts: dev_servers
   gather_facts: false
+  vars:
+    # The account the isolation and Chrome probes run as.
+    verify_unprivileged_user: nobody
   roles:
     # Listed only to load each role's defaults for the tests, at role-default precedence, so
     # inventory values still win. Do not use vars_files instead: play vars_files outrank inventory

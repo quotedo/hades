@@ -1,5 +1,5 @@
 # {{ ansible_managed }}
-# Host ports are published on {{ dev_services_host }} only; the container-side ports are the images' own.
+# Host ports are published on {{ hades_loopback_address }} only; the container-side ports are the images' own.
 name: hades
 x-logging: &logging
   driver: json-file
@@ -15,9 +15,9 @@ services:
       RABBITMQ_DEFAULT_USER: {{ rabbitmq_user | to_json }}
       RABBITMQ_DEFAULT_PASS: {{ rabbitmq_password | to_json }}
     ports:
-      - "{{ dev_services_host }}:{{ rabbitmq_amqp_port }}:5672"
-      - "{{ dev_services_host }}:{{ rabbitmq_management_port }}:15672"
-      - "{{ dev_services_host }}:{{ rabbitmq_mqtt_port }}:1883"
+      - "{{ hades_loopback_address }}:{{ rabbitmq_amqp_port }}:5672"
+      - "{{ hades_loopback_address }}:{{ rabbitmq_management_port }}:15672"
+      - "{{ hades_loopback_address }}:{{ rabbitmq_mqtt_port }}:1883"
     volumes:
       - ./rabbitmq-enabled-plugins:/etc/rabbitmq/enabled_plugins:ro
 {% endif %}
@@ -32,7 +32,7 @@ services:
       # Read by the ready hook; here rather than in the script so a changed list recreates the container.
       HADES_BUCKETS: "{{ localstack_buckets | join(' ') }}"
     ports:
-      - "{{ dev_services_host }}:{{ localstack_port }}:4566"
+      - "{{ hades_loopback_address }}:{{ localstack_port }}:4566"
     volumes:
       - ./localstack-init.sh:/etc/localstack/init/ready.d/hades-buckets.sh:ro
 {% endif %}
@@ -43,5 +43,5 @@ services:
     logging: *logging
     cgroup_parent: hades.slice
     ports:
-      - "{{ dev_services_host }}:{{ redis_port }}:6379"
+      - "{{ hades_loopback_address }}:{{ redis_port }}:6379"
 {% endif %}

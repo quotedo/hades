@@ -73,7 +73,7 @@
 # As root: loopback isolation lets only root, dev users and service accounts reach the port.
 - name: Query the dev cluster over TCP with the contracted credentials
   ansible.builtin.command: >-
-    psql -XtA -h {{ dev_pg_host }} -p {{ dev_pg_port }} -U {{ dev_pg_user }} -d postgres
+    psql -XtA -h {{ hades_loopback_address }} -p {{ dev_pg_port }} -U {{ dev_pg_user }} -d postgres
     -c 'show fsync' -c "select 1 from pg_available_extensions where name = 'postgis'"
   environment:
     PGPASSWORD: "{{ dev_pg_password }}"
@@ -92,7 +92,7 @@
 
 - name: Connect with a wrong password
   ansible.builtin.command: >-
-    psql -XtA -h {{ dev_pg_host }} -p {{ dev_pg_port }} -U {{ dev_pg_user }} -d postgres -c 'select 1'
+    psql -XtA -h {{ hades_loopback_address }} -p {{ dev_pg_port }} -U {{ dev_pg_user }} -d postgres -c 'select 1'
   environment:
     PGPASSWORD: "{{ dev_pg_password }}-wrong"
   become: true

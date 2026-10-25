@@ -7,7 +7,7 @@ export LC_ALL=C
 
 hades={{ (hades_bin_dir ~ '/hades') | quote }}
 group={{ hades_group | quote }}
-pg_host={{ dev_pg_host | quote }}
+pg_host={{ hades_loopback_address | quote }}
 pg_port={{ dev_pg_port | int }}
 pg_user={{ dev_pg_user | quote }}
 pg_password={{ dev_pg_password | quote }}

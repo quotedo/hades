@@ -24,7 +24,7 @@
     acceptance_entry: "{{ acceptance_ls.stdout | from_json | selectattr('Worktree', 'eq', acceptance_wt) | first | default({}) }}"
     acceptance_port: "{{ acceptance_entry.Port }}"
     acceptance_db: sample_dev{{ acceptance_entry.DBSuffix }}
-    acceptance_psql: psql -h {{ dev_pg_host }} -p {{ dev_pg_port }} -U {{ dev_pg_user }} -d postgres -tAc 'SELECT datname FROM pg_database'
+    acceptance_psql: psql -h {{ hades_loopback_address }} -p {{ dev_pg_port }} -U {{ dev_pg_user }} -d postgres -tAc 'SELECT datname FROM pg_database'
   block:
     - name: Copy the sample project
       ansible.builtin.copy:
@@ -90,18 +90,18 @@
     - name: Serve the worktree on its port as the user
       ansible.builtin.command: >-
         systemd-run --unit=hades-acceptance-http.service --collect --uid={{ acceptance_user }}
-        python3 -m http.server --bind {{ ingress_loopback_address }} --directory {{ acceptance_wt }} {{ acceptance_port }}
+        python3 -m http.server --bind {{ hades_loopback_address }} --directory {{ acceptance_wt }} {{ acceptance_port }}
       changed_when: true
 
     - name: Wait for the server
       ansible.builtin.wait_for:
-        host: "{{ ingress_loopback_address }}"
+        host: "{{ hades_loopback_address }}"
         port: "{{ acceptance_port | int }}"
         timeout: 10
 
     - name: Assert Caddy routes the host name to the worktree
       ansible.builtin.uri:
-        url: http://{{ ingress_loopback_address }}:{{ caddy_port }}/
+        url: http://{{ hades_loopback_address }}:{{ caddy_port }}/
         headers:
           Host: "{{ acceptance_entry.Host }}"
         status_code: 200
@@ -114,11 +114,11 @@
       changed_when: false
 
     - name: Connect to the worktree port as the probe account and as the user
-      ansible.builtin.command: runuser -u {{ item }} -- nc -z -w 3 {{ ingress_loopback_address }} {{ acceptance_port }}
+      ansible.builtin.command: runuser -u {{ item }} -- nc -z -w 3 {{ hades_loopback_address }} {{ acceptance_port }}
       register: acceptance_nc
       changed_when: false
       failed_when: false
-      loop: ["{{ host_test_unprivileged_user }}", "{{ acceptance_user }}"]
+      loop: ["{{ verify_unprivileged_user }}", "{{ acceptance_user }}"]
 
     - name: Run hades doctor as the user
       ansible.builtin.command: runuser -l {{ acceptance_user }} -c 'hades doctor'
@@ -146,7 +146,7 @@
 
     - name: Assert Caddy no longer routes the host name
       ansible.builtin.uri:
-        url: http://{{ ingress_loopback_address }}:{{ caddy_port }}/
+        url: http://{{ hades_loopback_address }}:{{ caddy_port }}/
         headers:
           Host: "{{ acceptance_entry.Host }}"
         status_code: 302

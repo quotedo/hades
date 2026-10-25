@@ -15,7 +15,6 @@ hades_config_dir: /etc/hades
 hades_label_template: !unsafe "{{project}}-{{name}}" # noqa: jinja[spacing]
 hades_port_range: "4100-4999"
 hades_registry_root: /srv/hades
-hades_tool_paths: []
 dev_services: []
 
 # Cloudflare Access (ingress role): extra emails or @domain entries the policy admits besides the
@@ -39,13 +38,11 @@ caddy_reload_command: [systemctl, reload, caddy]
 hades_live_dir: /etc/caddy/hades-sites
 
 # Dev Postgres (postgres role)
-dev_pg_host: 127.0.0.1
 dev_pg_port: 5433
 dev_pg_user: postgres
 dev_pg_password: postgres
 
 # Shared dev services (services role)
-dev_services_host: 127.0.0.1
 rabbitmq_management_port: 15672
 rabbitmq_amqp_port: 5672
 rabbitmq_user: guest
@@ -63,25 +60,6 @@ mise_shims: "{{ mise_store }}/shims"
 tools:
   node: ["24.22.1"]
   gh: ["2.103.1"]
-# `tool@version` for every tools entry, and for every installed record under the store in
-# host_tools_ls (`mise ls --json`, registered by the role and by verify). mise also lists versions
-# a config requests but nobody installed, and root's own installs: neither counts.
-host_tools_listed: >-
-  {%- set out = [] -%}
-  {%- for tool, versions in tools.items() -%}
-  {%- for v in versions -%}
-  {%- set _ = out.append(tool ~ '@' ~ v) -%}
-  {%- endfor -%}
-  {%- endfor -%}
-  {{ out }}
-host_tools_installed: >-
-  {%- set out = [] -%}
-  {%- for tool, records in (host_tools_ls.stdout | default('{}') | from_json).items() -%}
-  {%- for r in records if r.installed and r.install_path.startswith(mise_store ~ '/installs/') -%}
-  {%- set _ = out.append(tool ~ '@' ~ r.version) -%}
-  {%- endfor -%}
-  {%- endfor -%}
-  {{ out }}
 kerl_configure_options: "--without-wx --without-javac --without-odbc"
 # apt packages a host adds on top of host_packages; never removed by the role.
 host_extra_packages: []
@@ -118,29 +96,17 @@ host_chrome_packages:
 # Ops
 backup_dir: /var/backups/hades
 host_backup_keep: 7
-host_backup_on_calendar: "*-*-* 03:30:00"
-host_gc_on_calendar: weekly
 journald_system_max_use: 2G
 # Fallbacks for hades-status when /etc/login.defs has no UID_MIN/UID_MAX.
 host_uid_min: 1000
 host_uid_max: 60000
 
-# Loopback isolation: service accounts allowed to reach the dev port set, when
-# they exist on the host. Their uids are resolved at run time.
-host_isolation_service_accounts: [caddy, cloudflared, hades-postgres]
-
-# The loopback address Paseo binds (user role), and the addresses and accounts the verify
-# playbook's tests use.
-host_loopback_address: 127.0.0.1
-host_test_ssh_port: "{{ ansible_port | default(22) }}"
-host_test_unprivileged_user: nobody
+# The loopback address Caddy, Paseo, Postgres and the shared services bind; worktree apps listen
+# there too.
+hades_loopback_address: 127.0.0.1
 
 # Resource policy: starting values for a 128 GB box, override per host.
 # The per-user values (dev_user_*, default_limit_nofile) are applied by the user role.
-# Its per-uid slice drop-in is named 20-*.conf so that it sorts before the 50-<Property>.conf
-# files `systemctl set-property` writes; drop-ins apply in filename order across directories,
-# so an operator's set-property value still overrides it.
-hades_user_slice_dropin_name: 20-hades.conf
 dev_user_memory_high: 88G
 dev_user_memory_max: 96G
 dev_user_memory_swap_max: 2G

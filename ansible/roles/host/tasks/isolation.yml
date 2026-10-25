@@ -18,7 +18,7 @@
   ansible.builtin.set_fact:
     host_isolation_dev_uids: "{{ user_present | map(attribute='uid') | map('int') | unique | sort }}"
     host_isolation_service_uids: >-
-      {{ host_isolation_service_accounts | select('in', ansible_facts.getent_passwd)
+      {{ ['caddy', 'cloudflared', dev_pg_os_user] | select('in', ansible_facts.getent_passwd)
          | map('extract', ansible_facts.getent_passwd) | map(attribute=1) | map('int') | sort }}
     host_isolation_dev_ports: >-
       {{ ([hades_port_range, dev_pg_port, caddy_port]

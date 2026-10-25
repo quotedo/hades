@@ -34,7 +34,7 @@
                     | join(' | ') or 'none' }}
     quiet: true
   vars:
-    ingress_test_bind: " {{ ingress_loopback_address | regex_escape }}:{{ caddy_port }} "
+    ingress_test_bind: " {{ hades_loopback_address | regex_escape }}:{{ caddy_port }} "
     ingress_test_port_lines: "{{ ingress_test_ss.stdout_lines | select('search', ':' ~ caddy_port ~ ' ') | list }}"
 
 - name: Stat Caddy's API socket
@@ -56,7 +56,7 @@
 
 - name: Query the catch-all site
   ansible.builtin.uri:
-    url: http://{{ ingress_loopback_address }}:{{ caddy_port }}/
+    url: http://{{ hades_loopback_address }}:{{ caddy_port }}/
     headers:
       Host: nothing.{{ hades_domain }}
     status_code: 302
@@ -86,7 +86,7 @@
 
     - name: Assert a gated path without the Access header is refused
       ansible.builtin.uri:
-        url: http://{{ ingress_loopback_address }}:{{ caddy_port }}/dev/mailbox
+        url: http://{{ hades_loopback_address }}:{{ caddy_port }}/dev/mailbox
         headers:
           Host: probe.{{ hades_domain }}
         status_code: 403
@@ -94,7 +94,7 @@
     # Nothing listens on the probe port, so 502 means the gate let it through and Caddy dialled it.
     - name: Assert a gated path with the Access header is proxied
       ansible.builtin.uri:
-        url: http://{{ ingress_loopback_address }}:{{ caddy_port }}/dev/mailbox
+        url: http://{{ hades_loopback_address }}:{{ caddy_port }}/dev/mailbox
         headers:
           Host: probe.{{ hades_domain }}
           Cf-Access-Jwt-Assertion: probe

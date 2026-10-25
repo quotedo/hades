@@ -41,7 +41,7 @@
     label: "{{ item.0.name }} {{ item.1 }}"
   vars:
     ade_test_listeners: "{{ ade_test_ss.results[i].stdout_lines }}"
-    ade_test_address: "{{ host_loopback_address if item.1 == 'paseo' else '0.0.0.0' }}"
+    ade_test_address: "{{ hades_loopback_address if item.1 == 'paseo' else '0.0.0.0' }}"
     ade_test_line: >-
       {{ '\s' ~ (ade_test_address | regex_escape) ~ ':' ~ item.0[item.1 ~ '_port'] ~ '\s.*\buid:' ~ item.0.uid
          ~ '\b.*/user@' ~ item.0.uid ~ '\.service/app\.slice/' ~ item.1 ~ '\.service\b' }}
@@ -50,8 +50,8 @@
 - name: Request Paseo's health and, without a token, its agents # noqa: command-instead-of-module
   ansible.builtin.command: >-
     curl -s -w '%{http_code}\n'
-    -o /dev/null http://{{ host_loopback_address }}:{{ item.paseo_port }}/api/health
-    -o /dev/null http://{{ host_loopback_address }}:{{ item.paseo_port }}/api/agents
+    -o /dev/null http://{{ hades_loopback_address }}:{{ item.paseo_port }}/api/health
+    -o /dev/null http://{{ hades_loopback_address }}:{{ item.paseo_port }}/api/agents
   become: true
   register: ade_test_paseo_http
   changed_when: false

@@ -30,13 +30,16 @@
     - { path: "/etc/systemd/system/user@{{ user.uid }}.service.d", owner: root }
     - { path: "{{ hades_config_dir }}/ssh-keys", owner: root }
 
+# The slice drop-in is named 20-*.conf so that it sorts before the 50-<Property>.conf files
+# `systemctl set-property` writes; drop-ins apply in filename order across directories, so an
+# operator's set-property value still overrides it.
 - name: Write the per-uid resource policy
   ansible.builtin.template:
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
     mode: "0644"
   loop:
-    - { src: user-slice-dropin.conf.j2, dest: "/etc/systemd/system/user-{{ user.uid }}.slice.d/{{ hades_user_slice_dropin_name }}" }
+    - { src: user-slice-dropin.conf.j2, dest: "/etc/systemd/system/user-{{ user.uid }}.slice.d/20-hades.conf" }
     - { src: user-service-dropin.conf.j2, dest: "/etc/systemd/system/user@{{ user.uid }}.service.d/50-hades.conf" }
   register: user_dropins
 

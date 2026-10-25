@@ -31,7 +31,7 @@
     ingress_cf_tunnel: "{{ ingress_cf_tunnels.json.result[0] | default(ingress_cf_tunnel_new.json.result | default({})) }}"
     ingress_cf_ingress:
       - hostname: "*.{{ hades_domain }}"
-        service: http://{{ ingress_loopback_address }}:{{ caddy_port }}
+        service: http://{{ hades_loopback_address }}:{{ caddy_port }}
       - service: http_status:404
     ingress_cf_zone_url: "{{ ingress_cloudflare_api }}/zones/{{ ingress_cf_zones.json.result[0].id | default('') }}"
     ingress_cf_app: >-

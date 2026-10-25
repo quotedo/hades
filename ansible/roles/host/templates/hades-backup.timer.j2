@@ -3,7 +3,7 @@
 Description=Nightly backup of the dev users' ADE state and agent logins
 
 [Timer]
-OnCalendar={{ host_backup_on_calendar }}
+OnCalendar=*-*-* 03:30:00
 Persistent=true
 RandomizedDelaySec=30min
 

@@ -36,6 +36,26 @@
 
 - name: Shared tool store
   ansible.builtin.import_tasks: toolchain.yml
+  vars:
+    # `tool@version` for every tools entry, and for every installed record under the store in
+    # host_tools_ls (`mise ls --json`). mise also lists versions a config requests but nobody
+    # installed, and root's own installs: neither counts.
+    host_tools_listed: >-
+      {%- set out = [] -%}
+      {%- for tool, versions in tools.items() -%}
+      {%- for v in versions -%}
+      {%- set _ = out.append(tool ~ '@' ~ v) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+    host_tools_installed: >-
+      {%- set out = [] -%}
+      {%- for tool, records in (host_tools_ls.stdout | default('{}') | from_json).items() -%}
+      {%- for r in records if r.installed and r.install_path.startswith(mise_store ~ '/installs/') -%}
+      {%- set _ = out.append(tool ~ '@' ~ r.version) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
 
 - name: Agent CLIs, Paseo and Orca
   ansible.builtin.import_tasks: agents.yml
