@@ -1,8 +1,9 @@
 ---
 # One VM per present developer. A missing VM is created with its config and devices and started.
-# An existing VM gains missing devices and boot.autostart, also while it runs; its limits and root
-# size are set only while it is stopped, and it stays stopped. A running VM is never restarted or
-# resized: a size that differs from the inventory prints the pending line.
+# An existing VM gains missing devices, its NIC's settings (Incus applies a NIC's filters to a
+# running VM in place) and the boot keys, also while it runs; its limits and root size are set only
+# while it is stopped, and it stays stopped. A running VM is never restarted or resized: a size
+# that differs from the inventory prints the pending line.
 - name: Read the instances
   ansible.builtin.command: incus list -f json
   register: host_vms_list
@@ -19,13 +20,16 @@
       {{ dev_present | map(attribute='name') | reject('in', host_vms | rejectattr('last_used_at', 'match', '^(1970|0001)-')
          | map(attribute='name') | list) | list }}
     host_vm: "{{ host_vms | selectattr('name', 'eq', item.name) | first }}"
-    host_vm_config:
-      limits.cpu: "{{ item.cpus | string }}"
-      limits.memory: "{{ item.memory | string }}"
+    # A host shutdown gives each VM 300 seconds to shut down before Incus stops it.
+    host_vm_boot:
       boot.autostart: "true"
+      boot.host_shutdown_timeout: "300"
+    host_vm_config: "{{ host_vm_boot | combine({'limits.cpu': item.cpus | string, 'limits.memory': item.memory | string}) }}"
+    # The NIC's fixed address; IPv4 filtering (which implies MAC filtering) keeps the VM to it.
     host_vm_devices:
       root: { type: disk, path: /, pool: default, size: "{{ item.disk }}" }
-      eth0: { type: nic, nictype: bridged, parent: "{{ vm_bridge }}", ipv4.address: "{{ item.address }}", security.port_isolation: "true" }
+      eth0: { type: nic, nictype: bridged, parent: "{{ vm_bridge }}", ipv4.address: "{{ item.address }}", security.port_isolation: "true",
+              security.ipv4_filtering: "true" }
       hades: { type: disk, source: "{{ hades_share }}", path: "{{ hades_share }}", readonly: "true" }
       mise: { type: disk, source: "{{ mise_store }}", path: "{{ mise_store }}", readonly: "true" }
       mise-config: { type: disk, source: /etc/mise, path: /etc/mise, readonly: "true" }
@@ -50,11 +54,11 @@
       vars:
         host_vm_patch: >-
           {%- set ns = namespace(config={}, devices={}) -%}
-          {%- for k, v in (host_vm_config if host_vm.status == 'Stopped' else {'boot.autostart': 'true'}).items()
+          {%- for k, v in (host_vm_config if host_vm.status == 'Stopped' else host_vm_boot).items()
               if host_vm.config[k] | default('') != v -%}
           {%- set ns.config = ns.config | combine({k: v}) -%}
           {%- endfor -%}
-          {%- for k, v in host_vm_devices.items() if k not in host_vm.devices
+          {%- for k, v in host_vm_devices.items() if k not in host_vm.devices or (k == 'eth0' and host_vm.devices.eth0 != v)
               or (k == 'root' and host_vm.status == 'Stopped' and host_vm.devices.root.size | default('') != v.size) -%}
           {%- set ns.devices = ns.devices | combine({k: v}) -%}
           {%- endfor -%}

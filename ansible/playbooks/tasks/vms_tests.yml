@@ -14,15 +14,18 @@
       - vm.config['limits.cpu'] | default('') == item.cpus | string
       - vm.config['limits.memory'] | default('') == item.memory | string
       - vm.config['boot.autostart'] | default('') == 'true'
+      - vm.config['boot.host_shutdown_timeout'] | default('') == '300'
       - vm.devices | default({}) == vms_test_devices
     fail_msg: "{{ item.name }}: {{ vm | dict2items | selectattr('key', 'in', ['type', 'status', 'config', 'devices']) | items2dict | to_json }}"
     quiet: true
   vars:
     vm: "{{ vms_test_list.stdout | from_json | selectattr('name', 'eq', item.name) | first | default({}) }}"
-    # The root disk, the bridged NIC with its fixed address and port isolation, the read-only shares.
+    # The root disk, the bridged NIC with its fixed address, port isolation and IPv4 filtering, the
+    # read-only shares.
     vms_test_devices:
       root: { type: disk, path: /, pool: default, size: "{{ item.disk }}" }
-      eth0: { type: nic, nictype: bridged, parent: "{{ vm_bridge }}", ipv4.address: "{{ item.address }}", security.port_isolation: "true" }
+      eth0: { type: nic, nictype: bridged, parent: "{{ vm_bridge }}", ipv4.address: "{{ item.address }}", security.port_isolation: "true",
+              security.ipv4_filtering: "true" }
       hades: { type: disk, source: "{{ hades_share }}", path: "{{ hades_share }}", readonly: "true" }
       mise: { type: disk, source: "{{ mise_store }}", path: "{{ mise_store }}", readonly: "true" }
       mise-config: { type: disk, source: /etc/mise, path: /etc/mise, readonly: "true" }
