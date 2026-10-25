@@ -1,0 +1,54 @@
+---
+# An absent developer's VM, while it exists, gives its home to an archive on the host, then goes;
+# their jump keys went with jump.yml. Databases and Docker volumes are not kept. Every run archives
+# under its own time stamp, so a partial archive from an interrupted run never stands in for the
+# home. umask 077: the archive is root's, 0600; nothing prunes it.
+- name: Archive and delete the absent developers' VMs
+  when: host_offboard | length > 0
+  vars:
+    host_offboard: >-
+      {{ host_vms_list.stdout | default('[]') | from_json | selectattr('name', 'in', dev_absent | map(attribute='name') | list) | list }}
+  block:
+    - name: Create the archive directory
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: "0700"
+
+    - name: Start the stopped ones
+      ansible.builtin.command: incus start {{ item.name }}
+      changed_when: true
+      when: item.status == 'Stopped'
+      loop: "{{ host_offboard }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Wait for their agent
+      ansible.builtin.command: incus exec {{ item.name }} -- true
+      register: host_offboard_agent
+      until: host_offboard_agent.rc == 0
+      retries: 60
+      delay: 5
+      changed_when: false
+      loop: "{{ host_offboard }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    # tar's status 1 means a file changed while it was read; the listing proves the archive whole.
+    - name: Archive each home from inside its VM
+      ansible.builtin.shell: >-
+        umask 077; incus exec {{ item.name }} -- tar -C /home -czf - {{ item.name }} > {{ host_offboard_archive }};
+        [ $? -le 1 ] && tar -tzf {{ host_offboard_archive }} {{ item.name }}/ > /dev/null
+      vars:
+        host_offboard_archive: "{{ backup_dir }}/{{ item.name }}-offboard-{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz"
+      changed_when: true
+      loop: "{{ host_offboard }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Stop and delete the VMs
+      ansible.builtin.command: incus delete --force {{ item.name }}
+      changed_when: true
+      loop: "{{ host_offboard }}"
+      loop_control:
+        label: "{{ item.name }}"

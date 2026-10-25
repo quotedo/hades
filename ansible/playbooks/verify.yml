@@ -33,6 +33,14 @@
       ansible.builtin.import_tasks: tasks/isolation_tests.yml
       tags: [isolation]
 
+    - name: Jump account tests
+      ansible.builtin.import_tasks: tasks/jump_tests.yml
+      tags: [jump]
+
+    - name: Offboarding tests
+      ansible.builtin.import_tasks: tasks/offboard_tests.yml
+      tags: [offboard]
+
     - name: Ingress tests
       ansible.builtin.import_tasks: tasks/ingress_tests.yml
       tags: [ingress]

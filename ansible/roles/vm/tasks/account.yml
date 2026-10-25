@@ -9,6 +9,16 @@
     shell: /bin/bash
     home: "{{ vm_home }}"
 
+# hades-keys on the box writes the developer's authorized_keys here and their jump keys there. A
+# GitHub login that serves no keys fails here; both files keep their keys.
+- name: Write the developer's SSH keys
+  ansible.builtin.command: /usr/local/sbin/hades-keys {{ dev.name }}
+  delegate_to: "{{ hades_box }}"
+  become: true
+  register: vm_keys
+  changed_when: "'updated' in vm_keys.stdout"
+  failed_when: "vm_keys.stdout is not search('^' ~ dev.name ~ ': (unchanged|updated)$', multiline=True)"
+
 - name: Let the developer use sudo without a password
   ansible.builtin.copy:
     content: "{{ dev.name }} ALL=(ALL:ALL) NOPASSWD: ALL\n"

@@ -47,37 +47,17 @@
 - name: CPU governor
   ansible.builtin.import_tasks: sysctl.yml
 
-- name: Install hades-keys
-  ansible.builtin.template:
-    src: hades-keys.sh.j2
-    dest: /usr/local/sbin/hades-keys
-    mode: "0755"
-
-- name: Write the hades-keys units
-  ansible.builtin.template:
-    src: "{{ item }}.j2"
-    dest: /etc/systemd/system/{{ item }}
-    mode: "0644"
-  loop: [hades-keys.service, hades-keys.timer]
-  register: host_keys_units
-  notify: daemon-reload
-
-- name: Reload systemd before starting the timer
-  ansible.builtin.meta: flush_handlers
-
-# In check mode a unit file that is about to be written does not exist yet.
-- name: Enable and start the hades-keys timer
-  ansible.builtin.systemd_service:
-    name: hades-keys.timer
-    enabled: true
-    state: started
-  when: not (ansible_check_mode and host_keys_units is changed)
-
 - name: Incus, its storage pool and bridge
   ansible.builtin.import_tasks: incus.yml
 
 - name: Bridge firewall
   ansible.builtin.import_tasks: firewall.yml
 
+- name: SSH jump account and keys
+  ansible.builtin.import_tasks: jump.yml
+
 - name: Developer VMs
   ansible.builtin.import_tasks: vms.yml
+
+- name: Offboarding
+  ansible.builtin.import_tasks: offboard.yml

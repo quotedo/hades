@@ -1,38 +1,72 @@
 #!/bin/sh
 # {{ ansible_managed }}
-# hades-keys [LOGIN]: rewrite each listed user's authorized_keys from GitHub. The list holds
-# `login:github` lines; the file is the user's static keys followed by the GitHub keys, or the
-# static keys alone when github is empty. A failed or empty fetch keeps the file. The write runs as
-# the user, so a link in their home reaches nothing they could not write themselves.
+# hades-keys [LOGIN]: write the jump account's authorized_keys and, inside each developer's VM, the
+# developer's own. The list holds `login:github:address` lines; a developer's keys are their static
+# keys, then their GitHub keys (none for an empty login). In the jump file each key may only open a
+# tunnel to the developer's VM's SSH, and a session prints the VM's address. A key already written
+# for an earlier login is left out of both files. A failed or empty fetch keeps the developer's jump
+# lines and VM file; with LOGIN, the other developers' jump lines are kept as they are. The VM file
+# is written as the developer, so a link in their home reaches nothing they could not write.
 set -u
 [ $# -le 1 ] || { echo "usage: hades-keys [LOGIN]" >&2; exit 2; }
 want=${1:-}
 list=${HADES_KEYS_FILE:-{{ hades_config_dir }}/github-logins}
+jump=/var/lib/hades-jump/.ssh/authorized_keys
 [ -f "$list" ] || exit 0
+# One run at a time: the VMs' applies call it side by side, and the timer may too.
+exec 9> /run/hades-keys.lock && flock 9
 
-while IFS=: read -r login github; do
+out= seen=
+while IFS=: read -r login github address; do
   case $login in '' | '#'*) continue ;; esac
-  [ -z "$want" ] || [ "$login" = "$want" ] || continue
-  keys=
-  if [ -n "$github" ]; then
-    keys=$(curl -fsS --max-time 20 "https://github.com/$github.keys") || keys=
-    if [ -z "$keys" ]; then
+  # This developer's keys in the jump file, without the options (which hold one space).
+  keys=$(grep -sF "permitopen=\"$address:22\"" "$jump" | cut -d' ' -f3-) vm=
+  if [ -z "$want" ] || [ "$login" = "$want" ]; then
+    gh=
+    [ -z "$github" ] || gh=$(curl -fsS --max-time 20 "https://github.com/$github.keys") || gh=
+    if [ -n "$github" ] && [ -z "$gh" ]; then
       echo "$login: fetch failed, kept"
-      continue
+    else
+      keys=$(cat "{{ hades_config_dir }}/ssh-keys/$login" 2>/dev/null; [ -z "$gh" ] || printf '%s\n' "$gh") vm=1
     fi
   fi
-  home=$(getent passwd "$login" | cut -d: -f6)
-  if [ -z "$home" ] || [ ! -d "$home" ]; then
-    echo "$login: no home, skipped"
+  mine=
+  while read -r type blob comment; do
+    case $type in '' | '#'*) continue ;; esac
+    other=$(printf '%s' "$seen" | awk -v b="$blob" '$1 == b { print $2; exit }')
+    if [ -n "$other" ]; then
+      [ "$other" = "$login" ] || echo "$login: key $type ${comment:+$comment }also belongs to $other, skipped"
+      continue
+    fi
+    key="$type $blob${comment:+ $comment}"
+    seen="$seen$blob $login
+"
+    mine="$mine$key
+"
+    out="${out}restrict,port-forwarding,permitopen=\"$address:22\",command=\"echo $address\" $key
+"
+  done <<EOF
+$keys
+EOF
+  [ -n "$vm" ] || continue
+  if ! incus exec "$login" -- id -u "$login" < /dev/null > /dev/null 2>&1; then
+    echo "$login: no account yet, skipped"
     continue
   fi
-  static={{ hades_config_dir }}/ssh-keys/$login
-  result=$({ [ ! -f "$static" ] || cat "$static"; [ -z "$keys" ] || printf '%s\n' "$keys"; } |
-    runuser -u "$login" -- sh -c '
-      umask 077; new=$(cat); f=$1/authorized_keys
-      [ -f "$f" ] && [ "$(cat "$f")" = "$new" ] && { echo unchanged; exit 0; }
-      mkdir -p "$1" && printf "%s\n" "$new" > "$f.new" && mv -f "$f.new" "$f" && echo updated
-    ' sh "$home/.ssh") || result="write failed, kept"
+  result=$(printf '%s' "$mine" | incus exec "$login" -- runuser -u "$login" -- sh -c '
+    umask 077; new=$(cat); f=$HOME/.ssh/authorized_keys
+    [ -f "$f" ] && [ "$(cat "$f")" = "$new" ] && { echo unchanged; exit 0; }
+    mkdir -p "$HOME/.ssh" && printf "%s\n" "$new" > "$f.new" && mv -f "$f.new" "$f" && echo updated
+  ') || result="write failed, kept"
   echo "$login: $result"
 done < "$list"
+
+umask 022
+printf '%s' "$out" > "$jump.new"
+if cmp -s "$jump.new" "$jump"; then
+  rm -f "$jump.new"
+  echo "jump file: unchanged"
+else
+  mv -f "$jump.new" "$jump" && echo "jump file: updated"
+fi
 exit 0

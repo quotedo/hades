@@ -53,6 +53,31 @@
   changed_when: true
   when: host_tools_listed | difference(host_tools_installed) | length > 0
 
+# Prune guard: a version stays while a process in a running VM maps a file under its install
+# directory (its binary or a library); the run fails naming the VM.
+- name: Read the running VMs
+  ansible.builtin.command: incus list status=running -c n -f csv
+  register: host_tools_vms
+  changed_when: false
+  check_mode: false
+  when: host_tools_installed | difference(host_tools_listed) | length > 0
+
+- name: Look in the running VMs for processes that use a version to remove
+  ansible.builtin.command:
+    argv: [incus, exec, "{{ item.0 }}", --, sh, -c, 'grep -lsF "$1" /proc/[0-9]*/maps || :', sh, "{{ mise_store }}/installs/{{ item.1 | replace('@', '/') }}/"]
+  register: host_tools_inuse
+  changed_when: false
+  check_mode: false
+  loop: "{{ host_tools_vms.stdout_lines | default([]) | product(host_tools_installed | difference(host_tools_listed)) | list }}"
+
+- name: Refuse to remove a version in use
+  ansible.builtin.fail:
+    msg: "{{ item.item.1 }} is in use in {{ item.item.0 }}"
+  when: item.stdout | default('') | length > 0
+  loop: "{{ host_tools_inuse.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.1 }} in {{ item.item.0 }}"
+
 - name: Remove unlisted tool versions
   ansible.builtin.command:
     argv: "{{ ['mise', 'uninstall'] + host_tools_installed | difference(host_tools_listed) }}"

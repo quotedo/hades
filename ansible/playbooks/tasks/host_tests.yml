@@ -68,53 +68,6 @@
     quiet: true
   when: host_orca_wanted
 
-- name: Read the hades-keys timer
-  ansible.builtin.systemd_service:
-    name: hades-keys.timer
-  register: host_test_keys_timer
-
-- name: Assert the hades-keys timer is enabled and active
-  ansible.builtin.assert:
-    that:
-      - host_test_keys_timer.status.UnitFileState | default('') == 'enabled'
-      - host_test_keys_timer.status.ActiveState | default('') == 'active'
-    fail_msg: "hades-keys.timer must be enabled and active"
-    quiet: true
-
-# Review focus: a fetch that fails says so and writes nothing; hades-keys fetches before it
-# looks at any home. A login with an empty github field is not fetched at all.
-- name: Probe hades-keys with a GitHub login that does not exist and an empty one
-  become: true
-  block:
-    - name: Create the probe login list
-      ansible.builtin.tempfile:
-        state: file
-      register: host_test_keys_list
-
-    - name: Write the probe login list
-      ansible.builtin.copy:
-        content: "nouser:this-login-does-not-exist-404\nnostatic:\n"
-        dest: "{{ host_test_keys_list.path }}"
-        mode: "0600"
-
-    - name: Run hades-keys against the probe list
-      ansible.builtin.command: /usr/local/sbin/hades-keys
-      environment:
-        HADES_KEYS_FILE: "{{ host_test_keys_list.path }}"
-      register: host_test_keys_run
-      changed_when: false
-
-    - name: Assert the failed fetch kept authorized_keys
-      ansible.builtin.assert:
-        that: "host_test_keys_run.stdout_lines == ['nouser: fetch failed, kept', 'nostatic: no home, skipped']"
-        fail_msg: "hades-keys printed {{ host_test_keys_run.stdout_lines }}"
-        quiet: true
-  always:
-    - name: Remove the probe login list
-      ansible.builtin.file:
-        path: "{{ host_test_keys_list.path }}"
-        state: absent
-
 # The laptop runs it over ssh -t; without a terminal its logins would hang. timeout kills the
 # whole process group, so a script without the check fails the probe instead of hanging verify.
 - name: Run hades-onboard without a terminal as the probe account

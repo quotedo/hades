@@ -20,3 +20,15 @@
     state: restarted
   when: not ansible_check_mode
   listen: governor restart
+
+# sshd -t first: a configuration sshd refuses fails the run before the reload.
+- name: Check the sshd configuration
+  ansible.builtin.command: sshd -t
+  changed_when: false
+  listen: sshd reload
+
+- name: Reload sshd
+  ansible.builtin.systemd_service:
+    name: ssh.service
+    state: reloaded
+  listen: sshd reload

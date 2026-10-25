@@ -24,6 +24,8 @@ dev_present: >-
   'disk': vm_disk} | combine(d, {'address': (vm_subnet.split('.')[:2] + [d.uid // 256, d.uid % 256]) | join('.')})]
   %}{% endfor %}{{ ns.devs }}
 dev_absent: "{{ dev_users | default([]) | selectattr('state', 'defined') | selectattr('state', 'eq', 'absent') | list }}"
+# Offboarding keeps each absent developer's home as <backup_dir>/<name>-offboard-<time>.tar.gz.
+backup_dir: /var/backups/hades
 
 # One Incus VM per present developer, from the host's Ubuntu release, on a bridge with NAT. Sizes
 # are Incus values (GiB, or a percentage of the host's memory); an entry may set memory, cpus, disk.
