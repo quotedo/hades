@@ -1,21 +1,13 @@
 ---
 # Per present dev user and listed ADE. Root may reach every dev port through loopback isolation,
-# so the probes run as root. Orca binds every address; the hades table's input chain limits its
-# ports (set orca_ports) to loopback and Tailscale.
-- name: Read the Orca ports the hades table guards
-  ansible.builtin.command: nft -j list set inet hades orca_ports
-  become: true
-  register: ade_test_orca_ports
-  changed_when: false
-  when: user_present | map(attribute='ades', default=[]) | flatten is contains('orca')
-
+# so the probes run as root.
 - name: Read each listed ADE unit's state
   ansible.builtin.command: systemctl --user -M {{ item.0.name }}@ show {{ item.1 }}.service -p ActiveState -p UnitFileState # noqa: command-instead-of-module
   become: true
   register: ade_test_unit
   changed_when: false
   failed_when: false
-  loop: "{{ user_present | subelements('ades', skip_missing=True) }}"
+  loop: "{{ user_present | subelements('ades') }}"
   loop_control:
     label: "{{ item.0.name }} {{ item.1 }}"
 
@@ -24,7 +16,7 @@
   become: true
   register: ade_test_ss
   changed_when: false
-  loop: "{{ user_present | subelements('ades', skip_missing=True) }}"
+  loop: "{{ user_present | subelements('ades') }}"
   loop_control:
     label: "{{ item.0.name }} {{ item.1 }}"
 
@@ -43,38 +35,28 @@
       expected listeners on {{ ade_test_address }}:{{ item.0[item.1 ~ '_port'] }} from uid {{ item.0.uid }}'s {{ item.1 }}.service:
       {{ ade_test_listeners | join('\n') or 'none' }}
     quiet: true
-  loop: "{{ user_present | subelements('ades', skip_missing=True) }}"
+  loop: "{{ user_present | subelements('ades') }}"
   loop_control:
     index_var: i
     label: "{{ item.0.name }} {{ item.1 }}"
   vars:
     ade_test_listeners: "{{ ade_test_ss.results[i].stdout_lines }}"
-    ade_test_address: "{{ host_loopback_address if item.1 == 'paseo' else '0.0.0.0' }}"
+    ade_test_address: "{{ hades_loopback_address if item.1 == 'paseo' else '0.0.0.0' }}"
     ade_test_line: >-
       {{ '\s' ~ (ade_test_address | regex_escape) ~ ':' ~ item.0[item.1 ~ '_port'] ~ '\s.*\buid:' ~ item.0.uid
          ~ '\b.*/user@' ~ item.0.uid ~ '\.service/app\.slice/' ~ item.1 ~ '\.service\b' }}
-
-- name: Assert each Orca port is in the hades table's orca_ports set
-  ansible.builtin.assert:
-    that:
-      - item.orca_port in (ade_test_orca_ports.stdout | from_json).nftables | map(attribute='set', default={}) | map(attribute='elem', default=[]) | flatten
-    fail_msg: "{{ item.name }}'s orca_port {{ item.orca_port }} is not in set inet hades orca_ports"
-    quiet: true
-  loop: "{{ user_present | selectattr('ades', 'defined') | selectattr('ades', 'contains', 'orca') }}"
-  loop_control:
-    label: "{{ item.name }}"
 
 # One curl for both status codes; uri would need a request each.
 - name: Request Paseo's health and, without a token, its agents # noqa: command-instead-of-module
   ansible.builtin.command: >-
     curl -s -w '%{http_code}\n'
-    -o /dev/null http://{{ host_loopback_address }}:{{ item.paseo_port }}/api/health
-    -o /dev/null http://{{ host_loopback_address }}:{{ item.paseo_port }}/api/agents
+    -o /dev/null http://{{ hades_loopback_address }}:{{ item.paseo_port }}/api/health
+    -o /dev/null http://{{ hades_loopback_address }}:{{ item.paseo_port }}/api/agents
   become: true
   register: ade_test_paseo_http
   changed_when: false
   failed_when: false
-  loop: "{{ user_present | selectattr('ades', 'defined') | selectattr('ades', 'contains', 'paseo') }}"
+  loop: "{{ user_present | selectattr('ades', 'contains', 'paseo') }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -83,7 +65,7 @@
     path: "{{ user_home_base }}/{{ item.name }}/.config/hades/paseo.env"
   become: true
   register: ade_test_paseo_env
-  loop: "{{ user_present | selectattr('ades', 'defined') | selectattr('ades', 'contains', 'paseo') }}"
+  loop: "{{ user_present | selectattr('ades', 'contains', 'paseo') }}"
   loop_control:
     label: "{{ item.name }}"
 
@@ -99,7 +81,7 @@
       paseo.env {{ ade_test_paseo_env.results[i].stat.mode | default('missing') }}
       {{ ade_test_paseo_env.results[i].stat.pw_name | default('') }} (want 0600 {{ item.name }})
     quiet: true
-  loop: "{{ user_present | selectattr('ades', 'defined') | selectattr('ades', 'contains', 'paseo') }}"
+  loop: "{{ user_present | selectattr('ades', 'contains', 'paseo') }}"
   loop_control:
     index_var: i
     label: "{{ item.name }}"
@@ -116,9 +98,9 @@
 - name: Assert an ADE unit exists exactly for the ADEs a user lists
   ansible.builtin.assert:
     that:
-      - ade_test_unit_file.results[i].stat.exists == (item.1 in item.0.ades | default([]))
+      - ade_test_unit_file.results[i].stat.exists == (item.1 in item.0.ades)
     fail_msg: >-
-      {{ item.0.name }} lists {{ item.0.ades | default([]) }}, but {{ item.1 }}.service
+      {{ item.0.name }} lists {{ item.0.ades }}, but {{ item.1 }}.service
       {{ 'exists' if ade_test_unit_file.results[i].stat.exists else 'is missing' }}
     quiet: true
   loop: "{{ user_present | product(['paseo', 'orca']) }}"

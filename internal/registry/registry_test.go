@@ -102,20 +102,6 @@ func TestServerModeNeverCreatesDirs(t *testing.T) {
 	}
 }
 
-func TestManifestOwnerIsCurrentUID(t *testing.T) {
-	r := newReg(t)
-	if err := r.WriteManifest(&Manifest{Label: "a-b", UID: 99999}); err != nil {
-		t.Fatal(err)
-	}
-	uid, err := r.ManifestOwner("a-b")
-	if err != nil || uid != os.Getuid() {
-		t.Fatalf("uid %d err %v, want %d", uid, err, os.Getuid())
-	}
-	if _, err := r.ManifestOwner("missing"); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatal(err)
-	}
-}
-
 func TestAllSortedByLabel(t *testing.T) {
 	r := newReg(t)
 	for _, l := range []string{"c-1", "a-1", "b-1"} {
@@ -225,9 +211,6 @@ func TestLabelGuardEverywhere(t *testing.T) {
 		if err := r.RemoveManifest(label); err == nil {
 			t.Errorf("RemoveManifest(%q) accepted", label)
 		}
-		if _, err := r.ManifestOwner(label); err == nil {
-			t.Errorf("ManifestOwner(%q) accepted", label)
-		}
 		if err := r.WriteManifest(&Manifest{Label: label}); err == nil {
 			t.Errorf("WriteManifest(%q) accepted", label)
 		}
@@ -254,20 +237,6 @@ func TestByWorktreeOnlySeesTheCallersManifests(t *testing.T) {
 	// Root sees every owner.
 	if m, err := r.ByWorktree(wt, 0); err != nil || m.Label != "demo-x" {
 		t.Fatalf("%+v %v", m, err)
-	}
-}
-
-func TestManifestOwnerRefusesSymlink(t *testing.T) {
-	r := newReg(t)
-	target := filepath.Join(t.TempDir(), "t.toml")
-	if err := os.WriteFile(target, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(target, filepath.Join(r.ManifestsDir, "l.toml")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := r.ManifestOwner("l"); err == nil {
-		t.Fatal("ManifestOwner followed a symlink")
 	}
 }
 
@@ -302,7 +271,7 @@ func chmodRegistry(t *testing.T, r *Registry, mode os.FileMode) {
 	if os.Getenv("CI") != "" {
 		skip = t.Fatalf
 	}
-	for _, d := range r.dirs() {
+	for _, d := range r.Dirs() {
 		if err := os.Chmod(d, mode); err != nil {
 			skip("cannot chmod %s here: %v", d, err)
 		}
@@ -328,7 +297,7 @@ func TestSharedCheckRequiresModeAndGroup(t *testing.T) {
 	// A developer-owned 3775 directory is refused: its owner could remove
 	// anyone's entries.
 	if os.Geteuid() != 0 {
-		if err := r.Check(); !errors.Is(err, ErrRegistryPerms) || !strings.Contains(err.Error(), fmt.Sprintf("%s: owned by uid %d, not root", r.PortsDir, os.Geteuid())) {
+		if err := r.Check(); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%s: owned by uid %d, not root", r.PortsDir, os.Geteuid())) {
 			t.Fatalf("developer-owned: %v", err)
 		}
 	}
@@ -350,7 +319,7 @@ func TestSharedCheckRequiresModeAndGroup(t *testing.T) {
 	} {
 		chmodRegistry(t, r, c.mode)
 		err := r.Check()
-		if !errors.Is(err, ErrRegistryPerms) || !strings.Contains(err.Error(), r.PortsDir+": "+c.want) {
+		if err == nil || !strings.Contains(err.Error(), "wrong mode or group") || !strings.Contains(err.Error(), r.PortsDir+": "+c.want) {
 			t.Errorf("%o: %v", c.mode, err)
 		}
 	}
@@ -384,7 +353,7 @@ func TestRootRewriteKeepsManifestOwner(t *testing.T) {
 	if err := r.WriteManifest(m); err != nil {
 		t.Fatal(err)
 	}
-	if uid, err := r.ManifestOwner("demo-x"); err != nil || uid != nobody {
-		t.Fatalf("owner %d %v", uid, err)
+	if m, err := r.ByLabel("demo-x"); err != nil || m.OwnerUID() != nobody {
+		t.Fatalf("%+v %v", m, err)
 	}
 }

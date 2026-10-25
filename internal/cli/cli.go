@@ -9,13 +9,15 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/quotedo/hades/internal/execx"
 	"github.com/quotedo/hades/internal/version"
+	"github.com/quotedo/hades/internal/wtctx"
 )
 
 // Globals are the flags accepted by every command.
 type Globals struct {
-	Root, Worktree, Name, ADE string
-	JSON, Verbose             bool
+	wtctx.Flags
+	JSON bool
 }
 
 // Context carries the process environment into a command.
@@ -23,6 +25,33 @@ type Context struct {
 	Stdout, Stderr io.Writer
 	Getenv         func(string) string
 	Flags          Globals
+	Runner         execx.Runner // runs external commands; tests pass an execx.Fake
+}
+
+// fail reports why cmd failed and returns exit code 1.
+func (c *Context) fail(cmd string, err error) int {
+	fmt.Fprintf(c.Stderr, "hades: %s: %v\n", cmd, err)
+	return 1
+}
+
+// parseArgs parses a command's own flags and reports whether it can go on,
+// else the exit code: 0 after printing usage for --help, 2 after explaining a
+// bad flag or a leftover argument.
+func parseArgs(ctx *Context, fs *flag.FlagSet, usage string, args []string) (code int, ok bool) {
+	fs.SetOutput(io.Discard)
+	err := fs.Parse(args)
+	if err == nil && fs.NArg() > 0 {
+		err = fmt.Errorf("unexpected arguments %q", fs.Args())
+	}
+	switch {
+	case errors.Is(err, flag.ErrHelp):
+		fmt.Fprintln(ctx.Stdout, usage)
+		return 0, false
+	case err != nil:
+		fmt.Fprintf(ctx.Stderr, "%s: %v\n%s\n", fs.Name(), err, usage)
+		return 2, false
+	}
+	return 0, true
 }
 
 // Command runs one subcommand with the arguments left after global flag
@@ -31,7 +60,10 @@ type Command func(ctx *Context, args []string) int
 
 // commands is the dispatch table; adding a command is one entry.
 var commands = map[string]Command{
-	"version": func(ctx *Context, _ []string) int {
+	"version": func(ctx *Context, args []string) int {
+		if code, ok := parseArgs(ctx, flag.NewFlagSet("version", flag.ContinueOnError), "usage: hades version", args); !ok {
+			return code
+		}
 		fmt.Fprintln(ctx.Stdout, version.Version)
 		return 0
 	},
@@ -45,12 +77,13 @@ var commands = map[string]Command{
 	"env":          envCmd,
 	"port":         port,
 	"init":         initCmd,
+	"join":         join,
 }
 
 // Main parses global flags (before and after the command word), dispatches
 // to the command and returns the exit code.
 func Main(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
-	ctx := &Context{Stdout: stdout, Stderr: stderr, Getenv: getenv}
+	ctx := &Context{Stdout: stdout, Stderr: stderr, Getenv: getenv, Runner: &execx.Real{}}
 	g := &ctx.Flags
 
 	fs := flag.NewFlagSet("hades", flag.ContinueOnError)
@@ -60,22 +93,21 @@ func Main(args []string, stdout, stderr io.Writer, getenv func(string) string) i
 	fs.StringVar(&g.Name, "name", "", "worktree name")
 	fs.StringVar(&g.ADE, "ade", "", "ADE that invoked hades")
 	fs.BoolVar(&g.JSON, "json", false, "print the result as JSON on stdout")
-	fs.BoolVar(&g.Verbose, "v", false, "verbose output")
 
 	if err := fs.Parse(args); err != nil {
-		return usage(stderr, err)
+		return usage(ctx, err)
 	}
 	if fs.NArg() == 0 {
-		return usage(stderr, errors.New("no command given"))
+		return usage(ctx, errors.New("no command given"))
 	}
 	name := fs.Arg(0)
 	globals, rest := splitGlobals(fs, fs.Args()[1:])
 	if err := fs.Parse(globals); err != nil {
-		return usage(stderr, err)
+		return usage(ctx, err)
 	}
 	cmd, ok := commands[name]
 	if !ok {
-		return usage(stderr, fmt.Errorf("unknown command %q", name))
+		return usage(ctx, fmt.Errorf("unknown command %q", name))
 	}
 	return cmd(ctx, rest)
 }
@@ -107,11 +139,12 @@ func splitGlobals(fs *flag.FlagSet, args []string) (globals, rest []string) {
 	return globals, rest
 }
 
-func usage(w io.Writer, err error) int {
-	if errors.Is(err, flag.ErrHelp) {
-		err = nil
-	}
-	if err != nil {
+// usage prints the command line: on stdout with exit 0 for --help, else on
+// stderr after err with exit 2.
+func usage(ctx *Context, err error) int {
+	w, code := ctx.Stdout, 0
+	if !errors.Is(err, flag.ErrHelp) {
+		w, code = ctx.Stderr, 2
 		fmt.Fprintf(w, "hades: %v\n", err)
 	}
 	names := make([]string, 0, len(commands))
@@ -119,9 +152,6 @@ func usage(w io.Writer, err error) int {
 		names = append(names, n)
 	}
 	sort.Strings(names)
-	fmt.Fprintf(w, "usage: hades [--root DIR] [--worktree DIR] [--name NAME] [--ade ADE] [--json] [-v] <%s> [args]\n", strings.Join(names, "|"))
-	if err == nil {
-		return 0
-	}
-	return 2
+	fmt.Fprintf(w, "usage: hades [--root DIR] [--worktree DIR] [--name NAME] [--ade ADE] [--json] <%s> [args]\n", strings.Join(names, "|"))
+	return code
 }

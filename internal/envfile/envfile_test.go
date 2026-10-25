@@ -3,6 +3,7 @@ package envfile
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -47,9 +48,9 @@ func TestUpdateEnvrcPreservesUserLinesAndIsIdempotent(t *testing.T) {
 func TestEnvWorktreeRoundTrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), ".env.worktree")
 	WriteEnvWorktree(p, []KV{{"A", "1"}, {"B", "two words"}})
-	m, _ := ReadEnvWorktree(p)
-	if m["A"] != "1" || m["B"] != "two words" {
-		t.Fatal(m)
+	kv, _ := ReadEnvWorktree(p)
+	if !slices.Equal(kv, []KV{{"A", "1"}, {"B", "two words"}}) {
+		t.Fatal(kv)
 	}
 	st, _ := os.Stat(p)
 	if st.Mode().Perm() != 0o600 {
@@ -59,7 +60,7 @@ func TestEnvWorktreeRoundTrip(t *testing.T) {
 
 func TestComputeServerPhoenix(t *testing.T) {
 	h := config.Host{Domain: "example.test", Postgres: config.Postgres{Host: "127.0.0.1", Port: 5433, User: "postgres", Password: "postgres"}, RabbitMQ: &config.RabbitMQ{AMQPURL: "amqp://u:p@mq.test:5672"}}
-	kv, err := Compute(Inputs{Port: 4100, Label: "shop-x", Host: "shop-x.example.test", URL: "https://shop-x.example.test", Suffix: "_alice_x", Name: "x", Project: "shop", User: "alice", Preset: preset.Preset{Kind: preset.Phoenix, AppName: "shop"}, HostCfg: h, Vhost: "shop-x", Extra: map[string]string{"SHOP_ENDPOINT": "{{host}}"}, ExistingSecret: "keep"})
+	kv, err := Compute(Inputs{Port: 4100, Label: "shop-x", Host: "shop-x.example.test", URL: "https://shop-x.example.test", Suffix: "_alice_x", Name: "x", Project: "shop", Preset: preset.Preset{Kind: preset.Phoenix, AppName: "shop"}, HostCfg: h, Vhost: "shop-x", Extra: map[string]string{"SHOP_ENDPOINT": "{{host}}"}, ExistingSecret: "keep"})
 	if err != nil {
 		t.Fatal(err)
 	}

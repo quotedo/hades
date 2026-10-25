@@ -27,6 +27,21 @@ func TestMainUnknownCommandIsUsage(t *testing.T) {
 	}
 }
 
+func TestHelpPrintsUsageAndExitsZero(t *testing.T) {
+	argvs := [][]string{{"--help"}, {"-h"}}
+	for name := range commands {
+		argvs = append(argvs, []string{name, "--help"}, []string{name, "-h"})
+	}
+	argvs = append(argvs, []string{"join", "shop", "--help"})
+	for _, args := range argvs {
+		var out, errb bytes.Buffer
+		code := Main(args, &out, &errb, func(string) string { return "" })
+		if code != 0 || !strings.HasPrefix(out.String(), "usage: hades") || errb.Len() != 0 {
+			t.Errorf("%v: code=%d out=%q err=%q", args, code, out.String(), errb.String())
+		}
+	}
+}
+
 func TestGlobalFlagsBeforeAndAfterCommand(t *testing.T) {
 	for _, args := range [][]string{{"--json", "version"}, {"version", "--json"}} {
 		var out, errb bytes.Buffer

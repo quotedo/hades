@@ -1,16 +1,18 @@
 ---
-# dev_users, hades_group, hades_tool_paths, erl_flags, chrome_root and the per-user resource
-# policy (dev_user_*, default_limit_nofile, hades_user_slice_dropin_name) are shared defaults in
-# roles/host, as are the toolchain store, agent CLI and ADE versions. hex_repos is the name the
-# collection documents, so the role-prefix rule is waived for it.
+# dev_users, hades_group, erl_flags, chrome_root and the per-user resource policy (dev_user_*,
+# default_limit_nofile) are shared defaults in roles/host, as are the toolchain store, agent CLI
+# and ADE versions.
 
-# Each user is combined onto {'state': 'present'}, so one without state counts as present.
+# The present users, each combined onto its defaults: state present, ades [paseo], paseo_port
+# uid + 10000, orca_port uid + 20000, repos dev_repos. preflight.yml repeats the expression.
 user_present: >-
-  {{ [{'state': 'present'}] | product(dev_users | default([])) | map('combine') | selectattr('state', 'eq', 'present') | list }}
+  {% set ns = namespace(users=[]) %}{% for u in dev_users | default([])
+  if u.state | default('present') == 'present' %}{% set ns.users = ns.users + [{'state': 'present', 'ades': ['paseo'], 'paseo_port': u.uid + 10000,
+  'orca_port': u.uid + 20000, 'repos': dev_repos | default([])} | combine(u)] %}{% endfor %}{{ ns.users }}
 user_absent: "{{ dev_users | default([]) | selectattr('state', 'defined') | selectattr('state', 'eq', 'absent') | list }}"
 # Homes are <user_home_base>/<name>.
 user_home_base: /home
 
 # Private Hex repositories: {name, url, key_env, fingerprint_env}; the auth key and the public
 # key fingerprint are read from those controller environment variables.
-hex_repos: [] # noqa: var-naming[no-role-prefix]
+hex_repos: []

@@ -182,12 +182,6 @@ func checkSiteManifest(manifestsDir, label, sitePath string, uid int) error {
 	return nil
 }
 
-// ValidateSites checks every *.caddy file in h.SitesDir as Reload does.
-func ValidateSites(h *config.Host) error {
-	_, err := readSites(h)
-	return err
-}
-
 // mirror makes liveDir hold exactly the given site files.
 func mirror(liveDir string, sites map[string][]byte) error {
 	for label, content := range sites {
@@ -255,19 +249,15 @@ func BinaryPath(getenv func(string) string) string {
 	return DefaultBinary
 }
 
-// SudoReload runs `sudo -n <bin> caddy-reload`.
-func SudoReload(ctx context.Context, run execx.Runner, bin string) error {
-	if _, err := run.Run(ctx, execx.Cmd{Argv: []string{"sudo", "-n", bin, "caddy-reload"}}); err != nil {
-		return fmt.Errorf("sudo caddy-reload: %w", err)
+// SudoReload runs `sudo -n <bin> caddy-reload`; with check it passes --check,
+// which validates without mirroring or reloading anything.
+func SudoReload(ctx context.Context, run execx.Runner, bin string, check bool) error {
+	argv, what := []string{"sudo", "-n", bin, "caddy-reload"}, "sudo caddy-reload"
+	if check {
+		argv, what = append(argv, "--check"), what+" --check"
 	}
-	return nil
-}
-
-// SudoCheck runs `sudo -n <bin> caddy-reload --check`: the same validation as
-// SudoReload, without mirroring or reloading anything.
-func SudoCheck(ctx context.Context, run execx.Runner, bin string) error {
-	if _, err := run.Run(ctx, execx.Cmd{Argv: []string{"sudo", "-n", bin, "caddy-reload", "--check"}}); err != nil {
-		return fmt.Errorf("sudo caddy-reload --check: %w", err)
+	if _, err := run.Run(ctx, execx.Cmd{Argv: argv}); err != nil {
+		return fmt.Errorf("%s: %w", what, err)
 	}
 	return nil
 }

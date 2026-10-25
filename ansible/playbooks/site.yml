@@ -1,21 +1,15 @@
 ---
-# Provision a dev server.
-#
-# Interactive one-time steps that no playbook can do for you (docs/server.md):
-#   1. Cloudflare: enable Zero Trust once, export CF_ACCOUNT_ID and CF_API_TOKEN and give every
-#      present dev user an email; the ingress role creates the tunnel, DNS and Access.
-#   2. The administrator's password: `sudo passwd <name>` after the first user apply. Per user,
-#      as that user: `gh auth login` and each agent CLI's own login.
-#   3. Paseo: enter the daemon password in the desktop client; for a phone run
-#      `paseo daemon pair --relay`.
-#   4. Tailscale: `tailscale up` once, share the node with each developer; Orca pairs over it.
-#   5. A project's key holder runs `git secret tell` for the new users.
+# Provision a dev server (docs/server.md).
 - name: Preflight
   ansible.builtin.import_playbook: preflight.yml
+  tags: [always]
 
 - name: Provision dev servers
   hosts: dev_servers
   become: true
+  # Keeps Ubuntu's needrestart from restarting services (Docker, Postgres) after a package install.
+  environment:
+    NEEDRESTART_SUSPEND: "1"
   # Shared defaults live in roles/host/defaults/main.yml. Listing the host role makes them
   # visible to every role and task in this play under any tag selection, at role-default
   # precedence. Do not load that file with vars_files: play vars_files outrank inventory host
@@ -26,7 +20,6 @@
     - { role: services, tags: [services], when: dev_services | length > 0 }
     - { role: ingress, tags: [ingress] }
     - { role: user, tags: [user] }
-    - { role: protected, tags: [protected], when: protected is defined }
     - { role: vpn, tags: [vpn], when: vpn_enabled }
   tasks:
     # The rule set is derived from every role's outputs (dev users and their ports, service

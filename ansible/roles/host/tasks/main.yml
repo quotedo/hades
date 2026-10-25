@@ -1,34 +1,61 @@
 ---
 # Loopback isolation (isolation.yml) is included by site.yml at the end of the play.
-# preflight.yml is untagged and skipped by `--tags host`, so this role checks its own inputs
-# before touching the host.
-- name: Assert the variables this role consumes
-  ansible.builtin.assert:
-    that:
-      - hades_domain is defined
-      - hades_domain is string
-      - hades_domain | length > 0
-      - hades_label_template is string
-      - hades_label_template | length > 0
-      - dev_services is sequence
-      - dev_services is not string
-      - dev_services is not mapping
-      - hades_version is string
-      - hades_version | length > 0
-      - backup_dir is string
-      - backup_dir is match('^/.+')
-      - chrome_channel is string
-      - chrome_channel | length > 0
-    fail_msg: >-
-      hades_domain, hades_label_template, hades_version and chrome_channel must be non-empty
-      strings, backup_dir an absolute path and dev_services a list
-    quiet: true
+- name: Install the host packages
+  ansible.builtin.apt:
+    name: "{{ host_packages + host_extra_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    install_recommends: false
 
-- name: Packages
-  ansible.builtin.import_tasks: packages.yml
+- name: Create group hades
+  ansible.builtin.group:
+    name: "{{ hades_group }}"
+    system: true
+
+# The registry directories are setgid so entries get the group, sticky so users cannot remove
+# each other's entries.
+- name: Create the registry, Caddy live, host config, backup and journald drop-in directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    group: "{{ item.group | default(omit) }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - { path: "{{ hades_registry_root }}" }
+    - { path: "{{ hades_registry_root }}/ports", group: "{{ hades_group }}", mode: "3775" }
+    - { path: "{{ hades_registry_root }}/sites", group: "{{ hades_group }}", mode: "3775" }
+    - { path: "{{ hades_registry_root }}/manifests", group: "{{ hades_group }}", mode: "3775" }
+    - { path: "{{ hades_live_dir | dirname }}" }
+    - { path: "{{ hades_live_dir }}" }
+    - { path: "{{ hades_config_dir }}" }
+    - { path: "{{ backup_dir }}", mode: "0700" }
+    - { path: /etc/systemd/journald.conf.d }
+  loop_control:
+    label: "{{ item.path }}"
 
 - name: Shared tool store
   ansible.builtin.import_tasks: toolchain.yml
+  vars:
+    # `tool@version` for every tools entry, and for every installed record under the store in
+    # host_tools_ls (`mise ls --json`). mise also lists versions a config requests but nobody
+    # installed, and root's own installs: neither counts.
+    host_tools_listed: >-
+      {%- set out = [] -%}
+      {%- for tool, versions in tools.items() -%}
+      {%- for v in versions -%}
+      {%- set _ = out.append(tool ~ '@' ~ v) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+    host_tools_installed: >-
+      {%- set out = [] -%}
+      {%- for tool, records in (host_tools_ls.stdout | default('{}') | from_json).items() -%}
+      {%- for r in records if r.installed and r.install_path.startswith(mise_store ~ '/installs/') -%}
+      {%- set _ = out.append(tool ~ '@' ~ r.version) -%}
+      {%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
 
 - name: Agent CLIs, Paseo and Orca
   ansible.builtin.import_tasks: agents.yml
@@ -36,14 +63,23 @@
 - name: Kernel settings and CPU governor
   ansible.builtin.import_tasks: sysctl.yml
 
-- name: Dev services slice
-  ansible.builtin.import_tasks: slices.yml
+- name: Write hades.slice
+  ansible.builtin.template:
+    src: hades.slice.j2
+    dest: /etc/systemd/system/hades.slice
+    mode: "0644"
+  notify: daemon-reload
 
-- name: Hades CLI, registry, host config and sudoers
+- name: Hades CLI, host config and sudoers
   ansible.builtin.import_tasks: hades.yml
 
-- name: Gc and backup timers, status, journal and Docker log caps, login environment
+- name: Gc, backup and keys timers, status and the journal cap
   ansible.builtin.import_tasks: ops.yml
 
 - name: Chrome for Testing
   ansible.builtin.import_tasks: chrome.yml
+
+- name: Protected workloads
+  ansible.builtin.import_tasks: protected.yml
+  tags: [protected]
+  when: protected is defined

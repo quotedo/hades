@@ -1,6 +1,7 @@
 ---
 # Per absent dev user: the account is gone, nothing in the registry belongs to its uid, its
-# per-uid drop-in directories are gone, and its home was archived. Per present dev user with
+# per-uid drop-in directories are gone, its keys, login line and administrator password are gone,
+# and its home was archived. Per present dev user with
 # gpg_key: true: one key pair, exported.
 - name: Read the passwd entries
   ansible.builtin.getent:
@@ -12,6 +13,19 @@
            "(", -uid, "{{ item.uid }}", -o, -name, "user-{{ item.uid }}.slice.d", -o, -name, "user@{{ item.uid }}.service.d", ")"]
   become: true
   register: offboard_test_registry
+  changed_when: false
+  loop: "{{ user_absent }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Find what each absent dev user left in the hades config directory
+  ansible.builtin.shell: >-
+    grep -s '^{{ item.name }}:' github-logins;
+    ls -d ssh-keys/{{ item.name }} 2>/dev/null; true
+  args:
+    chdir: "{{ hades_config_dir }}"
+  become: true
+  register: offboard_test_config
   changed_when: false
   loop: "{{ user_absent }}"
   loop_control:
@@ -32,10 +46,12 @@
     that:
       - item.name not in ansible_facts.getent_passwd
       - offboard_test_registry.results[i].stdout_lines == []
+      - offboard_test_config.results[i].stdout_lines == []
       - offboard_test_archives.results[i].matched >= 1
     fail_msg: >-
       {{ item.name }}: account {{ 'exists' if item.name in ansible_facts.getent_passwd else 'gone' }};
       left behind by uid {{ item.uid }}: {{ offboard_test_registry.results[i].stdout_lines | join(', ') or 'none' }};
+      left in {{ hades_config_dir }}: {{ offboard_test_config.results[i].stdout_lines | join(', ') or 'none' }};
       archives: {{ offboard_test_archives.results[i].files | map(attribute='path') | join(', ') or 'none' }} (want at least one)
     quiet: true
   loop: "{{ user_absent }}"

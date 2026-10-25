@@ -44,6 +44,11 @@ func addSite(t *testing.T, h *config.Host, label string, port int) {
 	}
 }
 
+// validate checks the site files the way `caddy-reload --check` does.
+func validate(h *config.Host) error {
+	return caddy.Reload(context.Background(), h, true, &execx.Fake{})
+}
+
 func TestWriteValidateRemove(t *testing.T) {
 	h := newHost(t)
 	dir := h.SitesDir
@@ -52,11 +57,11 @@ func TestWriteValidateRemove(t *testing.T) {
 	if string(b) != "import worktree shop-x.example.test 4100\n" {
 		t.Fatalf("%q", b)
 	}
-	if err := caddy.ValidateSites(h); err != nil {
+	if err := validate(h); err != nil {
 		t.Fatal(err)
 	}
 	os.WriteFile(filepath.Join(dir, "evil.caddy"), []byte("reverse_proxy 10.0.0.1:22\n"), 0o644)
-	err := caddy.ValidateSites(h)
+	err := validate(h)
 	if err == nil || !strings.Contains(err.Error(), "evil.caddy") {
 		t.Fatal(err)
 	}
@@ -94,9 +99,10 @@ func TestReloadRunsValidateThenReload(t *testing.T) {
 
 func TestSudoReloadArgv(t *testing.T) {
 	f := &execx.Fake{}
-	caddy.SudoReload(context.Background(), f, "/usr/local/bin/hades")
-	if !reflect.DeepEqual(f.Calls[0].Argv, []string{"sudo", "-n", "/usr/local/bin/hades", "caddy-reload"}) {
-		t.Fatal(f.Calls[0].Argv)
+	caddy.SudoReload(context.Background(), f, "/usr/local/bin/hades", false)
+	caddy.SudoReload(context.Background(), f, "/usr/local/bin/hades", true)
+	if !reflect.DeepEqual(f.Calls[0].Argv, []string{"sudo", "-n", "/usr/local/bin/hades", "caddy-reload"}) || !reflect.DeepEqual(f.Calls[1].Argv, []string{"sudo", "-n", "/usr/local/bin/hades", "caddy-reload", "--check"}) {
+		t.Fatal(f.Calls)
 	}
 }
 
@@ -202,7 +208,7 @@ func TestValidateRejectsOversizedFile(t *testing.T) {
 	big := "import worktree big.example.test " + strings.Repeat("1", 300) + "\n"
 	os.WriteFile(filepath.Join(h.SitesDir, "big.caddy"), []byte(big), 0o644)
 	os.WriteFile(filepath.Join(h.ManifestsDir, "big.toml"), nil, 0o644)
-	if caddy.ValidateSites(h) == nil {
+	if validate(h) == nil {
 		t.Fatal("oversized file accepted")
 	}
 }
@@ -270,7 +276,7 @@ func TestReloadRefusesSiteWhoseManifestHasAnotherOwner(t *testing.T) {
 	if err := os.Chown(filepath.Join(h.ManifestsDir, "x.toml"), nobody, -1); err != nil {
 		t.Fatal(err)
 	}
-	if err := caddy.ValidateSites(h); err == nil || !strings.Contains(err.Error(), "by uid 65534") {
+	if err := validate(h); err == nil || !strings.Contains(err.Error(), "by uid 65534") {
 		t.Fatal(err)
 	}
 }
@@ -279,7 +285,7 @@ func TestReloadRequiresDomain(t *testing.T) {
 	h := newHost(t)
 	addSite(t, h, "a", 4100)
 	h.Domain = ""
-	if err := caddy.ValidateSites(h); err == nil || !strings.Contains(err.Error(), "no domain") {
+	if err := validate(h); err == nil || !strings.Contains(err.Error(), "no domain") {
 		t.Fatal(err)
 	}
 }

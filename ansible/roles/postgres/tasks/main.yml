@@ -1,28 +1,4 @@
 ---
-# preflight.yml is untagged and skipped by `--tags postgres`, so this role checks its own inputs.
-- name: Assert the variables this role consumes
-  ansible.builtin.assert:
-    that:
-      - dev_pg_port | int > 0
-      - dev_pg_port | int < 65536
-      - dev_pg_major | int > 0
-      - dev_pg_user is string
-      - dev_pg_user | length > 0
-      - dev_pg_password is string
-      - dev_pg_password | length > 0
-      - dev_pg_cluster is match('^[a-z0-9_]+$')
-      - dev_pg_os_user is string
-      - dev_pg_os_user | length > 0
-      - postgres_listen_addresses is sequence
-      - postgres_listen_addresses is not string
-      - postgres_listen_addresses | length > 0
-      - postgres_settings is mapping
-    fail_msg: >-
-      dev_pg_port must be a port, dev_pg_major a Postgres major version, dev_pg_user,
-      dev_pg_password and dev_pg_os_user non-empty strings, dev_pg_cluster a cluster name,
-      postgres_listen_addresses a non-empty list and postgres_settings a mapping
-    quiet: true
-
 # An existing PGDG source (any file, any format) is left exactly as it is.
 - name: Find an existing PGDG source
   ansible.builtin.find:
@@ -34,26 +10,14 @@
   register: postgres_pgdg_sources
 
 - name: Add the PGDG repository
+  ansible.builtin.deb822_repository:
+    name: pgdg
+    uris: https://apt.postgresql.org/pub/repos/apt
+    suites: "{{ ansible_facts.distribution_release }}-pgdg"
+    components: main
+    signed_by: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+  register: postgres_pgdg
   when: postgres_pgdg_sources.matched == 0
-  block:
-    - name: Download the PGDG signing key
-      ansible.builtin.get_url:
-        url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
-        dest: /etc/apt/keyrings/pgdg.asc
-        mode: "0644"
-
-    - name: Write the PGDG source
-      ansible.builtin.copy:
-        content: |
-          # Managed by Ansible (hades postgres role)
-          Types: deb
-          URIs: https://apt.postgresql.org/pub/repos/apt
-          Suites: {{ ansible_facts.distribution_release }}-pgdg
-          Components: main
-          Signed-By: /etc/apt/keyrings/pgdg.asc
-        dest: /etc/apt/sources.list.d/pgdg.sources
-        mode: "0644"
-      register: postgres_pgdg
 
 # postgresql-common creates and starts a default <major>/main cluster on install. Seeded only
 # before postgresql-common exists, so a host that already has Postgres keeps its own settings.
@@ -91,9 +55,6 @@
     update_cache: true
     cache_valid_time: "{{ 0 if postgres_pgdg is changed else 3600 }}"
     install_recommends: false
-  # Keeps Ubuntu's needrestart from restarting services (the packaged Postgres among them).
-  environment:
-    NEEDRESTART_SUSPEND: "1"
 
 - name: Create the dev cluster account
   ansible.builtin.user:

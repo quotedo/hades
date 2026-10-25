@@ -73,45 +73,11 @@ func TestDownAndGCRejectUnknownFlagsAndArgs(t *testing.T) {
 }
 
 func TestGCRefusesNonRootOnServer(t *testing.T) {
-	state := t.TempDir()
-	hostFile := filepath.Join(state, "host.toml")
-	content := `domain = "example.test"
-port_range = "4100-4119"
-ports_dir = "` + filepath.Join(state, "ports") + `"
-sites_dir = "` + filepath.Join(state, "sites") + `"
-manifests_dir = "` + filepath.Join(state, "manifests") + `"
-[caddy]
-config = "/etc/caddy/Caddyfile"
-live_dir = "/etc/caddy/worktrees"
-reload = ["caddy", "reload"]
-[postgres]
-host = "127.0.0.1"
-port = 5432
-user = "postgres"
-password = "postgres"
-`
-	if err := os.WriteFile(hostFile, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	_, getenv, _ := serverFixture(t, "")
 	prev := geteuid
 	geteuid = func() int { return 1000 }
 	t.Cleanup(func() { geteuid = prev })
-	getenv := func(k string) string {
-		if k == "HADES_HOST_CONFIG" {
-			return hostFile
-		}
-		return ""
-	}
 	var out, errb bytes.Buffer
-	if code := Main([]string{"gc"}, &out, &errb, getenv); code != 1 || errb.String() != "hades: gc: must run as root on a server\n" {
-		t.Fatalf("code=%d err=%q", code, errb.String())
-	}
-	// A host config the user cannot read still gets the root message, not a
-	// permission error.
-	if err := os.Chmod(hostFile, 0); err != nil {
-		t.Fatal(err)
-	}
-	errb.Reset()
 	if code := Main([]string{"gc"}, &out, &errb, getenv); code != 1 || errb.String() != "hades: gc: must run as root on a server\n" {
 		t.Fatalf("code=%d err=%q", code, errb.String())
 	}

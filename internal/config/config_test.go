@@ -16,8 +16,8 @@ func TestLoadHostValid(t *testing.T) {
 	if h.Domain != "example.test" || h.LabelTemplate != "{{project}}-{{name}}" || h.Postgres.Port != 5433 || h.RabbitMQ == nil {
 		t.Fatalf("%+v", h)
 	}
-	if r := h.Range(); r.Lo != 4100 || r.Hi != 4999 {
-		t.Fatal(r)
+	if h.Ports.Lo != 4100 || h.Ports.Hi != 4999 {
+		t.Fatal(h.Ports)
 	}
 }
 
@@ -86,18 +86,18 @@ func TestLoadExplicitMissingPathIsError(t *testing.T) {
 func TestLoadProjectWorktreeFirstThenRoot(t *testing.T) {
 	root, wt := t.TempDir(), t.TempDir()
 	os.WriteFile(filepath.Join(root, "hades.toml"), []byte("project = \"fromroot\"\n"), 0o644)
-	p, from, _ := LoadProject(wt, root)
-	if p.Project != "fromroot" || from != filepath.Join(root, "hades.toml") {
-		t.Fatal(p, from)
+	p, _ := LoadProject(wt, root)
+	if p.Project != "fromroot" {
+		t.Fatal(p)
 	}
 	os.WriteFile(filepath.Join(wt, "hades.toml"), []byte("project = \"fromwt\"\n"), 0o644)
-	p, _, _ = LoadProject(wt, root)
+	p, _ = LoadProject(wt, root)
 	if p.Project != "fromwt" {
 		t.Fatal(p)
 	}
-	p, from, err := LoadProject(t.TempDir(), t.TempDir())
-	if err != nil || from != "" || p == nil {
-		t.Fatal(p, from, err)
+	p, err := LoadProject(t.TempDir(), t.TempDir())
+	if err != nil || p == nil || p.Project != "" {
+		t.Fatal(p, err)
 	}
 }
 
@@ -105,7 +105,7 @@ func TestLoadProjectExample(t *testing.T) {
 	data, _ := os.ReadFile("testdata/hades.toml")
 	wt := t.TempDir()
 	os.WriteFile(filepath.Join(wt, "hades.toml"), data, 0o644)
-	p, _, err := LoadProject(wt, wt)
+	p, err := LoadProject(wt, wt)
 	if err != nil || p.Project != "shop" || p.Env["SHOP_ENDPOINT"] != "{{host}}" || !p.Services.RabbitMQ.Vhost || p.Databases[0] != "shop" {
 		t.Fatalf("%+v %v", p, err)
 	}
@@ -114,7 +114,7 @@ func TestLoadProjectExample(t *testing.T) {
 func TestLoadProjectRejectsUnknownKeys(t *testing.T) {
 	wt := t.TempDir()
 	os.WriteFile(filepath.Join(wt, "hades.toml"), []byte("projct = \"x\"\n"), 0o644)
-	if _, _, err := LoadProject(wt, wt); err == nil {
+	if _, err := LoadProject(wt, wt); err == nil {
 		t.Fatal("unknown key accepted")
 	}
 }

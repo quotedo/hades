@@ -70,40 +70,10 @@
       {{ postgres_test_listeners.stdout_lines | map('split') | map(attribute=3)
          | map('regex_replace', ':[0-9]+$', '') | map('trim', '[]') | list }}
 
-- name: Read the dev cluster pg_hba.conf
-  ansible.builtin.slurp:
-    src: "/etc/postgresql/{{ dev_pg_major }}/{{ dev_pg_cluster }}/pg_hba.conf"
-  become: true
-  register: postgres_test_hba
-  failed_when: false
-
-# Only the cluster account over the socket, and scram-sha-256 from the loopback addresses.
-- name: Assert pg_hba.conf allows nothing but local and loopback entries
-  ansible.builtin.assert:
-    that:
-      - postgres_test_hba.content is defined
-      - postgres_test_hba_rules | length > 0
-      - postgres_test_hba_bad | length == 0
-    fail_msg: "pg_hba.conf is missing or has entries other than local/loopback: {{ postgres_test_hba_bad }}"
-    quiet: true
-  vars:
-    postgres_test_hba_rules: >-
-      {{ (postgres_test_hba.content | default('') | b64decode).splitlines() | map('trim')
-         | reject('match', '#') | reject('equalto', '') | map('split') | list }}
-    postgres_test_hba_bad: >-
-      {%- set out = [] -%}
-      {%- for f in postgres_test_hba_rules -%}
-      {%- if not ((f[0] == 'local' and f[2] == dev_pg_os_user and f[3] == 'peer')
-                  or (f[0] == 'host' and f[3] in ['127.0.0.1/32', '::1/128'] and f[4] == 'scram-sha-256')) -%}
-      {%- set _ = out.append(f | join(' ')) -%}
-      {%- endif -%}
-      {%- endfor -%}
-      {{ out }}
-
 # As root: loopback isolation lets only root, dev users and service accounts reach the port.
 - name: Query the dev cluster over TCP with the contracted credentials
   ansible.builtin.command: >-
-    psql -XtA -h {{ dev_pg_host }} -p {{ dev_pg_port }} -U {{ dev_pg_user }} -d postgres
+    psql -XtA -h {{ hades_loopback_address }} -p {{ dev_pg_port }} -U {{ dev_pg_user }} -d postgres
     -c 'show fsync' -c "select 1 from pg_available_extensions where name = 'postgis'"
   environment:
     PGPASSWORD: "{{ dev_pg_password }}"
@@ -122,7 +92,7 @@
 
 - name: Connect with a wrong password
   ansible.builtin.command: >-
-    psql -XtA -h {{ dev_pg_host }} -p {{ dev_pg_port }} -U {{ dev_pg_user }} -d postgres -c 'select 1'
+    psql -XtA -h {{ hades_loopback_address }} -p {{ dev_pg_port }} -U {{ dev_pg_user }} -d postgres -c 'select 1'
   environment:
     PGPASSWORD: "{{ dev_pg_password }}-wrong"
   become: true

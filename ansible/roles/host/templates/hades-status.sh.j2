@@ -1,18 +1,18 @@
 #!/bin/bash
 # {{ ansible_managed }}
-# hades-status: "why did my test die" and "who is filling the disk" (design 6.10).
-# Read-only. Every section prints, and reports "unavailable" when it cannot be read.
+# hades-status: "why did my test die" and "who is filling the disk".
+# Read-only, root only. Every section prints, and reports "unavailable" when it cannot be read.
 set -uo pipefail
 export LC_ALL=C
+[ "$(id -u)" -eq 0 ] || { echo "hades-status: run it as root: sudo hades-status" >&2; exit 1; }
 
 hades={{ (hades_bin_dir ~ '/hades') | quote }}
 group={{ hades_group | quote }}
-pg_host={{ dev_pg_host | quote }}
+pg_host={{ hades_loopback_address | quote }}
 pg_port={{ dev_pg_port | int }}
 pg_user={{ dev_pg_user | quote }}
 pg_password={{ dev_pg_password | quote }}
 
-is_root() { [ "$(id -u)" -eq 0 ]; }
 members=$(getent group "$group" | cut -d: -f4 | tr ',' ' ')
 
 # memory and CPU pressure ("some" avg10 / avg60) of one cgroup
@@ -44,38 +44,27 @@ else
 fi
 
 echo
-errfile=$(mktemp)
-trap 'rm -f -- "$errfile"' EXIT
-if list=$("$hades" ls --json 2>"$errfile") && count=$(jq length <<<"$list" 2>/dev/null); then
-  echo "worktrees: $count"
-  if [ "$count" -gt 0 ]; then
-    jq -r 'group_by(.User)[] | "  \(.[0].User): \(length)"' <<<"$list"
-    echo
-    jq -r '.[] | [.Label, .User, (.Port | tostring), (if .Host == "" then "-" else "https://" + .Host end), .Worktree] | @tsv' <<<"$list" |
-      awk -F '\t' '{ printf "  %-32s %-12s %-6s %-48s %s\n", $1, $2, $3, $4, $5 }'
-  fi
-else
-  echo "worktrees: unavailable ($(head -n 1 "$errfile"))"
-fi
+echo "worktrees:"
+"$hades" ls 2>&1 | sed 's/^/  /'
 
 echo
-if ! command -v psql >/dev/null 2>&1; then
-  echo "dev postgres connections: unavailable (psql is not installed)"
-elif [ -z "$(ss -Hltn "sport = :$pg_port" 2>/dev/null)" ]; then
-  echo "dev postgres connections: unavailable (nothing listens on port $pg_port)"
-elif n=$(PGPASSWORD="$pg_password" PGCONNECT_TIMEOUT=3 psql -w -X -At -h "$pg_host" -p "$pg_port" \
+if n=$(PGPASSWORD="$pg_password" PGCONNECT_TIMEOUT=3 psql -w -X -At -h "$pg_host" -p "$pg_port" \
   -U "$pg_user" -d postgres \
   -c "select count(*) from pg_stat_activity where backend_type = 'client backend' and pid <> pg_backend_pid()" 2>&1); then
   echo "dev postgres connections: $n"
 else
   echo "dev postgres connections: unavailable ($(head -n 1 <<<"$n"))"
 fi
+keys_started=$(systemctl show hades-keys.service -p ExecMainStartTimestamp --value 2>/dev/null)
+if [ -n "$keys_started" ]; then
+  echo "keys: last run $keys_started, $(systemctl show hades-keys.service -p Result --value)"
+else
+  echo "keys: unavailable"
+fi
 
 {% if vpn_enabled %}
 echo
-if ! is_root; then
-  echo "vpn: unavailable (needs root)"
-elif last=$(awg show intranet latest-handshakes 2>/dev/null | awk 'NR == 1 { print $2 }') && [ "${last:-0}" -gt 0 ]; then
+if last=$(awg show intranet latest-handshakes 2>/dev/null | awk 'NR == 1 { print $2 }') && [ "${last:-0}" -gt 0 ]; then
   echo "vpn: last handshake $(( $(date +%s) - last )) s ago"
 else
   echo "vpn: unavailable"
@@ -84,34 +73,21 @@ fi
 {% endif %}
 echo
 echo "oom kills (this boot, last 10):"
-if ! is_root && ! id -nG | tr ' ' '\n' | grep -qxE 'adm|systemd-journal'; then
-  echo "  unavailable (needs root or group adm)"
+kills=$(journalctl -k -q --no-pager -o short-iso 2>/dev/null | grep -E 'oom-kill:|Killed process' | tail -n 10)
+if [ -n "$kills" ]; then
+  sed 's/^/  /' <<<"$kills"
 else
-  kills=$(journalctl -k -q --no-pager -o short-iso 2>/dev/null | grep -E 'oom-kill:|Killed process' | tail -n 10)
-  if [ -n "$kills" ]; then
-    sed 's/^/  /' <<<"$kills"
-  else
-    echo "  none"
-  fi
+  echo "  none"
 fi
 
 echo
 echo "disk:"
 df -h / | sed 's/^/  /'
 echo
-if is_root; then
-  echo "largest homes:"
-else
-  echo "largest homes (partial: unreadable directories are not counted without root):"
-fi
-uid_min=$(awk '$1 == "UID_MIN" { print $2 }' /etc/login.defs 2>/dev/null)
-uid_max=$(awk '$1 == "UID_MAX" { print $2 }' /etc/login.defs 2>/dev/null)
-getent passwd |
-  awk -F: -v min="${uid_min:-{{ host_uid_min | int }}}" -v max="${uid_max:-{{ host_uid_max | int }}}" \
-    '$3 >= min && $3 <= max { print $6 }' | sort -u |
-  while IFS= read -r home; do
-    [ -d "$home" ] && printf '%s\0' "$home"
-  done |
-  xargs -0 -r du -sxh 2>/dev/null | sort -rh | head -n 5 | sed 's/^/  /'
+echo "largest homes:"
+for user in $members; do
+  home=$(getent passwd "$user" | cut -d: -f6)
+  [ -n "$home" ] && [ -d "$home" ] && printf '%s\0' "$home"
+done | xargs -0 -r du -sxh 2>/dev/null | sort -rh | head -n 5 | sed 's/^/  /'
 
 exit 0

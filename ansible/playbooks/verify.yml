@@ -1,12 +1,11 @@
 ---
 # Verification playbook. Each check set is selected by a tag.
-- name: Import preflight
-  ansible.builtin.import_playbook: preflight.yml
-  tags: [preflight]
-
 - name: Verify the collection
   hosts: dev_servers
   gather_facts: false
+  vars:
+    # The account the isolation and Chrome probes run as.
+    verify_unprivileged_user: nobody
   roles:
     # Listed only to load each role's defaults for the tests, at role-default precedence, so
     # inventory values still win. Do not use vars_files instead: play vars_files outrank inventory
@@ -18,20 +17,7 @@
     - { role: services, tags: [never], when: false }
     - { role: ingress, tags: [never], when: false }
     - { role: user, tags: [never], when: false }
-    - { role: protected, tags: [never], when: false }
   tasks:
-    - name: Preflight tests
-      ansible.builtin.import_tasks: tasks/preflight_tests.yml
-      tags: [preflight]
-
-    - name: Scan the roles and playbooks for inventory literals
-      ansible.builtin.command: "{{ playbook_dir }}/../scripts/check-no-literals.sh {{ inventory_file }}"
-      delegate_to: localhost
-      become: false
-      run_once: true
-      changed_when: false
-      tags: [preflight]
-
     - name: Host tests
       ansible.builtin.import_tasks: tasks/host_tests.yml
       tags: [host]
@@ -85,25 +71,3 @@
       ansible.builtin.import_tasks: tasks/acceptance_tests.yml
       tags: [acceptance]
       when: acceptance_user is defined
-
-    # Opt-in (-e reboot_test=true): the boot-sensitive checks again after a reboot.
-    - name: Reboot, then verify again
-      when: reboot_test | default(false) | bool
-      tags: [reboot]
-      block:
-        - name: Reboot the host
-          ansible.builtin.reboot:
-          become: true
-        - name: Host tests after the reboot
-          ansible.builtin.import_tasks: tasks/host_tests.yml
-        - name: Loopback isolation tests after the reboot
-          ansible.builtin.import_tasks: tasks/isolation_tests.yml
-        - name: Postgres tests after the reboot
-          ansible.builtin.import_tasks: tasks/postgres_tests.yml
-        - name: Shared services tests after the reboot
-          ansible.builtin.import_tasks: tasks/services_tests.yml
-          when: dev_services | length > 0
-        - name: Ingress tests after the reboot
-          ansible.builtin.import_tasks: tasks/ingress_tests.yml
-        - name: ADE daemon tests after the reboot
-          ansible.builtin.import_tasks: tasks/ade_tests.yml

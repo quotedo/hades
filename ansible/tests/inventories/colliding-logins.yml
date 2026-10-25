@@ -5,5 +5,5 @@ dev_servers:
       ansible_connection: local
       hades_domain: valid.example.test
       dev_users:
-        - { name: j-smith, uid: 2001, email: j-smith@example.test }
-        - { name: jsmith, uid: 2002, email: jsmith@example.test }
+        - { name: j-smith, github: j-smith, uid: 2001, email: j-smith@example.test }
+        - { name: jsmith, github: jsmith, uid: 2002, email: jsmith@example.test }

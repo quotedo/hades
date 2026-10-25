@@ -31,16 +31,15 @@ func TestRealRunnerPrependsExistingPaths(t *testing.T) {
 	}
 }
 
-func TestRealRunnerDirEnvStdin(t *testing.T) {
+func TestRealRunnerDirEnv(t *testing.T) {
 	dir := t.TempDir()
 	r := &execx.Real{}
 	res, err := r.Run(context.Background(), execx.Cmd{
-		Argv:  []string{"sh", "-c", "pwd; echo $FOO; cat"},
-		Dir:   dir,
-		Env:   []string{"FOO=bar", "PATH=/usr/bin:/bin"},
-		Stdin: strings.NewReader("in"),
+		Argv: []string{"sh", "-c", "pwd; echo $FOO"},
+		Dir:  dir,
+		Env:  []string{"FOO=bar", "PATH=/usr/bin:/bin"},
 	})
-	if err != nil || !strings.HasSuffix(res.Stdout, "\nbar\nin") {
+	if err != nil || !strings.HasSuffix(res.Stdout, "\nbar\n") {
 		t.Fatalf("%+v %v", res, err)
 	}
 }
@@ -65,43 +64,12 @@ func TestFakeRecordsAndHandles(t *testing.T) {
 	}
 }
 
-func TestDryRunPrintsMutatingAndPassesReadOnlyGit(t *testing.T) {
+func TestDryRunPrintsInsteadOfRunning(t *testing.T) {
 	var out bytes.Buffer
-	next := &execx.Fake{}
-	d := &execx.DryRun{Out: &out, Next: next}
+	d := &execx.DryRun{Out: &out}
 	res, err := d.Run(context.Background(), execx.Cmd{Argv: []string{"git", "worktree", "add", "x"}, Dir: "/d"})
-	if err != nil || res.ExitCode != 0 || len(next.Calls) != 0 || out.String() != "would run: git worktree add x (in /d)\n" {
-		t.Fatalf("%q %v %v", out.String(), err, next.Calls)
-	}
-	if _, err := d.Run(context.Background(), execx.Cmd{Argv: []string{"git", "rev-parse", "HEAD"}}); err != nil || len(next.Calls) != 1 {
-		t.Fatal(err, next.Calls)
-	}
-	if _, err := d.Run(context.Background(), execx.Cmd{Argv: []string{"git", "-C", "/d", "rev-parse", "--show-toplevel"}}); err != nil || len(next.Calls) != 2 {
-		t.Fatal(err, next.Calls)
-	}
-}
-
-func TestDryRunGitBranchOnlyListingForms(t *testing.T) {
-	cases := []struct {
-		argv    []string
-		forward bool
-	}{
-		{[]string{"git", "-C", "d", "branch", "-D", "x"}, false},
-		{[]string{"git", "branch", "newname"}, false},
-		{[]string{"git", "-C", "d", "branch", "--show-current"}, true},
-		{[]string{"git", "branch", "--list", "feat*"}, true},
-		{[]string{"git", "branch"}, true},
-	}
-	for _, tc := range cases {
-		var out bytes.Buffer
-		next := &execx.Fake{}
-		d := &execx.DryRun{Out: &out, Next: next}
-		if _, err := d.Run(context.Background(), execx.Cmd{Argv: tc.argv}); err != nil {
-			t.Fatal(err)
-		}
-		if got := len(next.Calls) == 1; got != tc.forward || (!tc.forward && !strings.HasPrefix(out.String(), "would run: ")) {
-			t.Errorf("%v: forwarded=%v out=%q", tc.argv, got, out.String())
-		}
+	if err != nil || res.ExitCode != 0 || out.String() != "would run: git worktree add x (in /d)\n" {
+		t.Fatalf("%q %v", out.String(), err)
 	}
 }
 

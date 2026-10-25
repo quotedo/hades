@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/quotedo/hades/internal/testutil"
 )
 
 // laptopUpFixture lays out a root checkout named demo and a worktree holding
@@ -19,20 +21,7 @@ func laptopUpFixture(t *testing.T, fixture string) (root, wt string, getenv func
 			t.Fatal(err)
 		}
 	}
-	src := filepath.Join("..", "preset", "testdata", fixture)
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(src, e.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(wt, e.Name()), data, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	testutil.CopyDir(t, filepath.Join("..", "preset", "testdata", fixture), wt)
 	home := filepath.Join(tmp, "home")
 	getenv = func(k string) string {
 		switch k {
@@ -99,7 +88,7 @@ func TestCommandFlagsReachTheCommand(t *testing.T) {
 	}
 	// Globals after the command word, mixed with command flags, still apply.
 	errb.Reset()
-	if code := Main([]string{"version", "-v", "--json"}, &out, &errb, getenv); code != 0 {
+	if code := Main([]string{"version", "--json"}, &out, &errb, getenv); code != 0 {
 		t.Fatalf("code=%d err=%q", code, errb.String())
 	}
 }

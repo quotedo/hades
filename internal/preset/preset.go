@@ -29,12 +29,13 @@ type Preset struct {
 	Web      bool
 	Setup    []string
 	AppName  string
-	HasEcto  bool
 	Tidewave bool
 
-	// dir is the directory Detect looked at; Apply uses it to re-derive
-	// setup defaults when the kind is overridden.
+	// dir is the directory Detect looked at and mix the mix.exs it read (nil
+	// without one); Apply uses them to re-derive setup defaults when the kind
+	// is overridden.
 	dir string
+	mix []byte
 }
 
 var (
@@ -100,8 +101,7 @@ func Detect(dir string) (Preset, error) {
 		if err != nil {
 			return Preset{}, err
 		}
-		p.AppName = app
-		p.HasEcto = mixHasDep(mix, "ecto_sql")
+		p.AppName, p.mix = app, mix
 		if mixHasDep(mix, "phoenix") {
 			p.Kind = Phoenix
 		}
@@ -123,12 +123,8 @@ func (p *Preset) derive() error {
 	p.Setup = nil
 	switch p.Kind {
 	case Phoenix, Elixir:
-		// A missing mix.exs (kind forced by hades.toml) means no setup alias.
-		mix, err := os.ReadFile(filepath.Join(p.dir, "mix.exs"))
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		if mixHasAlias(mix, "setup") {
+		// No mix.exs (kind forced by hades.toml) means no setup alias.
+		if mixHasAlias(p.mix, "setup") {
 			p.Setup = []string{"mix setup"}
 		} else {
 			p.Setup = []string{"mix deps.get"}

@@ -9,7 +9,7 @@
   vars:
     user_gpg_uid: "{{ user.name }}+{{ inventory_hostname }}@{{ hades_domain }}"
 
-- name: Hex, ADE daemons and repositories, as the user
+- name: Toolchain and ADE daemons, as the user
   become: true
   become_user: "{{ user.name }}"
   environment:
@@ -25,11 +25,40 @@
 
     - name: Paseo
       ansible.builtin.import_tasks: ade_paseo.yml
-      when: "'paseo' in user.ades | default([])"
+      when: "'paseo' in user.ades"
 
     - name: Orca
       ansible.builtin.import_tasks: ade_orca.yml
-      when: "'orca' in user.ades | default([])"
+      when: "'orca' in user.ades"
 
-    - name: Repositories
-      ansible.builtin.import_tasks: repos.yml
+    - name: Look for the units of ADEs the user no longer lists
+      ansible.builtin.stat:
+        path: "{{ user_home }}/.config/systemd/user/{{ item }}.service"
+      register: user_dropped_ades
+      loop: "{{ ['paseo', 'orca'] | difference(user.ades) }}"
+
+    - name: Stop and disable them
+      ansible.builtin.systemd_service:
+        name: "{{ item.item }}.service"
+        scope: user
+        state: stopped
+        enabled: false
+      loop: "{{ user_dropped_ades.results | selectattr('stat.exists') }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Remove their unit files
+      ansible.builtin.file:
+        path: "{{ item.stat.path }}"
+        state: absent
+      register: user_dropped_units
+      loop: "{{ user_dropped_ades.results | selectattr('stat.exists') }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # Not a handler: it must run as this user, inside the loop.
+    - name: Reload the user manager without them
+      ansible.builtin.systemd_service:
+        scope: user
+        daemon_reload: true
+      when: user_dropped_units is changed # noqa: no-handler

@@ -9,25 +9,44 @@
 | darwin/arm64, linux/amd64 | tested in CI |
 | darwin/amd64, linux/arm64 | built, untested |
 
-From source (Go 1.25+; the repository is private, so `GOPRIVATE` and git credentials are needed):
+The repository and its releases are private: the download needs `gh` logged in with read access to
+the repository. Replace `<os>_<arch>` with `darwin_arm64`, `darwin_amd64`, `linux_amd64` or
+`linux_arm64`. `~/.local/bin` must be on your `PATH`.
 
 ```sh
-GOPRIVATE=github.com/quotedo/* go install github.com/quotedo/hades/cmd/...@latest   # both binaries into $(go env GOPATH)/bin
+gh release download --repo quotedo/hades --pattern '*_<os>_<arch>.tar.gz' --pattern checksums.txt
+shasum -a 256 --check --ignore-missing checksums.txt
+tar -xzf hades_*_<os>_<arch>.tar.gz hades hades-port
+install -d ~/.local/bin && install -m 0755 hades hades-port ~/.local/bin/
 hades version
 ```
 
-From a release, when one is published: download `hades_<version>_<os>_<arch>.tar.gz` and `checksums.txt`, verify, and `install -m 0755 hades hades-port ~/.local/bin/`.
+Without a tag, `gh release download` takes the latest release. From source (Go 1.25+, with git
+credentials for the private repository):
 
-For a server, build both binaries for linux/amd64 and point the inventory's `hades_local_binary_dir` at the directory; see the [server reference](server.md#inventory).
+```sh
+GOPRIVATE=github.com/quotedo/* go install github.com/quotedo/hades/cmd/...@latest   # both binaries into $(go env GOPATH)/bin
+```
+
+On a server the Ansible collection installs the CLI; see the [server reference](server.md#inventory).
 
 ## Modes
 
 | Mode | When | Registry | Postgres | URL |
 |---|---|---|---|---|
 | Server | `/etc/hades/host.toml` exists | `/srv/hades/{ports,sites,manifests}` | the host's dev cluster | `https://<label>.<domain>` through Caddy |
-| Laptop | no host config | `~/.local/state/hades/` | `127.0.0.1:5432`, `postgres`/`postgres` | `http://localhost:<port>`; `PHX_HOST=localhost` |
+| Laptop | no host config | `~/.local/state/hades/`, created at the first `up` | `127.0.0.1:5432`, `postgres`/`postgres` | `http://localhost:<port>`; `PHX_HOST=localhost` |
 
-`HADES_HOST_CONFIG=<path>` overrides the host config path and fails if the file is missing (a typo cannot demote a server); `HADES_HOST_CONFIG=laptop` forces laptop mode. Laptop overrides: `HADES_PORT_RANGE`, `HADES_DB_HOST`, `HADES_DB_PORT`, `HADES_DB_USER`, `HADES_DB_PASSWORD`.
+`HADES_HOST_CONFIG=<path>` overrides the host config path and fails if the file is missing (a typo
+cannot demote a server); `HADES_HOST_CONFIG=laptop` forces laptop mode. Laptop overrides:
+`HADES_PORT_RANGE`, `HADES_DB_HOST`, `HADES_DB_PORT`, `HADES_DB_USER`, `HADES_DB_PASSWORD`.
+
+On a laptop:
+
+1. Start Postgres on `127.0.0.1:5432`, or set the `HADES_DB_*` overrides.
+2. In the repository, run `hades init` and add the config snippet it prints.
+3. Commit `hades.toml`, `paseo.json`, `orca.yaml` and `.gitignore`.
+4. Open a worktree from your ADE: `hades up` claims a port; the app, once started, is at `http://localhost:<port>`.
 
 ## Commands
 
@@ -35,23 +54,56 @@ For a server, build both binaries for linux/amd64 and point the inventory's `had
 hades [--root DIR] [--worktree DIR] [--name NAME] [--ade paseo|orca|wt|shell] [--json] <command> [args]
 ```
 
-`--root` is the main checkout, `--worktree` the worktree path, `--name` the worktree name, `--ade` which ADE's variables to read. All are usually detected.
+`--root` is the main checkout, `--worktree` the worktree path, `--name` the worktree name, `--ade`
+which ADE's variables to read. All are usually detected.
 
 | Command | Does | Flags |
 |---|---|---|
-| `init` | Writes `hades.toml` (project name set, other keys commented out), the hook files for `--ade` (default `paseo,orca`) and `.gitignore` entries; prints the Phoenix config snippet. Existing files are left alone unless `--force`; a hook file that lacks hades gets the lines to add printed. | `--ade paseo,orca,wt`, `--force` |
-| `up` | Claims a port, writes the manifest, the site file, `.env.worktree` and `.envrc` (`direnv allow` if direnv is installed), runs `git secret reveal -f` when `.gitsecret` exists, ensures the RabbitMQ vhost, publishes the site and reloads Caddy, points the MCP configs at this worktree, then runs the project's setup steps. It names the databases (`DB_SUFFIX`, `DATABASE_URL`) but does not create them; the setup steps do, for example `mix setup`. Idempotent: a second run reuses the label and port. | `--dry-run`, `--skip-setup` |
+| `init` | Writes `hades.toml` (project name set, other keys commented out), the hook files for `--ade` (default `paseo,orca`) and `.gitignore` entries; prints the Phoenix config snippet. Existing files are left alone unless `--force`; a hook file that lacks hades gets the lines to add printed. Run once per project and commit the files. | `--ade paseo,orca,wt`, `--force` |
+| `up` | Claims a port, writes the manifest, the site file, `.env.worktree` and `.envrc` (`direnv allow` if direnv is installed), runs `git secret reveal -f` when `.gitsecret` exists, ensures the RabbitMQ vhost, publishes the site and reloads Caddy, points the MCP configs at this worktree, then runs the project's setup steps. It names the databases (`DB_SUFFIX`, `DATABASE_URL`); the setup steps create them, for example `mix setup`. Idempotent: a second run reuses the label and port. | `--dry-run`, `--skip-setup` |
 | `down` | Runs the project's teardown steps, drops the databases the manifest lists and its vhost, removes the site and reloads Caddy, releases the port, deletes the manifest. Best effort: every step is attempted, exit 0 unless `--strict`. | `--strict` |
 | `ls` | Every worktree known on this machine: label, port, host, path, owner. | `--mine`, `--json` |
 | `status` | Host summary: mode, port range and free ports, worktrees, Postgres and Caddy reachability. | `--json` |
-| `env` | The worktree's variables as export lines. | `--json` |
+| `env` | The worktree's variables as export lines, in file order. | `--json` |
 | `port` | The worktree's port and nothing else (what `hades-port` runs). | |
-| `doctor` | Checks host config, registry directories and permissions, Postgres, Caddy, tools; prints `ok`/`WARN`/`FAIL` lines with the fix. Exit 0 when nothing fails. | `--json` |
+| `doctor` | Checks host config, registry directories and permissions, Postgres, Caddy, RabbitMQ, git, tools, ADE hooks and manifests. Prints `ok`, `WARN` or `FAIL` per check; every FAIL ends with its fix. A repository without `paseo.json` or `orca.yaml` is a WARN. Exit 0 when nothing fails. | `--json` |
 | `gc` | Releases the claims of worktrees whose directory vanished, or everything owned by a user. On a server it runs as root (a weekly timer runs it too); on a laptop as the user. | `--dry-run`, `--owner USER` |
 | `caddy-reload` | As root through sudo: validates every site file, mirrors them into Caddy's live directory, validates the Caddyfile, reloads Caddy. | `--check` |
 | `version` | Prints the version. | |
+| `join` | On a laptop: `hades join <host-or-ip>` makes the host reachable over SSH, then runs `ssh -t <alias> hades-onboard <alias>`. Writes a block between `# hades:begin <alias>` and `# hades:end <alias>` in `~/.ssh/config`, generates `~/.ssh/id_ed25519` when no key exists, and may upload a key with `gh ssh-key add`. The steps are in the [developer guide](developer.md#join). | `--as LOGIN` (default `$USER`), `--alias NAME` (default: the host's first DNS label; required for an IP), `--github LOGIN` (default: `gh`'s login) |
 
-How a worktree is identified: `--worktree`/`--name` flags, else Paseo's `PASEO_*` variables, else Orca's `ORCA_*` (the label is the workspace name), else git. The name, label and hostname are fixed at the first `up` and recorded in the manifest; a renamed branch keeps them. `down` then `up` gives a fresh label. A label another user already holds fails `up` with `label <l> taken by <user> for <path>`.
+How a worktree is identified: `--worktree`/`--name` flags, else Paseo's `PASEO_*` variables, else
+Orca's `ORCA_*` (the label is the workspace name), else git. The name, label and hostname are fixed
+at the first `up` and recorded in the manifest; a renamed branch keeps them. `down` then `up` gives a
+fresh label. A label another user already holds fails `up` with `label <l> taken by <user> for <path>`.
+
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. `--help` and `-h` print the usage on stdout and exit 0, for `hades` and every command. |
+| 1 | Failure, usually as `hades: <command>: <reason>` on stderr. |
+| 2 | Usage error: an unknown command, flag or argument. |
+
+`join` differs:
+
+| Code | When |
+|---|---|
+| hades-onboard's code | The login worked: 0 when onboarding completed. A box without `hades-onboard` gives 0 and prints `next: ssh <alias>`. |
+| 2 | `not authorised yet`: the box refused the key. Also a usage error. |
+| 1 | Any other failure, as `join: <reason>`; an unreachable host or a refused host key is `join: ssh: <ssh's message>`. |
+
+## Server scripts and files
+
+The Ansible collection installs these beside `hades`.
+
+| Script or file | What it is |
+|---|---|
+| `hades-onboard [HOST]` | The developer's first-login steps, listed in the [developer guide](developer.md#first-login-steps). Needs a terminal: exit 2 without one. HOST is the name in the printed Paseo address, default the box's hostname. Exit 0 and `onboarding complete` when every step passed, else 1. |
+| `~/.config/hades/onboarded` | Written by `hades-onboard` on success; while it is missing, interactive shells print `Run hades-onboard to finish setting up your account.` |
+| `~/.config/hades/repos` | The repositories `hades-onboard` clones, one URL per line (owner, 0600). |
+| `~/.config/hades/paseo.env` | `PASEO_PASSWORD=<password>`, generated once per Paseo user (owner, 0600) and kept, also when edited by hand. |
+| `hades-keys [LOGIN]` | Root, hourly through `hades-keys.timer`, and by the user role at apply. For each `login:github` line of `/etc/hades/github-logins` (or LOGIN alone), writes `~/.ssh/authorized_keys` as that user: `/etc/hades/ssh-keys/<login>` followed by `https://github.com/<github>.keys`, or the static keys alone when github is empty. Writes only when the content differs; a failed or empty fetch keeps the file. Prints `<login>: updated`, `unchanged`, `fetch failed, kept`, `no home, skipped` or `write failed, kept`. |
 
 ## What `up` writes
 
@@ -122,7 +174,7 @@ port_range = "4100-4999"
 ports_dir = "/srv/hades/ports"
 sites_dir = "/srv/hades/sites"
 manifests_dir = "/srv/hades/manifests"
-tool_paths = []                           # extra PATH entries for project commands
+tool_paths = []                           # extra PATH entries for project commands; the collection writes []
 chrome_path = "/opt/chrome-for-testing/chrome"   # enables the chrome-devtools MCP entry
 
 [caddy]

@@ -1,33 +1,4 @@
 ---
-- name: Create group hades
-  ansible.builtin.group:
-    name: "{{ hades_group }}"
-    system: true
-
-- name: Create the registry root
-  ansible.builtin.file:
-    path: "{{ hades_registry_root }}"
-    state: directory
-    mode: "0755"
-
-# setgid so entries get the group, sticky so users cannot remove each other's entries.
-- name: Create the registry directories
-  ansible.builtin.file:
-    path: "{{ hades_registry_root }}/{{ item }}"
-    state: directory
-    group: "{{ hades_group }}"
-    mode: "3775"
-  loop: [ports, sites, manifests]
-
-- name: Create the Caddy live directory
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    mode: "0755"
-  loop:
-    - "{{ hades_live_dir | dirname }}"
-    - "{{ hades_live_dir }}"
-
 - name: Read the installed hades version
   ansible.builtin.command: "{{ hades_bin_dir }}/hades version"
   register: host_hades_installed
@@ -43,43 +14,43 @@
   loop: [hades, hades-port]
   when: hades_local_binary_dir is defined
 
-- name: Install hades from the release archive
+# The repository may be private, so the archive is fetched on the controller with the operator's
+# own gh login (GH_TOKEN unset so the keyring login is used) and checked against checksums.txt.
+- name: Install hades from the release
   when:
     - hades_local_binary_dir is not defined
     - host_hades_installed.rc != 0 or host_hades_installed.stdout != hades_version
   vars:
-    host_hades_archive: "hades_{{ hades_version }}_{{ hades_release_platform }}.tar.gz"
+    host_hades_release_dir: "{{ playbook_dir }}/../.cache/release/{{ hades_version }}"
   block:
-    - name: Create the download directory
-      ansible.builtin.file:
-        path: "{{ hades_download_dir }}"
-        state: directory
-        mode: "0755"
+    - name: Download the release archive and checksums on the controller
+      ansible.builtin.command:
+        argv: [env, -u, GH_TOKEN, gh, release, download, "v{{ hades_version }}", --repo, quotedo/hades,
+               --pattern, "hades_{{ hades_version }}_linux_amd64.tar.gz", --pattern, checksums.txt,
+               --dir, "{{ host_hades_release_dir }}", --clobber]
+      delegate_to: localhost
+      become: false
+      run_once: false
+      changed_when: true
+      check_mode: false
 
-    - name: Download the release archive, verified against checksums.txt
-      ansible.builtin.get_url:
-        url: "{{ hades_release_base_url }}/{{ host_hades_archive }}"
-        dest: "{{ hades_download_dir }}/{{ host_hades_archive }}"
-        checksum: "sha256:{{ hades_release_base_url }}/checksums.txt"
-        mode: "0644"
+    - name: Verify the archive against checksums.txt
+      ansible.builtin.command: sha256sum --check --ignore-missing checksums.txt
+      args:
+        chdir: "{{ host_hades_release_dir }}"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      check_mode: false
 
     - name: Unpack hades and hades-port
       ansible.builtin.unarchive:
-        src: "{{ hades_download_dir }}/{{ host_hades_archive }}"
+        src: "{{ host_hades_release_dir }}/hades_{{ hades_version }}_linux_amd64.tar.gz"
         dest: "{{ hades_bin_dir }}"
-        remote_src: true
         include: [hades, hades-port]
         owner: root
         group: root
         mode: "0755"
-      # In check mode the archive was not downloaded.
-      when: not ansible_check_mode
-
-- name: Create the host config directory
-  ansible.builtin.file:
-    path: "{{ hades_config_dir }}"
-    state: directory
-    mode: "0755"
 
 # caddy-reload refuses a host config that is not root-owned or is group- or world-writable.
 - name: Write the host config

@@ -25,16 +25,8 @@ const (
 	suffixHash = 8
 )
 
-var (
-	// ErrEmptyName means the input has no characters left after sanitising.
-	ErrEmptyName = errors.New("naming: name is empty after sanitising")
-	// ErrSlugTooLong means the sanitised slug exceeds maxSlug characters.
-	ErrSlugTooLong = errors.New("naming: slug is longer than 30 characters")
-)
-
-// ErrNotPlain means a label cannot be used as a file name in a registry
-// directory.
-var ErrNotPlain = errors.New("must be a plain file name")
+// errEmptyName means the input has no characters left after sanitising.
+var errEmptyName = errors.New("naming: name is empty after sanitising")
 
 // CheckPlain returns an error unless label can name a file inside a registry
 // directory: non-empty, a single path element, and not "." or "..". Labels
@@ -42,7 +34,7 @@ var ErrNotPlain = errors.New("must be a plain file name")
 // through this check first.
 func CheckPlain(label string) error {
 	if label == "" || label != filepath.Base(label) || label == "." || label == ".." {
-		return fmt.Errorf("refusing label %q: %w", label, ErrNotPlain)
+		return fmt.Errorf("refusing label %q: must be a plain file name", label)
 	}
 	return nil
 }
@@ -72,10 +64,10 @@ func Sanitize(s string) string {
 func Slug(s string) (string, error) {
 	slug := Sanitize(s)
 	if slug == "" {
-		return "", ErrEmptyName
+		return "", errEmptyName
 	}
 	if len(slug) > maxSlug {
-		return "", ErrSlugTooLong
+		return "", fmt.Errorf("naming: slug %q is longer than %d characters", slug, maxSlug)
 	}
 	return slug, nil
 }
@@ -94,7 +86,7 @@ func Label(tmpl string, v Vars) (string, error) {
 		return "", err
 	}
 	if v.Name == "" {
-		return "", ErrEmptyName
+		return "", errEmptyName
 	}
 	if excess := len(label) - maxLabel; excess > 0 {
 		v.Name = v.Name[:max(0, len(v.Name)-excess)]
@@ -104,7 +96,7 @@ func Label(tmpl string, v Vars) (string, error) {
 	}
 	label = strings.TrimRight(label, "-")
 	if label == "" {
-		return "", ErrEmptyName
+		return "", errEmptyName
 	}
 	if len(label) > maxLabel {
 		return "", fmt.Errorf("naming: label %q is longer than %d characters", label, maxLabel)
@@ -113,18 +105,19 @@ func Label(tmpl string, v Vars) (string, error) {
 }
 
 func render(tmpl string, v Vars) (string, error) {
+	return Render(tmpl, map[string]string{"project": v.Project, "user": v.User, "name": v.Name})
+}
+
+// Render replaces every {{name}} in tmpl with vars[name]. A name that is not
+// in vars is an error.
+func Render(tmpl string, vars map[string]string) (string, error) {
 	var bad error
 	out := placeholder.ReplaceAllStringFunc(tmpl, func(m string) string {
-		switch m[2 : len(m)-2] {
-		case "project":
-			return v.Project
-		case "user":
-			return v.User
-		case "name":
-			return v.Name
+		v, ok := vars[m[2:len(m)-2]]
+		if !ok {
+			bad = fmt.Errorf("naming: unknown placeholder %s", m)
 		}
-		bad = fmt.Errorf("naming: unknown placeholder %s", m)
-		return ""
+		return v
 	})
 	return out, bad
 }

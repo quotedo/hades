@@ -1,22 +1,5 @@
 ---
-# preflight.yml is untagged and skipped by `--tags services`, so this role checks its own inputs.
-# site.yml runs it only when dev_services lists something: compose refuses an empty project.
-- name: Assert the variables this role consumes
-  ansible.builtin.assert:
-    that:
-      - dev_services is sequence
-      - dev_services is not string
-      - dev_services | difference(['rabbitmq', 'localstack', 'redis']) | length == 0
-      - services_ports | map('string') | reject('match', '^[0-9]+$') | list | length == 0
-      - localstack_buckets is sequence
-      - localstack_buckets is not string
-      - localstack_buckets | reject('match', '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') | list | length == 0
-    fail_msg: >-
-      dev_services must be a list drawn from rabbitmq, localstack and redis, every service port an
-      integer and localstack_buckets a list of S3 bucket names (they reach a shell loop)
-    quiet: true
-  vars:
-    services_ports: "{{ [rabbitmq_amqp_port, rabbitmq_management_port, rabbitmq_mqtt_port, localstack_port, redis_port] }}"
+# site.yml runs this role only when dev_services lists something: compose refuses an empty project.
 
 # A host that already runs Docker (any install method) keeps it exactly as it is.
 - name: Check for Docker Compose
@@ -29,32 +12,19 @@
 - name: Install Docker CE from Docker's apt repository
   when: services_compose.rc != 0
   block:
-    - name: Download Docker's signing key
-      ansible.builtin.get_url:
-        url: https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}/gpg
-        dest: /etc/apt/keyrings/docker.asc
-        mode: "0644"
-
-    - name: Write the Docker source
-      ansible.builtin.copy:
-        content: |
-          # Managed by Ansible (hades services role)
-          Types: deb
-          URIs: https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}
-          Suites: {{ ansible_facts.distribution_release }}
-          Components: stable
-          Signed-By: /etc/apt/keyrings/docker.asc
-        dest: /etc/apt/sources.list.d/docker.sources
-        mode: "0644"
+    - name: Add Docker's repository
+      ansible.builtin.deb822_repository:
+        name: docker
+        uris: https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}
+        suites: "{{ ansible_facts.distribution_release }}"
+        components: stable
+        signed_by: https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}/gpg
 
     - name: Install Docker CE
       ansible.builtin.apt:
         name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
         state: present
         update_cache: true
-      # Keeps Ubuntu's needrestart from restarting services (running containers among them).
-      environment:
-        NEEDRESTART_SUSPEND: "1"
 
 - name: Create the services directory
   ansible.builtin.file:

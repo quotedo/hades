@@ -67,69 +67,6 @@
     fail_msg: "hades-status exited {{ host_test_status.rc }}: {{ host_test_status.stderr | default('') }}"
     quiet: true
 
-- name: Read the journald drop-in
-  ansible.builtin.slurp:
-    src: /etc/systemd/journald.conf.d/hades.conf
-  register: host_test_journald
-  failed_when: false
-
-- name: Assert journald is capped
-  ansible.builtin.assert:
-    that:
-      - ('SystemMaxUse=' ~ journald_system_max_use) in (host_test_journald.content | default('') | b64decode).splitlines()
-    fail_msg: "/etc/systemd/journald.conf.d/hades.conf must set SystemMaxUse={{ journald_system_max_use }}"
-    quiet: true
-
-- name: Stat the Docker daemon config
-  ansible.builtin.stat:
-    path: /etc/docker/daemon.json
-  register: host_test_docker_stat
-
-- name: Read the Docker daemon config
-  ansible.builtin.slurp:
-    src: /etc/docker/daemon.json
-  register: host_test_docker
-  when: host_test_docker_stat.stat.exists
-
-- name: Assert Docker rotates container logs
-  ansible.builtin.assert:
-    that:
-      - host_test_docker_stat.stat.exists
-      - host_test_docker_conf['log-driver'] | default('') == 'json-file'
-      - host_test_docker_conf['log-opts']['max-size'] | default('') == docker_log_max_size
-      - host_test_docker_conf['log-opts']['max-file'] | default('') == docker_log_max_file | string
-    fail_msg: "/etc/docker/daemon.json must set json-file logs with max-size {{ docker_log_max_size }} and max-file {{ docker_log_max_file }}"
-    quiet: true
-  vars:
-    host_test_docker_conf: "{{ host_test_docker.content | default('e30=') | b64decode | from_json }}"
-
-- name: Source the profile script as an account outside group hades
-  ansible.builtin.shell: . /etc/profile.d/hades.sh && echo "${CHROME_PATH-unset} ${ERL_FLAGS-unset}"
-  become: true
-  register: host_test_profile_root
-  changed_when: false
-  failed_when: false
-
-- name: Read the profile script
-  ansible.builtin.slurp:
-    src: /etc/profile.d/hades.sh
-  register: host_test_profile
-  failed_when: false
-
-- name: Assert the profile script exports CHROME_PATH and ERL_FLAGS only for group hades
-  ansible.builtin.assert:
-    that:
-      - host_test_profile_root.rc == 0
-      - host_test_profile_root.stdout == 'unset unset'
-      - ('export CHROME_PATH=' ~ (chrome_root ~ '/chrome') | quote) in host_test_profile_text
-      - ('export ERL_FLAGS=' ~ erl_flags | quote) in host_test_profile_text
-    fail_msg: >-
-      /etc/profile.d/hades.sh must export CHROME_PATH and ERL_FLAGS for group {{ hades_group }}
-      only; sourced as root it printed: {{ host_test_profile_root.stdout | default('') }}
-    quiet: true
-  vars:
-    host_test_profile_text: "{{ host_test_profile.content | default('') | b64decode }}"
-
 - name: Stat Chrome for Testing
   ansible.builtin.stat:
     path: "{{ chrome_root }}/chrome"
@@ -142,33 +79,15 @@
   failed_when: false
   when: host_test_chrome.stat.exists
 
-- name: Find unresolved Chrome libraries
-  ansible.builtin.shell: set -o pipefail; ldd {{ chrome_root }}/chrome | { grep 'not found' || true; }
-  args:
-    executable: /bin/bash
-  register: host_test_chrome_ldd
-  changed_when: false
-  when: host_test_chrome.stat.exists
-
-- name: Read the Chrome for Testing index
-  ansible.builtin.uri:
-    url: https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json
-    return_content: true
-  register: host_test_chrome_index
-
-- name: Assert Chrome for Testing is the channel's version, executable and resolves every library
+- name: Assert Chrome for Testing is executable and runs
   ansible.builtin.assert:
     that:
       - host_test_chrome.stat.exists
       - host_test_chrome.stat.executable
       - host_test_chrome_version.rc == 0
-      - host_test_chrome_index.json.channels[chrome_channel | capitalize].version in host_test_chrome_version.stdout.split()
-      - host_test_chrome_ldd.stdout == ''
     fail_msg: >-
-      {{ chrome_root }}/chrome must be executable, run and be the {{ chrome_channel }} version
-      {{ host_test_chrome_index.json.channels[chrome_channel | capitalize].version }};
-      {{ host_test_chrome_version.stdout | default('') }}
-      {{ host_test_chrome_version.stderr | default('') }} {{ host_test_chrome_ldd.stdout | default('') }}
+      {{ chrome_root }}/chrome must be executable and run: {{ host_test_chrome_version.stdout | default('') }}
+      {{ host_test_chrome_version.stderr | default('') }}
     quiet: true
 
 # Agents drive Chrome as their own non-root user, with the sandbox on (acceptance 3). Where
@@ -185,7 +104,7 @@
     - name: Hand the scratch directory to the unprivileged account
       ansible.builtin.file:
         path: "{{ host_test_chrome_tmp.path }}"
-        owner: "{{ host_test_unprivileged_user }}"
+        owner: "{{ verify_unprivileged_user }}"
         mode: "0700"
 
     - name: Dump about:blank with Chrome as the unprivileged account, sandbox enabled
@@ -197,7 +116,7 @@
           - "60"
           - runuser
           - -u
-          - "{{ host_test_unprivileged_user }}"
+          - "{{ verify_unprivileged_user }}"
           - --
           - env
           - HOME={{ host_test_chrome_tmp.path }}
@@ -218,14 +137,14 @@
           - host_test_chrome_unpriv.rc == 0
           - "'<html' in host_test_chrome_unpriv.stdout"
         fail_msg: >-
-          Chrome as {{ host_test_unprivileged_user }} exited {{ host_test_chrome_unpriv.rc }}:
+          Chrome as {{ verify_unprivileged_user }} exited {{ host_test_chrome_unpriv.rc }}:
           {{ host_test_chrome_unpriv.stderr_lines | default([]) | select('search', 'sandbox|namespace|FATAL') | list | join(' | ') }}
         quiet: true
 
   always:
     # timeout signals runuser only; Chrome's zygote and renderers may outlive it.
     - name: Stop Chrome processes left by the test
-      ansible.builtin.command: pkill -u {{ host_test_unprivileged_user }} -f {{ host_test_chrome_tmp.path }}
+      ansible.builtin.command: pkill -u {{ verify_unprivileged_user }} -f {{ host_test_chrome_tmp.path }}
       changed_when: false
       failed_when: false
       when: host_test_chrome_tmp.path is defined

@@ -1,22 +1,12 @@
 ---
-- name: Download Cloudflare's signing key
-  ansible.builtin.get_url:
-    url: https://pkg.cloudflare.com/cloudflare-main.gpg
-    dest: /etc/apt/keyrings/cloudflare-main.gpg
-    mode: "0644"
-
 # Cloudflare publishes the one suite `any` for every release.
 - name: Add the cloudflared repository
-  ansible.builtin.copy:
-    content: |
-      # Managed by Ansible (hades ingress role)
-      Types: deb
-      URIs: https://pkg.cloudflare.com/cloudflared
-      Suites: any
-      Components: main
-      Signed-By: /etc/apt/keyrings/cloudflare-main.gpg
-    dest: /etc/apt/sources.list.d/cloudflared.sources
-    mode: "0644"
+  ansible.builtin.deb822_repository:
+    name: cloudflared
+    uris: https://pkg.cloudflare.com/cloudflared
+    suites: any
+    components: main
+    signed_by: https://pkg.cloudflare.com/cloudflare-main.gpg
   register: ingress_cloudflared_repo
 
 - name: Install cloudflared
@@ -25,8 +15,6 @@
     state: present
     update_cache: true
     cache_valid_time: "{{ 0 if ingress_cloudflared_repo is changed else 3600 }}"
-  environment:
-    NEEDRESTART_SUSPEND: "1"
   when: not (ansible_check_mode and ingress_cloudflared_repo is changed)
 
 - name: Create the cloudflared directory

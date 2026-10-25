@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"time"
@@ -45,29 +44,20 @@ type statusPG struct {
 
 // status summarises the host: mode, ports, worktrees, Postgres and Caddy.
 func status(ctx *Context, args []string) int {
-	flags := flag.NewFlagSet("status", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	if err := flags.Parse(args); err != nil || flags.NArg() > 0 {
-		if err == nil {
-			err = fmt.Errorf("unexpected arguments %q", flags.Args())
-		}
-		fmt.Fprintf(ctx.Stderr, "status: %v\nusage: hades status [--json]\n", err)
-		return 2
+	if code, ok := parseArgs(ctx, flag.NewFlagSet("status", flag.ContinueOnError), "usage: hades status [--json]", args); !ok {
+		return code
 	}
 	d, err := newDeps(ctx)
 	if err != nil {
-		fmt.Fprintf(ctx.Stderr, "hades: status: %v\n", err)
-		return 1
+		return ctx.fail("status", err)
 	}
 	r, err := buildStatus(context.Background(), ctx, d)
 	if err != nil {
-		fmt.Fprintf(ctx.Stderr, "hades: status: %v\n", err)
-		return 1
+		return ctx.fail("status", err)
 	}
 	if ctx.Flags.JSON {
 		if err := writeJSON(ctx.Stdout, r); err != nil {
-			fmt.Fprintf(ctx.Stderr, "hades: status: %v\n", err)
-			return 1
+			return ctx.fail("status", err)
 		}
 		return 0
 	}
@@ -88,7 +78,7 @@ func buildStatus(bg context.Context, ctx *Context, d lifecycle.Deps) (statusRepo
 	if err != nil {
 		return r, err
 	}
-	rng := d.Host.Range()
+	rng := d.Host.Ports
 	r.Ports = statusPorts{Range: d.Host.PortRange, Used: used, Free: max(rng.Hi-rng.Lo+1-used, 0)}
 
 	all, _, err := allManifests(d)
@@ -105,7 +95,7 @@ func buildStatus(bg context.Context, ctx *Context, d lifecycle.Deps) (statusRepo
 
 	if d.Mode == config.Server {
 		r.CaddyCheck = "ok"
-		if err := caddy.SudoCheck(bg, d.Run, d.Bin); err != nil {
+		if err := caddy.SudoReload(bg, d.Run, d.Bin, true); err != nil {
 			r.CaddyCheck = "error: " + err.Error()
 		}
 	}

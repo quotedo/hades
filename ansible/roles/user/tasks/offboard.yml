@@ -35,14 +35,21 @@
     -C {{ ansible_facts.getent_passwd[user.name][4] | quote }} .
   changed_when: true
 
-# The role created both directories for this uid.
-- name: Remove the per-uid resource policy
+# The role created all of them for this user.
+- name: Remove the per-uid resource policy and static keys
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:
     - /etc/systemd/system/user-{{ user_uid }}.slice.d
     - /etc/systemd/system/user@{{ user_uid }}.service.d
+    - "{{ hades_config_dir }}/ssh-keys/{{ user.name }}"
+
+- name: Remove the user from the GitHub login list
+  ansible.builtin.lineinfile:
+    path: "{{ hades_config_dir }}/github-logins"
+    regexp: "^{{ user.name }}:"
+    state: absent
 
 - name: Reload systemd without the resource policy
   ansible.builtin.systemd_service:

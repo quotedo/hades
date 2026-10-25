@@ -68,7 +68,7 @@ func newE2E(t *testing.T) *e2e {
 	reg, getenv, state := serverFixture(t, "")
 	sharedRegistry(t, state) // a server's up refuses anything else
 	root, wt := testutil.TempGitRepo(t, "demo", "feature/e2e")
-	copyTree(t, filepath.Join("testdata", "phoenix-project"), wt)
+	testutil.CopyDir(t, filepath.Join("testdata", "phoenix-project"), wt)
 	for _, args := range [][]string{
 		{"add", "-A"},
 		{"-c", "user.name=hades-test", "-c", "user.email=hades@test", "-c", "commit.gpgsign=false", "commit", "-m", "fixture"},
@@ -108,32 +108,6 @@ func newE2E(t *testing.T) *e2e {
 		t.Setenv(k, "")
 	}
 	return h
-}
-
-// copyTree copies the regular files under src into dst.
-func copyTree(t *testing.T, src, dst string) {
-	t.Helper()
-	err := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(src, p)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0o755)
-		}
-		data, err := os.ReadFile(p)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(target, data, 0o644)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }
 
 // run runs hades in-process with the process environment and returns the
