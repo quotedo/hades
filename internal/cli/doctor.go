@@ -48,8 +48,8 @@ func warnIf(name, problem, okDetail string) check {
 // doctor verifies that this machine can run hades and reports every check.
 // It exits 1 when a check that is not warn-only fails.
 func doctor(ctx *Context, args []string) int {
-	if !parseArgs(ctx, flag.NewFlagSet("doctor", flag.ContinueOnError), "usage: hades doctor [--json]", args) {
-		return 2
+	if code, ok := parseArgs(ctx, flag.NewFlagSet("doctor", flag.ContinueOnError), "usage: hades doctor [--json]", args); !ok {
+		return code
 	}
 	checks := runChecks(context.Background(), ctx)
 

@@ -13,8 +13,8 @@ import (
 // port prints the web port of the current worktree. It is what hades-port
 // runs, so it prints nothing else on stdout.
 func port(ctx *Context, args []string) int {
-	if !parseArgs(ctx, flag.NewFlagSet("port", flag.ContinueOnError), "usage: hades port", args) {
-		return 2
+	if code, ok := parseArgs(ctx, flag.NewFlagSet("port", flag.ContinueOnError), "usage: hades port", args); !ok {
+		return code
 	}
 	bg := context.Background()
 	wt, err := resolveWorktree(bg, ctx)

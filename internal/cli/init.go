@@ -44,8 +44,8 @@ var gitignoreEntries = []string{".env.worktree", ".envrc"}
 func initCmd(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	force := fs.Bool("force", false, "overwrite existing hades.toml, paseo.json and orca.yaml")
-	if !parseArgs(ctx, fs, initUsage, args) {
-		return 2
+	if code, ok := parseArgs(ctx, fs, initUsage, args); !ok {
+		return code
 	}
 	ades := ctx.Flags.ADE // the global --ade flag; init reads it as the list of ADEs to wire
 	if ades == "" {

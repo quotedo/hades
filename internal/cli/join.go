@@ -70,6 +70,10 @@ func join(ctx *Context, args []string) int {
 	if err == nil && (arg == "" || fs.NArg() > 0) {
 		err = errors.New("expected one host or IP")
 	}
+	if errors.Is(err, flag.ErrHelp) {
+		fmt.Fprintln(ctx.Stdout, joinUsage)
+		return 0
+	}
 	if err != nil {
 		fmt.Fprintf(ctx.Stderr, "join: %v\n%s\n", err, joinUsage)
 		return 2

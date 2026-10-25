@@ -20,8 +20,8 @@ import (
 func ls(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
 	mine := fs.Bool("mine", false, "only the current user's worktrees")
-	if !parseArgs(ctx, fs, "usage: hades ls [--mine] [--json]", args) {
-		return 2
+	if code, ok := parseArgs(ctx, fs, "usage: hades ls [--mine] [--json]", args); !ok {
+		return code
 	}
 	d, err := newDeps(ctx)
 	if err != nil {

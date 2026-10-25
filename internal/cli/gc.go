@@ -21,8 +21,8 @@ func gc(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "print what would be released; change nothing")
 	owner := fs.String("owner", "", "release every manifest whose file this user owns")
-	if !parseArgs(ctx, fs, "usage: hades gc [--dry-run] [--owner USER]", args) {
-		return 2
+	if code, ok := parseArgs(ctx, fs, "usage: hades gc [--dry-run] [--owner USER]", args); !ok {
+		return code
 	}
 	d, err := newDeps(ctx)
 	if err != nil {

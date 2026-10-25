@@ -44,8 +44,8 @@ type statusPG struct {
 
 // status summarises the host: mode, ports, worktrees, Postgres and Caddy.
 func status(ctx *Context, args []string) int {
-	if !parseArgs(ctx, flag.NewFlagSet("status", flag.ContinueOnError), "usage: hades status [--json]", args) {
-		return 2
+	if code, ok := parseArgs(ctx, flag.NewFlagSet("status", flag.ContinueOnError), "usage: hades status [--json]", args); !ok {
+		return code
 	}
 	d, err := newDeps(ctx)
 	if err != nil {

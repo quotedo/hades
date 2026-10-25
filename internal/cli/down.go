@@ -12,8 +12,8 @@ import (
 func down(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("down", flag.ContinueOnError)
 	strict := fs.Bool("strict", false, "exit 1 when any step fails")
-	if !parseArgs(ctx, fs, "usage: hades down [--strict]", args) {
-		return 2
+	if code, ok := parseArgs(ctx, fs, "usage: hades down [--strict]", args); !ok {
+		return code
 	}
 	// No signal handler: an interrupt kills hades before the manifest goes,
 	// so a re-run of down still finds everything it has to release.

@@ -48,8 +48,8 @@ func loadReloadConfig(euid int, getenv func(string) string, path string) (*confi
 func caddyReload(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("caddy-reload", flag.ContinueOnError)
 	check := fs.Bool("check", false, "validate only; do not reload")
-	if !parseArgs(ctx, fs, "usage: hades caddy-reload [--check]", args) {
-		return 2
+	if code, ok := parseArgs(ctx, fs, "usage: hades caddy-reload [--check]", args); !ok {
+		return code
 	}
 	host, mode, err := loadReloadConfig(os.Geteuid(), ctx.Getenv, rootHostConfig)
 	if err != nil {

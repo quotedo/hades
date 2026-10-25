@@ -14,8 +14,8 @@ import (
 
 // envCmd prints the worktree's .env.worktree for eval or machines.
 func envCmd(ctx *Context, args []string) int {
-	if !parseArgs(ctx, flag.NewFlagSet("env", flag.ContinueOnError), "usage: hades env [--json]", args) {
-		return 2
+	if code, ok := parseArgs(ctx, flag.NewFlagSet("env", flag.ContinueOnError), "usage: hades env [--json]", args); !ok {
+		return code
 	}
 	wt, err := resolveWorktree(context.Background(), ctx)
 	if err != nil {

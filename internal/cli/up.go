@@ -26,8 +26,8 @@ func up(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("up", flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "print what would be done; change nothing")
 	skipSetup := fs.Bool("skip-setup", false, "skip the project's setup commands")
-	if !parseArgs(ctx, fs, "usage: hades up [--dry-run] [--skip-setup]", args) {
-		return 2
+	if code, ok := parseArgs(ctx, fs, "usage: hades up [--dry-run] [--skip-setup]", args); !ok {
+		return code
 	}
 	opt := lifecycle.UpOptions{DryRun: *dryRun, SkipSetup: *skipSetup}
 
