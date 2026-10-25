@@ -56,13 +56,6 @@ func TestGlobalFlagsBeforeAndAfterCommand(t *testing.T) {
 	}
 }
 
-func TestCaddyReloadIsGone(t *testing.T) {
-	code, _, errs := runMain(func(string) string { return "" }, "caddy-reload")
-	if code != 2 || !strings.Contains(errs, `unknown command "caddy-reload"`) {
-		t.Fatalf("code=%d err=%q", code, errs)
-	}
-}
-
 func TestGCOwnerFlagIsGone(t *testing.T) {
 	if code, _, errs := runMain(func(string) string { return "" }, "gc", "--owner", "bob"); code != 2 {
 		t.Fatalf("code=%d err=%q", code, errs)

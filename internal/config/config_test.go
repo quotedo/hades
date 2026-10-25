@@ -35,7 +35,7 @@ func TestLoadOverlaysHostFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	rmq := RabbitMQ{ManagementURL: "http://127.0.0.1:15672", AMQPURL: "amqp://guest:guest@127.0.0.1:5672", User: "guest", Password: "guest"}
-	if h.Domain != "example.test" || h.ChromePath != "/opt/hades/chrome/chrome" || h.RabbitMQ == nil || *h.RabbitMQ != rmq ||
+	if h.Domain != "example.test" || h.ChromePath != "/opt/chrome-for-testing/chrome" || h.RabbitMQ == nil || *h.RabbitMQ != rmq ||
 		h.LabelTemplate != "{{user}}-{{project}}-{{name}}" || h.Ports != (PortRange{4100, 4999}) ||
 		h.PortsDir != "/h/.local/state/hades/ports" || h.Postgres != laptopPostgres {
 		t.Fatalf("%+v", h)

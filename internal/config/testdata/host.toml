@@ -1,5 +1,5 @@
 domain = "example.test"
-chrome_path = "/opt/hades/chrome/chrome"
+chrome_path = "/opt/chrome-for-testing/chrome"
 
 [rabbitmq]
 management_url = "http://127.0.0.1:15672"

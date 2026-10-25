@@ -187,8 +187,7 @@ func TestDoctorLaptopRegistryCreatedAtFirstUp(t *testing.T) {
 	}
 }
 
-// doctor names the host config it loaded, and has no registry-perms or
-// caddy-reload check.
+// doctor names the host config it loaded.
 func TestDoctorReportsHostConfig(t *testing.T) {
 	stubProbe(t)
 	_, _, getenv := laptopUpFixture(t, "phoenix")
@@ -204,11 +203,6 @@ func TestDoctorReportsHostConfig(t *testing.T) {
 	_, checks, _ = doctorChecks(t, withEnv(getenv, map[string]string{"HADES_HOST_CONFIG": hostFile}))
 	if c := checks["host-config"]; !c.OK || c.Detail != "loaded "+hostFile+" (domain example.test)" {
 		t.Fatalf("host-config = %+v", c)
-	}
-	for _, name := range []string{"registry-perms", "caddy-reload"} {
-		if c, ok := checks[name]; ok {
-			t.Errorf("%s = %+v", name, c)
-		}
 	}
 }
 

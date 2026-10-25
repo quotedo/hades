@@ -56,7 +56,10 @@ func (f *fakeRabbit) Delete(_ context.Context, v string) error {
 // newDeps builds Deps for a host with domain example.test around a fresh git
 // worktree holding the preset fixture. The root checkout carries hades.toml
 // with project = "demo", so the label is demo-feature-x whatever later tests
-// write into the worktree's own hades.toml.
+// write into the worktree's own hades.toml. config.Load pairs a domain with
+// DomainLabelTemplate; here the domain comes with the laptop template, so the
+// label stays demo-feature-x (not alice-demo-feature-x) while the domain
+// still drives the site files and Caddy reloads.
 func newDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 	t.Helper()
 	root, wt := testutil.TempGitRepoWithWorktree(t)

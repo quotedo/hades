@@ -212,7 +212,7 @@ func (u *upRun) identify() error {
 	m, err = d.Reg.ByLabel(label)
 	switch {
 	case err == nil:
-		if err := u.checkOwned(m); err != nil {
+		if err := u.checkSameWorktree(m); err != nil {
 			return err
 		}
 		u.existing = m
@@ -299,8 +299,8 @@ func union(a, b []string) []string {
 	return out
 }
 
-// checkOwned fails unless m records this worktree.
-func (u *upRun) checkOwned(m *registry.Manifest) error {
+// checkSameWorktree fails unless m records this worktree.
+func (u *upRun) checkSameWorktree(m *registry.Manifest) error {
 	if !sameDir(m.Worktree, u.c.Worktree) {
 		return &ErrLabelTaken{Label: m.Label, User: m.User, Worktree: m.Worktree}
 	}
