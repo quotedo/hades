@@ -168,9 +168,10 @@
         path: "{{ host_test_keys_list.path }}"
         state: absent
 
-# The laptop runs it over ssh -t; without a terminal its logins would hang.
+# The laptop runs it over ssh -t; without a terminal its logins would hang. timeout kills the
+# whole process group, so a script without the check fails the probe instead of hanging verify.
 - name: Run hades-onboard without a terminal as the probe account
-  ansible.builtin.shell: runuser -u {{ verify_unprivileged_user }} -- {{ hades_bin_dir }}/hades-onboard </dev/null
+  ansible.builtin.shell: timeout 20 runuser -u {{ verify_unprivileged_user }} -- {{ hades_bin_dir }}/hades-onboard </dev/null
   become: true
   register: host_test_onboard
   changed_when: false
