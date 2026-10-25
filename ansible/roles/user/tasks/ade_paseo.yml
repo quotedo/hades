@@ -1,7 +1,7 @@
 ---
 # One present dev user listing paseo, run as the user (loop variable `user`).
 # Generated on the host once and kept, also when edited by hand; it never touches the
-# controller's disk.
+# controller's disk. The welcome shows it.
 - name: Generate the Paseo password, once
   ansible.builtin.shell: |
     umask 077
@@ -12,11 +12,6 @@
     creates: "{{ user_home }}/.config/hades/paseo.env"
   register: user_paseo_password
   no_log: true
-
-- name: Show the generated Paseo password, once
-  ansible.builtin.debug:
-    msg: "{{ user.name }}'s Paseo password, stored only in {{ user_home }}/.config/hades/paseo.env: {{ user_paseo_password.stdout }}"
-  when: user_paseo_password is changed and not ansible_check_mode
 
 - name: Write the Paseo unit
   ansible.builtin.template:

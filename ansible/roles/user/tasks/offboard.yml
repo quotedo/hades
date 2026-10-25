@@ -44,6 +44,20 @@
     - /etc/systemd/system/user-{{ user_uid }}.slice.d
     - /etc/systemd/system/user@{{ user_uid }}.service.d
 
+- name: Remove the user's static keys and administrator password
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ hades_config_dir }}/ssh-keys/{{ user.name }}"
+    - "{{ hades_config_dir }}/admin-password.{{ user.name }}"
+
+- name: Remove the user from the GitHub login list
+  ansible.builtin.lineinfile:
+    path: "{{ hades_config_dir }}/github-logins"
+    regexp: "^{{ user.name }}:"
+    state: absent
+
 - name: Reload systemd without the resource policy
   ansible.builtin.systemd_service:
     daemon_reload: true

@@ -22,6 +22,17 @@
   vars:
     user_ade_users: "{{ user_present | selectattr('ades', 'defined') }}"
 
+- name: Assert each present dev user has a GitHub login or static SSH keys
+  ansible.builtin.assert:
+    that:
+      - (item.github is defined and item.github is string and item.github is match('^[A-Za-z0-9-]+$'))
+        or item.ssh_keys | default([]) | length > 0
+    fail_msg: "dev_users entry {{ item.name }} needs github (a GitHub login) or a non-empty ssh_keys"
+    quiet: true
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
 - name: Assert each Hex repository is complete and its keys are in the controller environment
   ansible.builtin.assert:
     that:

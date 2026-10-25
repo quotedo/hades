@@ -28,6 +28,7 @@
     - { path: "{{ user_home }}/.local/bin" }
     - { path: "/etc/systemd/system/user-{{ user.uid }}.slice.d", owner: root }
     - { path: "/etc/systemd/system/user@{{ user.uid }}.service.d", owner: root }
+    - { path: "{{ hades_config_dir }}/ssh-keys", owner: root }
 
 - name: Write the per-uid resource policy
   ansible.builtin.template:
@@ -45,7 +46,7 @@
     daemon_reload: true
   when: user_dropins is changed # noqa: no-handler
 
-- name: Write the user manager limits, authorized keys and shell environment
+- name: Write the user manager limits, shell environment and repository list
   ansible.builtin.template:
     src: "{{ item.src }}"
     dest: "{{ user_home }}/{{ item.dest }}"
@@ -54,8 +55,82 @@
     mode: "{{ item.mode | default('0644') }}"
   loop:
     - { src: system-user-manager.conf.j2, dest: .config/systemd/user.conf }
-    - { src: authorized_keys.j2, dest: .ssh/authorized_keys, mode: "0600" }
     - { src: env.sh.j2, dest: .config/hades/env.sh }
+    - { src: repos.j2, dest: .config/hades/repos, mode: "0600" }
+
+# Until hades-onboard writes the marker; env.sh shows it in interactive shells.
+- name: Look for the welcome and the onboarded marker
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.config/hades/{{ item }}"
+  register: user_onboarding
+  loop: [welcome, onboarded]
+
+- name: Write the welcome
+  ansible.builtin.template:
+    src: welcome.sh.j2
+    dest: "{{ user_home }}/.config/hades/welcome"
+    owner: "{{ user.name }}"
+    group: "{{ user.name }}"
+    mode: "0600"
+  when: user_onboarding.results | selectattr('stat.exists') | list == []
+
+# hades-keys (host role) is the one writer of authorized_keys, here and hourly from its timer:
+# the static keys, then the GitHub keys (none for an empty login). A failed fetch keeps the file
+# and fails this task.
+- name: Write the static SSH keys
+  ansible.builtin.copy:
+    content: "{{ user.ssh_keys | join('\n') }}\n"
+    dest: "{{ hades_config_dir }}/ssh-keys/{{ user.name }}"
+    mode: "0644"
+  when: user.ssh_keys | default([]) | length > 0
+
+- name: Remove the static SSH keys
+  ansible.builtin.file:
+    path: "{{ hades_config_dir }}/ssh-keys/{{ user.name }}"
+    state: absent
+  when: user.ssh_keys | default([]) | length == 0
+
+- name: List the GitHub login for hades-keys
+  ansible.builtin.lineinfile:
+    path: "{{ hades_config_dir }}/github-logins"
+    regexp: "^{{ user.name }}:"
+    line: "{{ user.name }}:{{ user.github | default('') }}"
+    create: true
+    mode: "0644"
+
+- name: Write the authorized keys
+  ansible.builtin.command: "{{ hades_bin_dir }}/hades-keys {{ user.name }}"
+  register: user_keys
+  changed_when: "'updated' in user_keys.stdout"
+  failed_when: "'fetch failed' in user_keys.stdout and user.github is defined"
+
+# A locked or unset password only: the role never touches a set one. Generated on the host,
+# printed once below, then readable by root alone.
+- name: Read the administrator's password status
+  ansible.builtin.command: passwd -S {{ user.name }}
+  register: user_passwd
+  changed_when: false
+  check_mode: false
+  when: user.admin | default(false)
+
+- name: Generate the administrator's password
+  ansible.builtin.shell: |
+    set -e; umask 077
+    pw=$(openssl rand -base64 18)
+    printf '%s\n' "$pw" > {{ (hades_config_dir ~ '/admin-password.' ~ user.name) | quote }}
+    chpasswd <<EOF
+    {{ user.name }}:$pw
+    EOF
+    echo "$pw"
+  register: user_admin_password
+  changed_when: true
+  no_log: true
+  when: user.admin | default(false) and user_passwd.stdout.split()[1] in ['L', 'NP']
+
+- name: Show the administrator's password, once
+  ansible.builtin.debug:
+    msg: "{{ user.name }}'s sudo password, stored only in {{ hades_config_dir }}/admin-password.{{ user.name }}: {{ user_admin_password.stdout }}"
+  when: user_admin_password is changed and not ansible_check_mode
 
 - name: Source the shell environment from ~/.bashrc
   ansible.builtin.lineinfile:

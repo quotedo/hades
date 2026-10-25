@@ -159,3 +159,137 @@
     fail_msg: >-
       sshd -T: {{ user_test_sshd.stdout_lines | select('match', '^(allowagentforwarding|passwordauthentication|kbdinteractiveauthentication) ') | join(', ') }}
     quiet: true
+
+# Keys, first-login welcome and administrator password. Each loop runs over every present user,
+# skipping where it does not apply, so the results line up with user_present.
+- name: Fetch each GitHub user's public keys from the controller
+  ansible.builtin.uri:
+    url: https://github.com/{{ item.github }}.keys
+    return_content: true
+  delegate_to: localhost
+  become: false
+  register: user_test_github
+  when: item.github is defined
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Read each dev user's authorized keys
+  ansible.builtin.slurp:
+    src: "{{ user_home_base }}/{{ item.name }}/.ssh/authorized_keys"
+  become: true
+  register: user_test_authorized
+  failed_when: false
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Read the GitHub login list
+  ansible.builtin.slurp:
+    src: "{{ hades_config_dir }}/github-logins"
+  become: true
+  register: user_test_logins
+  failed_when: false
+
+- name: Stat each dev user's welcome
+  ansible.builtin.stat:
+    path: "{{ user_home_base }}/{{ item.name }}/.config/hades/welcome"
+  become: true
+  register: user_test_welcome
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Stat each dev user's onboarded marker
+  ansible.builtin.stat:
+    path: "{{ user_home_base }}/{{ item.name }}/.config/hades/onboarded"
+  become: true
+  register: user_test_onboarded
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# What `ssh box true` runs: bash reads ~/.bashrc for a command over SSH.
+- name: Run a command through each dev user's ~/.bashrc, non-interactive
+  ansible.builtin.command:
+    argv: [runuser, -u, "{{ item.name }}", --, bash, -c, '. "$HOME/.bashrc"; true']
+    expand_argument_vars: false
+  become: true
+  register: user_test_shell
+  changed_when: false
+  failed_when: false
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Start an interactive login shell as each dev user
+  ansible.builtin.command: runuser -u {{ item.name }} -- bash -lic true
+  become: true
+  register: user_test_interactive
+  changed_when: false
+  failed_when: false
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Stat each administrator's password file
+  ansible.builtin.stat:
+    path: "{{ hades_config_dir }}/admin-password.{{ item.name }}"
+  become: true
+  register: user_test_admin_file
+  when: item.admin | default(false)
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# The redirect runs as root, so the password passes through no variable and no command line.
+- name: Sudo as each administrator with the stored password
+  ansible.builtin.shell: >-
+    runuser -u {{ item.name }} -- sudo -S -k true
+    < {{ (hades_config_dir ~ '/admin-password.' ~ item.name) | quote }}
+  become: true
+  register: user_test_admin_sudo
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when: item.admin | default(false)
+  loop: "{{ user_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Assert each dev user's keys, login list, welcome and administrator password
+  ansible.builtin.assert:
+    that:
+      - item.github is not defined or user_test_github_keys | length > 0
+      - item.github is not defined or user_test_github_keys | reject('in', user_test_keys) | list == []
+      - item.ssh_keys | default([]) | reject('in', user_test_keys) | list == []
+      - user_test_login_lines | select('match', item.name ~ ':') | list == [item.name ~ ':' ~ item.github | default('')]
+      - user_test_welcome.results[i].stat.exists != user_test_onboarded.results[i].stat.exists
+      - not user_test_welcome.results[i].stat.exists
+        or (user_test_welcome.results[i].stat.mode == '0600' and user_test_welcome.results[i].stat.pw_name == item.name)
+      - user_test_shell.results[i].rc == 0
+      - user_test_shell.results[i].stdout == ''
+      - (user_test_interactive.results[i].stdout is search('^Welcome to ', multiline=True)) == user_test_welcome.results[i].stat.exists
+      - not item.admin | default(false) or (user_test_admin_file.results[i].stat.exists
+        and user_test_admin_file.results[i].stat.pw_name == 'root' and user_test_admin_file.results[i].stat.mode == '0600')
+      - not item.admin | default(false) or user_test_admin_sudo.results[i].rc == 0
+    fail_msg: |-
+      {{ item.name }}: {{ user_test_github_keys | reject('in', user_test_keys) | list | length }} of
+      {{ user_test_github_keys | length }} GitHub keys and {{ item.ssh_keys | default([]) | reject('in', user_test_keys) | list | length }}
+      static keys missing from authorized_keys;
+      login list: {{ user_test_login_lines | select('match', item.name ~ ':') | join(', ') or 'no line' }};
+      welcome {{ user_test_welcome.results[i].stat.mode | default('absent') }}, onboarded
+      {{ 'present' if user_test_onboarded.results[i].stat.exists else 'absent' }};
+      non-interactive output: {{ user_test_shell.results[i].stdout_lines | join(' | ') or 'none' }};
+      interactive output: {{ user_test_interactive.results[i].stdout_lines | first | default('none') }};
+      admin password file {{ user_test_admin_file.results[i].stat.mode | default('absent') }}
+      {{ user_test_admin_file.results[i].stat.pw_name | default('') }}, sudo -S rc {{ user_test_admin_sudo.results[i].rc | default('n/a') }}
+    quiet: true
+  loop: "{{ user_present }}"
+  loop_control:
+    index_var: i
+    label: "{{ item.name }}"
+  vars:
+    user_test_github_keys: "{{ (user_test_github.results[i].content | default('')).splitlines() | select | list }}"
+    user_test_keys: "{{ (user_test_authorized.results[i].content | default('') | b64decode).splitlines() }}"
+    user_test_login_lines: "{{ (user_test_logins.content | default('') | b64decode).splitlines() }}"

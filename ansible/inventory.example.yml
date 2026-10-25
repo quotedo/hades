@@ -39,7 +39,8 @@ dev_servers:
           state: present
           admin: false  # the box's one administrator: group sudo, password required
           email: <EMAIL>  # their Cloudflare Access login
-          ssh_keys: ["<SSH_PUBLIC_KEY>"]
+          github: <GITHUB_LOGIN>  # authorized_keys follows https://github.com/<login>.keys, refreshed hourly
+          ssh_keys: []  # static public keys, added to the GitHub ones
           ades: [paseo]
           paseo_port: 6767
           gpg_key: true

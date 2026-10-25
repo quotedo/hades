@@ -1,4 +1,0 @@
-# {{ ansible_managed }}
-{% for key in user.ssh_keys | default([]) %}
-{{ key }}
-{% endfor %}
