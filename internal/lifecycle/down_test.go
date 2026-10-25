@@ -193,11 +193,11 @@ func TestDownRunsTeardownInWorktreeWithItsEnv(t *testing.T) {
 	}
 	f := d.Run.(*execx.Fake)
 	calls := argvs(f)
-	if !hasCall(calls, "sh -c mix ecto.drop") || !hasCall(calls, "sh -c echo bye") {
+	if !slices.Contains(calls, "sh -c mix ecto.drop") || !slices.Contains(calls, "sh -c echo bye") {
 		t.Fatalf("%v", calls)
 	}
 	td := lastCallWithPrefix(f, "sh -c mix ecto.drop")
-	if td.Dir != c.Worktree || !envHas(td.Env, "PORT=4100") || !envHas(td.Env, "PHX_HOST=demo-feature-x.example.test") {
+	if td.Dir != c.Worktree || !slices.Contains(td.Env, "PORT=4100") || !slices.Contains(td.Env, "PHX_HOST=demo-feature-x.example.test") {
 		t.Fatalf("%+v", td)
 	}
 }
@@ -222,7 +222,7 @@ func TestDownTeardownFailureIsReportedAndOthersStillRun(t *testing.T) {
 	if r, _ := findStep(res, "teardown"); r.Err == nil {
 		t.Fatalf("%+v", res)
 	}
-	if !hasCall(argvs(d.Run.(*execx.Fake)), "sh -c echo after") {
+	if !slices.Contains(argvs(d.Run.(*execx.Fake)), "sh -c echo after") {
 		t.Fatal("later teardown command did not run")
 	}
 	if !strings.Contains(log.String(), "down: failed teardown: ") || !strings.Contains(log.String(), "down: manifest kept (failed: teardown)") {
@@ -315,7 +315,7 @@ func TestDownAsRootActsOnAnyManifestButSkipsTeardown(t *testing.T) {
 	if r, ok := findStep(res, "teardown"); !ok || !r.Skipped || r.Reason != "teardown runs only as the owner; use gc" {
 		t.Fatalf("%+v", res)
 	}
-	if hasCallPrefix(argvs(d.Run.(*execx.Fake)), "sh -c mix ecto.drop") {
+	if slices.ContainsFunc(argvs(d.Run.(*execx.Fake)), func(c string) bool { return strings.HasPrefix(c, "sh -c mix ecto.drop") }) {
 		t.Fatal("ran another user's teardown as root")
 	}
 }

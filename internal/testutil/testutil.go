@@ -2,6 +2,7 @@
 package testutil
 
 import (
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -39,6 +40,32 @@ func TempGitRepo(t *testing.T, rootName, branch string) (root, worktree string) 
 		"commit", "--allow-empty", "-m", "init")
 	git(t, root, "worktree", "add", worktree, "-b", branch)
 	return root, worktree
+}
+
+// CopyDir copies the regular files under src into dst, directories included.
+func CopyDir(t *testing.T, src, dst string) {
+	t.Helper()
+	err := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, p)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o755)
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // StubTool writes an executable bash script named name into bindir.

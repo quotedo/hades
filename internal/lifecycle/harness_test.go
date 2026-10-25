@@ -62,7 +62,7 @@ func newServerDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 	t.Helper()
 	root, wt := testutil.TempGitRepoWithWorktree(t)
 	root, wt = resolved(t, root), resolved(t, wt)
-	copyDir(t, filepath.Join("..", "preset", "testdata", fixture), wt)
+	testutil.CopyDir(t, filepath.Join("..", "preset", "testdata", fixture), wt)
 	writeFile(t, filepath.Join(root, "hades.toml"), "project = \"demo\"\n")
 	writeFile(t, filepath.Join(wt, ".mcp.json"),
 		`{"mcpServers": {"tidewave": {"type": "http", "url": "http://localhost:4000/tidewave/mcp"}}}`+"\n")
@@ -128,7 +128,7 @@ func newServerDepsSharing(t *testing.T, d Deps, fixture, userName string) (Deps,
 	t.Helper()
 	root, wt := testutil.TempGitRepoWithWorktree(t)
 	root, wt = resolved(t, root), resolved(t, wt)
-	copyDir(t, filepath.Join("..", "preset", "testdata", fixture), wt)
+	testutil.CopyDir(t, filepath.Join("..", "preset", "testdata", fixture), wt)
 	writeFile(t, filepath.Join(root, "hades.toml"), "project = \"demo\"\n")
 	d.User.Name = userName
 	return d, wtctx.Context{Root: root, Worktree: wt, Name: "feature/y", ADE: "shell"}
@@ -170,21 +170,6 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
-func copyDir(t *testing.T, src, dst string) {
-	t.Helper()
-	entries, err := os.ReadDir(src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		data, err := os.ReadFile(filepath.Join(src, e.Name()))
-		if err != nil {
-			t.Fatal(err)
-		}
-		writeFile(t, filepath.Join(dst, e.Name()), string(data))
-	}
-}
-
 // failWhen returns a Fake handler failing every command whose argv[0] is argv0.
 func failWhen(argv0 string, code int) func(execx.Cmd) (execx.Result, error) {
 	return func(c execx.Cmd) (execx.Result, error) {
@@ -204,24 +189,6 @@ func argvs(f *execx.Fake) []string {
 	return out
 }
 
-func hasCall(calls []string, want string) bool {
-	for _, c := range calls {
-		if c == want {
-			return true
-		}
-	}
-	return false
-}
-
-func hasCallPrefix(calls []string, prefix string) bool {
-	for _, c := range calls {
-		if strings.HasPrefix(c, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
 func lastCallWithPrefix(f *execx.Fake, prefix string) execx.Cmd {
 	for i := len(f.Calls) - 1; i >= 0; i-- {
 		if strings.HasPrefix(strings.Join(f.Calls[i].Argv, " "), prefix) {
@@ -229,15 +196,6 @@ func lastCallWithPrefix(f *execx.Fake, prefix string) execx.Cmd {
 		}
 	}
 	return execx.Cmd{}
-}
-
-func envHas(env []string, kv string) bool {
-	for _, e := range env {
-		if e == kv {
-			return true
-		}
-	}
-	return false
 }
 
 func toMap(kv []envfile.KV) map[string]string {

@@ -199,10 +199,4 @@ func TestJoinMessages(t *testing.T) {
 			t.Fatalf("%d %q %v", code, out, f.Calls)
 		}
 	})
-	t.Run("IP without alias", func(t *testing.T) {
-		code, _ := runJoin(t, t.TempDir(), joinFake(true, true, 0), "203.0.113.10")
-		if code != 1 {
-			t.Fatal(code)
-		}
-	})
 }

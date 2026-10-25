@@ -216,21 +216,14 @@ func TestDoctorFailsOnMissingRegistryDir(t *testing.T) {
 	}
 }
 
-type doctorCheck struct {
-	Name   string `json:"name"`
-	OK     bool   `json:"ok"`
-	Warn   bool   `json:"warn"`
-	Detail string `json:"detail"`
-}
-
-func doctorChecks(t *testing.T, getenv func(string) string) (int, map[string]doctorCheck, []string) {
+func doctorChecks(t *testing.T, getenv func(string) string) (int, map[string]check, []string) {
 	t.Helper()
 	code, out, errs := runMain(getenv, "doctor", "--json")
-	var list []doctorCheck
+	var list []check
 	if err := json.Unmarshal([]byte(out), &list); err != nil {
 		t.Fatalf("doctor --json: %v: out=%q err=%q", err, out, errs)
 	}
-	byName := map[string]doctorCheck{}
+	byName := map[string]check{}
 	var order []string
 	for _, c := range list {
 		byName[c.Name] = c
