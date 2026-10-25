@@ -15,22 +15,70 @@ For a developer with an account on a hades server. Commands, flags, files and va
 
 ## Connect
 
-1. Send the administrator your SSH public key and the email you will log in with.
-2. On your laptop:
+1. Give the administrator your GitHub login and the email you will log in with. They add you to the inventory, apply, and tell you the box's host name.
+2. Install the CLI on your laptop ([CLI reference](cli.md#install)) and log `gh` in with `gh auth login`.
+3. On your laptop:
 
-   ```
-   # ~/.ssh/config
-   Host <box>
-     HostName <box address or Tailscale name>
-     User <your login>
-     ForwardAgent yes
+   ```sh
+   hades join <box> --as <your login>
    ```
 
-   `ForwardAgent yes` lets you reach production hosts from the box with the keys that stay on your laptop.
-3. If the box is shared over Tailscale, accept the share; the box appears in your own tailnet.
-4. **Paseo:** in Paseo Desktop choose "Remote SSH", host as above, and the password the administrator read off the first apply. It lives in `~/.config/hades/paseo.env` on the box.
-   **Orca:** `journalctl --user -u orca.service` on the box prints the pairing URL.
-5. On the box: `gh auth login`, `gh auth setup-git`, and each agent CLI's own login. Then clone your projects.
+   `--as` defaults to your laptop's `$USER`. For an IP address, add `--alias <name>`: the name you will use with `ssh`.
+4. If the box is shared over Tailscale (Orca), accept the share; the box appears in your own tailnet.
+
+What `hades join` does, in order:
+
+| Step | Action |
+|---|---|
+| Key | Uses `~/.ssh/id_ed25519.pub`, else the first `~/.ssh/*.pub`; with none, generates `~/.ssh/id_ed25519` without a passphrase. |
+| GitHub | Adds the key to your GitHub account through `gh`, titled `hades <alias>`, unless it is there already. When `gh` is missing or logged out it says so and goes on: send the key it prints to the administrator instead. |
+| SSH config | Writes a block between `# hades:begin <alias>` and `# hades:end <alias>` in `~/.ssh/config`: `Host <alias>`, `HostName <box>`, `User <login>`, `ForwardAgent yes`. A rerun replaces that block and touches nothing else. |
+| Test | `ssh -o BatchMode=yes -o ConnectTimeout=10 <alias> true`. |
+
+| Outcome | First line | Exit |
+|---|---|---|
+| Connected | `connected: <login>@<alias>`, followed by how to connect Paseo Desktop | 0 |
+| Not yet | `not authorised yet: ask the administrator to add github: <your GitHub login> (or your key below) to your entry and apply, then run: hades join <your arguments>`, followed by your public key | 2 |
+| Error | `join: <reason>` on stderr | 1 |
+
+On "not yet", run the same command again once the administrator has applied. Rerunning is always safe. The alias is the box's first DNS label (`shop` for `shop.example.test`) unless you pass `--alias`.
+
+`ForwardAgent yes` lets you reach production hosts from the box with the keys that stay on your laptop. ssh takes the first value it finds for each option, so an earlier `Host *` entry in `~/.ssh/config` that sets `User` or `ForwardAgent` wins over the block: move that entry below it.
+
+## First login
+
+Log in once over SSH:
+
+```sh
+ssh <alias>
+```
+
+Every interactive shell shows the welcome until onboarding is complete; `ssh <alias> <command>` does not. It holds:
+
+| Line | For |
+|---|---|
+| `Welcome to <box>, <login>.` | everyone |
+| `Paseo Desktop: Remote SSH, host <box>, user <login>, port <port>`, then `Paseo password: ...` | Paseo users; the password lives in `~/.config/hades/paseo.env` |
+| `Orca pairing URL: journalctl --user -u orca.service` | Orca users |
+| `Laptop: hades join <box> --as <login>` | everyone |
+| `Next: run hades-onboard` | everyone |
+
+Then run `hades-onboard`. Each step prints `already done` or does its work, so it is safe to run again:
+
+| Step | Does |
+|---|---|
+| GitHub | `gh auth login` unless `gh` is logged in already. |
+| git | `gh auth setup-git`: git reaches GitHub with your `gh` login. |
+| Claude Code, Codex | `claude auth login` and `codex login --device-auth`, for each one installed and not logged in. |
+| Repositories | Clones each repository the administrator listed into `~/<name>`, unless that directory exists. |
+| Check | `hades doctor`. When it passes: deletes the welcome, writes `~/.config/hades/onboarded` and prints `onboarding complete`. Otherwise it prints `onboarding incomplete: fix the FAIL lines above and run hades-onboard again`, keeps the welcome and exits 1. |
+
+Connect your ADE:
+
+- **Paseo:** in Paseo Desktop choose "Remote SSH", host `<alias>`, user `<login>`, and the Paseo password from the welcome.
+- **Orca:** `journalctl --user -u orca.service` on the box prints the pairing URL.
+
+Your keys follow GitHub. The box writes `~/.ssh/authorized_keys` from `https://github.com/<your GitHub login>.keys`, plus any key the administrator listed, at every apply and every hour. A key you add on GitHub (a new laptop: run `hades join` there) works within the hour; a key you remove from GitHub stops working within the hour.
 
 ## A worktree's life
 
@@ -74,6 +122,8 @@ The hooks live in the repository (`paseo.json`, `orca.yaml`, written by `hades i
 | `hades env` | The worktree's variables as export lines; `--json`. |
 | `hades port` | The worktree's port. |
 | `hades doctor` | What is misconfigured, with the fix. Run it first when something is off. |
+| `hades join <box> --as <login>` | On your laptop: SSH key, key on GitHub, `~/.ssh/config` block, login test. See [Connect](#connect). |
+| `hades-onboard` | On the box: the first-login steps. See [First login](#first-login). |
 | `hades up` / `hades down` | What the hooks run. `up --skip-setup` skips the project's setup steps; `down --strict` exits 1 when any step failed. |
 
 ## Tools and versions
@@ -110,6 +160,9 @@ The hooks live in the repository (`paseo.json`, `orca.yaml`, written by `hades i
 
 | Symptom | Check |
 |---|---|
+| `hades join` says `not authorised yet` | The box does not have your key yet. Check that the administrator added the GitHub login the message names (or the key it prints) to your entry and applied, then run the same command again. |
+| My new key does not work yet | The box reads your GitHub keys hourly: wait for the next refresh, or ask the administrator to apply or refresh the keys now. |
+| I lost my Paseo password | `~/.config/hades/paseo.env` on the box. |
 | The URL answers 502 | Nothing listens on the worktree's port: start the app (`hades port` prints the port). |
 | The URL shows a Cloudflare login | Expected once per 30 days; use the email the administrator registered. |
 | The URL redirects to the apex domain | No worktree is live under that label; `hades ls` shows the labels. |

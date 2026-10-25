@@ -9,16 +9,23 @@
 | darwin/arm64, linux/amd64 | tested in CI |
 | darwin/amd64, linux/arm64 | built, untested |
 
-From source (Go 1.25+; the repository is private, so `GOPRIVATE` and git credentials are needed):
+From a release. The repository is private, so the download goes through your own `gh` login, which needs read access to it. `<os>_<arch>` is one of `darwin_arm64`, `darwin_amd64`, `linux_amd64`, `linux_arm64`:
 
 ```sh
-GOPRIVATE=github.com/quotedo/* go install github.com/quotedo/hades/cmd/...@latest   # both binaries into $(go env GOPATH)/bin
+gh release download v<version> --repo quotedo/hades --pattern '*<os>_<arch>*' --pattern checksums.txt
+sha256sum --check --ignore-missing checksums.txt
+tar -xzf hades_<version>_<os>_<arch>.tar.gz hades hades-port
+install -m 0755 hades hades-port ~/.local/bin/
 hades version
 ```
 
-From a release, when one is published: download `hades_<version>_<os>_<arch>.tar.gz` and `checksums.txt`, verify, and `install -m 0755 hades hades-port ~/.local/bin/`.
+From source (Go 1.25+, with `GOPRIVATE` and git credentials for the private repository):
 
-For a server, build both binaries for linux/amd64 and point the inventory's `hades_local_binary_dir` at the directory; see the [server reference](server.md#inventory).
+```sh
+GOPRIVATE=github.com/quotedo/* go install github.com/quotedo/hades/cmd/...@latest   # both binaries into $(go env GOPATH)/bin
+```
+
+On a server the Ansible collection installs the release named by `hades_version`, or a local linux/amd64 build from `hades_local_binary_dir`; see the [server reference](server.md#inventory).
 
 ## Modes
 
@@ -50,8 +57,21 @@ hades [--root DIR] [--worktree DIR] [--name NAME] [--ade paseo|orca|wt|shell] [-
 | `gc` | Releases the claims of worktrees whose directory vanished, or everything owned by a user. On a server it runs as root (a weekly timer runs it too); on a laptop as the user. | `--dry-run`, `--owner USER` |
 | `caddy-reload` | As root through sudo: validates every site file, mirrors them into Caddy's live directory, validates the Caddyfile, reloads Caddy. | `--check` |
 | `version` | Prints the version. | |
+| `join` | On a laptop: `hades join <host-or-ip> [--as LOGIN] [--alias NAME]` prepares SSH access to a server. Uses `~/.ssh/id_ed25519.pub`, else the first `~/.ssh/*.pub`, else generates `~/.ssh/id_ed25519` without a passphrase; adds the key to the `gh` user's GitHub account unless it is there (without `gh`, says so and goes on); writes `Host <alias>`, `HostName`, `User <login>`, `ForwardAgent yes` between `# hades:begin <alias>` and `# hades:end <alias>` in `~/.ssh/config`, touching nothing else; runs `ssh -o BatchMode=yes -o ConnectTimeout=10 <alias> true`. Exit 0 with `connected: <login>@<alias>`; exit 2 with `not authorised yet: ...` and the public key (run the same command again after the administrator applies), or on a usage error; exit 1 with `join: <reason>` on any other failure. | `--as LOGIN` (default `$USER`), `--alias NAME` (default: the host's first DNS label; required for an IP) |
 
 How a worktree is identified: `--worktree`/`--name` flags, else Paseo's `PASEO_*` variables, else Orca's `ORCA_*` (the label is the workspace name), else git. The name, label and hostname are fixed at the first `up` and recorded in the manifest; a renamed branch keeps them. `down` then `up` gives a fresh label. A label another user already holds fails `up` with `label <l> taken by <user> for <path>`.
+
+## First login on a server
+
+The Ansible collection installs these beside `hades`; the [developer guide](developer.md#first-login) walks through them.
+
+| File or command | What it is |
+|---|---|
+| `~/.config/hades/welcome` | Written by the user role (owner, 0600) while neither it nor `onboarded` exists; `~/.config/hades/env.sh` sources it in interactive shells only. Prints the Paseo host, user, port and password (read from `~/.config/hades/paseo.env` at print time), the Orca pairing hint, the `hades join` line for the laptop and `Next: run hades-onboard`. |
+| `hades-onboard` | Run by the developer. `gh auth login` unless logged in; `gh auth setup-git`; `claude auth login` and `codex login --device-auth` for each installed CLI not logged in; clones each line of `~/.config/hades/repos` into `~/<name>` unless that directory exists; `hades doctor`. When doctor passes it deletes the welcome, touches `onboarded` and prints `onboarding complete`; otherwise it keeps the welcome and exits 1. Each step prints `already done` or does its work. |
+| `~/.config/hades/onboarded` | The marker `hades-onboard` writes; while it exists the role never writes the welcome again. |
+| `~/.config/hades/repos` | The inventory's `repos` for the user, one URL per line (owner, 0600). |
+| `hades-keys [LOGIN]` | Root, hourly through `hades-keys.timer`, and by the user role at apply. For each `login:github` line of `/etc/hades/github-logins` (or LOGIN alone), writes `~/.ssh/authorized_keys` as that user: `/etc/hades/ssh-keys/<login>` followed by `https://github.com/<github>.keys`, or the static keys alone when github is empty. Writes only when the content differs; a failed or empty fetch keeps the file. Prints `<login>: updated`, `unchanged`, `fetch failed, kept`, `no home, skipped` or `write failed, kept`. |
 
 ## What `up` writes
 

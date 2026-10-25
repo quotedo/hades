@@ -7,10 +7,11 @@ dev_servers:
       ansible_user: <SUDO_USER>
       hades_domain: <DOMAIN>
       hades_label_template: !unsafe '{{project}}-{{name}}'
-      # hades_version: "0.1.0"  # a published release; until one exists, build the CLI for linux/amd64 and name the directory:
-      # hades_local_binary_dir: /path/to/dist/linux_amd64
+      # hades_version: "0.1.0"  # a published release, downloaded with the operator's gh
+      # hades_local_binary_dir: /path/to/dist/linux_amd64  # development: a local linux/amd64 build instead of the release
       # Cloudflare Access admits every present dev user's email plus these emails or @domains.
       access_allow: []
+      # cloudflare_team: hades-<DOMAIN with dots replaced by dashes>  # the default; Zero Trust team name when the role creates it
       dev_services: [rabbitmq, localstack]
       tailscale_enabled: false  # true when a dev user lists orca
       vpn_enabled: false

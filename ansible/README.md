@@ -4,6 +4,6 @@ The Ansible collection that turns an Ubuntu host into a hades dev server. Everyt
 
 ```sh
 ansible-playbook -i inventory.yml playbooks/preflight.yml
-ansible-playbook -i inventory.yml playbooks/site.yml --tags host   # then postgres, services, ingress, user, protected, vpn
-ansible-playbook -i inventory.yml playbooks/verify.yml --tags host  # per tag
+ansible-playbook -i inventory.yml playbooks/site.yml
+ansible-playbook -i inventory.yml playbooks/verify.yml
 ```

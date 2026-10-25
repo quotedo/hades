@@ -49,30 +49,38 @@ flowchart LR
 
 ### Developer on an existing server
 
-1. Give the administrator your SSH public key and the email you will log in with.
-2. On your laptop, add the box to `~/.ssh/config` with `ForwardAgent yes`; accept the Tailscale share if the box uses one.
-3. Connect your ADE: Paseo Desktop "Remote SSH" with the password the administrator gives you, or read Orca's pairing URL on the box with `journalctl --user -u orca.service`.
-4. On the box: `gh auth login`, `gh auth setup-git`, and each agent CLI's own login.
-5. Clone your project. Its repository must contain the hooks (`paseo.json` or `orca.yaml`, written by `hades init`); open a worktree from the ADE and the hook runs `hades up`.
-6. Start the app on `$PORT` (direnv loads `.env.worktree`; a declared Paseo service gets the port from `hades-port`). It is then at `https://<label>.<domain>` after you log in with your email.
+1. Give the administrator your GitHub login and the email you will log in with.
+2. Install the CLI on your laptop (see [below](#cli-alone-on-a-laptop)), then run `hades join <box> --as <login>`. It puts your SSH key on GitHub, writes the box into `~/.ssh/config` and tests the login. Until the box has your key it says `not authorised yet`: run the same command again once the administrator has applied. Orca users also accept the Tailscale share.
+3. Log in once with `ssh <box>`. The welcome shows your Paseo password and port; run `hades-onboard` (GitHub and agent logins, your repositories, `hades doctor`).
+4. Connect your ADE: Paseo Desktop "Remote SSH", host `<box>`, user `<login>`; or Orca's pairing URL from `journalctl --user -u orca.service` on the box. Open a worktree: the project's hooks (`paseo.json` or `orca.yaml`, written by `hades init`) run `hades up`.
+5. Start the app on `$PORT` (direnv loads `.env.worktree`; a declared Paseo service gets the port from `hades-port`). It is then at `https://<label>.<domain>` after you log in with your email.
 
 Details: [Developer guide](docs/developer.md).
 
 ### Operator setting up a server
 
-1. Install `ansible-core` 2.17+ and the collection's requirements; copy `ansible/inventory.example.yml` to a private inventory: domain, tool versions, users, and the `protected` block (services already on the box that dev accounts must not starve or reach).
-2. Export the secrets from a private `.env`: Cloudflare account id and API token, the VPN config if used.
-3. `ansible-playbook -i inventory.yml playbooks/preflight.yml`, then `site.yml` one tag group at a time, then `verify.yml` per tag.
-4. Set the administrator's sudo password, run `tailscale up` if Orca or Tailscale sharing is wanted, hand each developer their Paseo password.
+1. Install `ansible-core` 2.17+ and the collection's requirements, and log `gh` in with read access to this repository (the host's CLI is a release downloaded with it). Copy `ansible/inventory.example.yml` to a private inventory: domain, tool versions, users (each with `github` and `email`), and the `protected` block (services already on the box that dev accounts must not starve or reach).
+2. Export the secrets from a private `.env`: Cloudflare account id and API token, `TS_AUTHKEY` when the box runs Tailscale, the VPN config if used.
+3. Apply and verify:
+
+   ```sh
+   ansible-playbook -i inventory.yml playbooks/preflight.yml
+   ansible-playbook -i inventory.yml playbooks/site.yml
+   ansible-playbook -i inventory.yml playbooks/verify.yml
+   ```
+
+4. Tell each developer the box's host name. Nobody types or hands over a password: the administrator's sudo password is generated and printed once in the apply output, and each developer reads their Paseo password at their first login.
 
 Details: [Server reference](docs/server.md).
 
 ### CLI alone on a laptop
 
-Needs Postgres on `127.0.0.1:5432` (`postgres`/`postgres`, or `HADES_DB_*` overrides) and the project config snippet that `hades init` prints.
+Needs Postgres on `127.0.0.1:5432` (`postgres`/`postgres`, or `HADES_DB_*` overrides) and the project config snippet that `hades init` prints. The repository is private: install from a release with your own `gh` login (other ways in the [CLI reference](docs/cli.md#install)).
 
 ```sh
-GOPRIVATE=github.com/quotedo/* go install github.com/quotedo/hades/cmd/...@latest
+gh release download v<version> --repo quotedo/hades --pattern '*darwin_arm64*' --pattern checksums.txt   # your <os>_<arch>
+sha256sum --check --ignore-missing checksums.txt
+tar -xzf hades_<version>_darwin_arm64.tar.gz hades hades-port && install -m 0755 hades hades-port ~/.local/bin/
 cd your-repo && hades init
 git add hades.toml paseo.json orca.yaml .gitignore && git commit -m "add hades"
 ```

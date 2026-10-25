@@ -1,15 +1,16 @@
 ---
 # Provision a dev server.
 #
-# Interactive one-time steps that no playbook can do for you (docs/server.md):
-#   1. Cloudflare: enable Zero Trust once, export CF_ACCOUNT_ID and CF_API_TOKEN and give every
-#      present dev user an email; the ingress role creates the tunnel, DNS and Access.
-#   2. The administrator's password: `sudo passwd <name>` after the first user apply. Per user,
-#      as that user: `gh auth login` and each agent CLI's own login.
-#   3. Paseo: enter the daemon password in the desktop client; for a phone run
+# Steps outside this playbook (docs/server.md):
+#   1. Cloudflare: export CF_ACCOUNT_ID and CF_API_TOKEN and give every present dev user an email;
+#      the ingress role creates the tunnel, DNS, Access and, when missing, the Zero Trust
+#      organization. Tailscale: export TS_AUTHKEY, or run `sudo tailscale up` once; share the node
+#      with each Orca user.
+#   2. The administrator's sudo password is generated and printed once by the user role.
+#   3. Each developer runs `hades join` on the laptop, then `hades-onboard` on the box (GitHub and
+#      agent logins, repositories); the welcome shows their Paseo password. For a phone run
 #      `paseo daemon pair --relay`.
-#   4. Tailscale: `tailscale up` once, share the node with each developer; Orca pairs over it.
-#   5. A project's key holder runs `git secret tell` for the new users.
+#   4. A project's key holder runs `git secret tell` for the new users.
 - name: Preflight
   ansible.builtin.import_playbook: preflight.yml
 
