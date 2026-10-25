@@ -21,8 +21,9 @@ import (
 
 // domainFixture writes a host config with domain example.test, plus extra,
 // and returns the registry under HOME (created), a getenv pointing at both,
-// and HOME. <HOME>/bin leads PATH, for stub tools. Postgres points at a
-// closed port, so the postgres check fails fast.
+// and HOME. <HOME>/bin leads PATH, for stub tools; its systemctl says
+// caddy.service is active. Postgres points at a closed port, so the postgres
+// check fails fast.
 func domainFixture(t *testing.T, extra string) (*registry.Registry, func(string) string, string) {
 	t.Helper()
 	home := t.TempDir()
@@ -30,6 +31,7 @@ func domainFixture(t *testing.T, extra string) (*registry.Registry, func(string)
 	if err := os.Mkdir(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	testutil.StubTool(t, bin, "systemctl", "#!/bin/bash\n[ \"$*\" = \"is-active caddy.service\" ] || exit 9\necho active\n")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	hostFile := filepath.Join(home, "host.toml")
 	if err := os.WriteFile(hostFile, []byte("domain = \"example.test\"\n"+extra), 0o644); err != nil {
@@ -203,6 +205,30 @@ func TestDoctorReportsHostConfig(t *testing.T) {
 	_, checks, _ = doctorChecks(t, withEnv(getenv, map[string]string{"HADES_HOST_CONFIG": hostFile}))
 	if c := checks["host-config"]; !c.OK || c.Detail != "loaded "+hostFile+" (domain example.test)" {
 		t.Fatalf("host-config = %+v", c)
+	}
+	// Without a domain there are no sites to serve: no caddy check.
+	if err := os.WriteFile(hostFile, []byte("chrome_path = \"/opt/chrome-for-testing/chrome\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, checks, _ = doctorChecks(t, withEnv(getenv, map[string]string{"HADES_HOST_CONFIG": hostFile}))
+	if c, ok := checks["caddy"]; checks["host-config"].Detail != "loaded "+hostFile+" (domain none)" || ok {
+		t.Fatalf("host-config = %+v, caddy = %+v", checks["host-config"], c)
+	}
+}
+
+// With a domain, doctor checks the Caddy service that serves the sites.
+func TestDoctorCaddy(t *testing.T) {
+	stubProbe(t)
+	_, getenv, home := domainFixture(t, "")
+	t.Chdir(t.TempDir())
+	_, checks, _ := doctorChecks(t, getenv)
+	if c := checks["caddy"]; !c.OK || c.Detail != "caddy.service active" {
+		t.Fatalf("caddy = %+v", c)
+	}
+	testutil.StubTool(t, filepath.Join(home, "bin"), "systemctl", "#!/bin/bash\necho inactive\nexit 3\n")
+	_, checks, _ = doctorChecks(t, getenv)
+	if c := checks["caddy"]; c.OK || c.Warn || c.Detail != "caddy.service is inactive: sudo systemctl restart caddy" {
+		t.Fatalf("caddy = %+v", c)
 	}
 }
 

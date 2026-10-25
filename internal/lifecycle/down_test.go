@@ -228,6 +228,17 @@ func TestDownWithDomainRemovesSiteAndReloads(t *testing.T) {
 	}
 }
 
+func TestDownWithoutDomainMakesNoSiteOrCaddyCall(t *testing.T) {
+	d, c := newLaptopDeps(t, "phoenix")
+	mustUp(t, d, c)
+	f := d.Run.(*execx.Fake)
+	f.Calls = nil
+	res, err := Down(context.Background(), d, c, true)
+	if _, ok := findStep(res, "site"); err != nil || ok || slices.ContainsFunc(f.Calls, func(c execx.Cmd) bool { return c.Argv[0] == "caddy" }) {
+		t.Fatalf("%+v %v %v", res, err, argvs(f))
+	}
+}
+
 func TestDownDeletesVhostOrSkipsWithoutRabbit(t *testing.T) {
 	d, c := newDeps(t, "phoenix")
 	rmq := &fakeRabbit{}

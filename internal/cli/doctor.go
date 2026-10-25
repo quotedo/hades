@@ -103,6 +103,9 @@ func runChecks(bg context.Context, ctx *Context) []check {
 	if r := d.Host.RabbitMQ; r != nil {
 		checks = append(checks, checkRabbit(bg, r, "start RabbitMQ at "+r.ManagementURL))
 	}
+	if d.Host.Domain != "" {
+		checks = append(checks, checkCaddy(bg, d.Run))
+	}
 
 	lookup := toolLookup(d, ctx.Getenv("PATH"))
 	if p, err := lookup("git"); err != nil {
@@ -200,6 +203,16 @@ func checkRabbit(bg context.Context, r *config.RabbitMQ, fix string) check {
 		return fail(name, fmt.Errorf("GET %s: %s", url, resp.Status), fix)
 	}
 	return pass(name, "management API reachable at "+r.ManagementURL)
+}
+
+// checkCaddy fails unless the Caddy service that serves the site files runs.
+func checkCaddy(bg context.Context, run execx.Runner) check {
+	res, err := run.Run(bg, execx.Cmd{Argv: []string{"systemctl", "is-active", "caddy.service"}})
+	if err != nil {
+		state := cmp.Or(strings.TrimSpace(res.Stdout), err.Error())
+		return fail("caddy", errors.New("caddy.service is "+state), "sudo systemctl restart caddy")
+	}
+	return pass("caddy", "caddy.service active")
 }
 
 // toolLookup resolves a tool the way `up` runs commands: the version-manager
