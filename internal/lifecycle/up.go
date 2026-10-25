@@ -270,7 +270,7 @@ func (u *upRun) plan() {
 		Worktree:     c.Worktree,
 		Root:         c.Root,
 		Preset:       string(u.preset.Kind),
-		DBSuffix:     naming.Suffix(d.User.Name, naming.Sanitize(c.Name)),
+		DBSuffix:     naming.Suffix(u.project, naming.Sanitize(c.Name)),
 		DBBases:      bases,
 		Vhost:        u.vhost,
 		ADE:          c.ADE,
@@ -308,7 +308,10 @@ func (u *upRun) checkSameWorktree(m *registry.Manifest) error {
 }
 
 // checkDatabases fails when another worktree's manifest records one of this
-// run's databases (the same base and suffix): down there would drop it.
+// run's databases (the same base and suffix): down there would drop it. A
+// distinct label does not rule that out: a domain change adds or drops the
+// label's "<user>-" but not the suffix's, and a manifest keeps the suffix
+// it recorded.
 func (u *upRun) checkDatabases() error {
 	all, _, err := u.d.Reg.All()
 	if err != nil {

@@ -94,12 +94,12 @@ which ADE's variables to read.
 How a worktree is identified: `--root`/`--worktree`/`--name` flags, else Paseo's `PASEO_*`
 variables, else Orca's `ORCA_*`, else git. The name is the branch (Paseo, git; the directory name on
 a detached HEAD) or the workspace name (Orca). The label is in the [host config](#host-config) table,
-at most 63 characters (the name is shortened to fit). The name, label and hostname are fixed at the
-first `up` and recorded in the manifest; a renamed branch keeps them. `down` then `up` gives a fresh
-label. A label held by the manifest of another worktree path fails `up` with
-`label <l> taken by <user> for <path>`.
-A database another worktree's manifest records (the same Mix app and worktree name in two projects)
-fails `up` with `database <db> is <label>'s (<path>); give this worktree another name: hades --name NAME up`.
+at most 63 characters (the name is shortened to fit). The name, label, hostname and `DB_SUFFIX` are
+fixed at the first `up` and recorded in the manifest; a renamed branch keeps them. `down` then `up`
+gives a fresh label. A label held by the manifest of another worktree path fails `up` with
+`label <l> taken by <user> for <path>`. A database another worktree's manifest records (its label
+from before a change of domain) fails `up` with
+`database <db> is <label>'s (<path>); give this worktree another name: hades --name NAME up`.
 
 ## `join`
 
@@ -170,7 +170,7 @@ Variables (web projects get all of them; others get no `PORT`, `PHX_HOST`, `HADE
 | `PHX_HOST`, `HADES_URL` | in the [host config](#host-config) table |
 | `HADES_LABEL` | `<label>` |
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` | the `HADES_DB_*` values |
-| `DB_SUFFIX` | `_<user>_<name>`, at most 32 bytes, never ending in a digit |
+| `DB_SUFFIX` | `_<project>_<name>` with `_` for `-`, at most 32 bytes, never ending in a digit |
 | `DATABASE_URL`, `TEST_DATABASE_URL` | `<app>_dev<suffix>` and `<app>_test<suffix>` from the Mix app name (Mix projects only) |
 | `SECRET_KEY_BASE` | random, kept across runs |
 | `RABBITMQ_VHOST`, `AMQP_URL` | when the project asks for a vhost |

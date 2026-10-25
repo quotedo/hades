@@ -26,7 +26,7 @@ func TestUpPhoenixHappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := out.Manifest
-	if m.Port != 4100 || m.Label != "demo-feature-x" || m.Host != "demo-feature-x.example.test" || !reflect.DeepEqual(m.DBBases, []string{"demo_dev", "demo_test"}) || m.DBSuffix != "_alice_feature_x" || m.Vhost != "" {
+	if m.Port != 4100 || m.Label != "demo-feature-x" || m.Host != "demo-feature-x.example.test" || !reflect.DeepEqual(m.DBBases, []string{"demo_dev", "demo_test"}) || m.DBSuffix != "_demo_feature_x" || m.Vhost != "" {
 		t.Fatalf("%+v", m)
 	}
 	if owner, _ := d.Reg.PortOwner(4100); owner != c.Worktree {
@@ -85,16 +85,49 @@ func TestUpLabelTakenByOtherWorktree(t *testing.T) {
 	}
 }
 
-// Another project with the same Mix app and worktree name would share the
-// databases, and down there would drop them here.
-func TestUpRefusesDatabasesOfAnotherWorktree(t *testing.T) {
+// Another project with the same Mix app and worktree name gets its own
+// databases: the suffix is the project's and the name's.
+func TestUpSuffixIsProjectAndName(t *testing.T) {
 	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
 	other := secondWorktree(t, "phoenix")
 	other.Name = c.Name
 	writeFile(t, filepath.Join(other.Root, "hades.toml"), "project = \"shop\"\n")
+	out, err := Up(context.Background(), d, other, UpOptions{SkipSetup: true})
+	if err != nil || out.Manifest.DBSuffix != "_shop_feature_x" {
+		t.Fatal(err, out)
+	}
+}
+
+// A manifest keeps the suffix it recorded, whatever the rule gives today.
+func TestUpKeepsRecordedSuffix(t *testing.T) {
+	d, c := newDeps(t, "phoenix")
+	mustUp(t, d, c)
+	m, err := d.Reg.ByWorktree(c.Worktree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.DBSuffix = "_alice_feature_x"
+	if err := d.Reg.WriteManifest(m); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
+	if err != nil || out.Manifest.DBSuffix != "_alice_feature_x" || toMap(out.Env)["DB_SUFFIX"] != "_alice_feature_x" {
+		t.Fatal(err, out)
+	}
+}
+
+// Labels from before and after a domain change differ by "<user>-", the
+// suffix does not: up refuses databases another worktree's manifest records,
+// as down there would drop them.
+func TestUpRefusesDatabasesOfAnotherWorktree(t *testing.T) {
+	d, c := newDeps(t, "phoenix")
+	mustUp(t, d, c)
+	d.Host.LabelTemplate = naming.DomainLabelTemplate
+	other := secondWorktree(t, "phoenix")
+	other.Name = c.Name
 	_, err := Up(context.Background(), d, other, UpOptions{SkipSetup: true})
-	if err == nil || !strings.Contains(err.Error(), "database demo_dev_alice_feature_x is demo-feature-x's") {
+	if err == nil || !strings.Contains(err.Error(), "database demo_dev_demo_feature_x is demo-feature-x's") {
 		t.Fatal(err)
 	}
 	if all, _, _ := d.Reg.All(); len(all) != 1 {
@@ -457,11 +490,11 @@ func TestUpRerunKeepsRecordedBasesAndVhost(t *testing.T) {
 		t.Fatalf("ensured %v env %v", rmq.ensured, toMap(out.Env))
 	}
 
-	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x", "only_this_alice_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_demo_feature_x", "only_this_demo_feature_x"}
 	if _, err := Down(context.Background(), d, c, true); err != nil {
 		t.Fatal(err)
 	}
-	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_alice_feature_x", "only_this_alice_feature_x"}) {
+	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_demo_feature_x", "only_this_demo_feature_x"}) {
 		t.Fatal(got)
 	}
 	if !reflect.DeepEqual(rmq.deleted, []string{"demo-feature-x"}) {
@@ -510,7 +543,7 @@ func TestUpProjectFromConfigIsSlugged(t *testing.T) {
 func TestUpAfterKeptManifest(t *testing.T) {
 	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
-	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_demo_feature_x"}
 	d.PG.(*fakePG).failDrop = true
 	if _, err := Down(context.Background(), d, c, false); err != nil {
 		t.Fatal(err)

@@ -127,26 +127,17 @@ func Render(tmpl string, vars map[string]string) (string, error) {
 	return out, bad
 }
 
-// Suffix builds a database suffix "_<user>_<name>". The user part keeps only
-// lower-case letters and digits, so the first "_"-delimited segment of a
-// suffix is always the owner's login: "alice-feature" with "x" and "alice"
-// with "feature/x" cannot collide. In the name, lower-case letters, digits
-// and "_" are kept, "-" becomes "_", and everything else is dropped. A result
-// longer than 32 bytes (counting the "_" below) keeps its first 22 bytes and
-// appends "_" plus the first 8 hex characters of the SHA-256 of the full
-// string. A suffix never ends in a digit: "_" is appended when it would, so
-// the digits after <base><suffix> can only be this worktree's
-// MIX_TEST_PARTITION.
-func Suffix(user, name string) string {
+// Suffix builds a database suffix "_<project>_<name>". Lower-case letters,
+// digits and "_" are kept, "-" becomes "_", and everything else is dropped,
+// so for a project slug and a sanitised name the suffix is the label
+// "<project>-<name>" with "_" for "-". A result longer than 32 bytes
+// (counting the "_" below) keeps its first 22 bytes and appends "_" plus the
+// first 8 hex characters of the SHA-256 of the full string. A suffix never
+// ends in a digit: "_" is appended when it would, so the digits after
+// <base><suffix> can only be this worktree's MIX_TEST_PARTITION.
+func Suffix(project, name string) string {
 	var b strings.Builder
-	b.WriteByte('_')
-	for _, c := range []byte(strings.ToLower(user)) {
-		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
-			b.WriteByte(c)
-		}
-	}
-	b.WriteByte('_')
-	for _, c := range []byte(strings.ToLower(name)) {
+	for _, c := range []byte(strings.ToLower("_" + project + "_" + name)) {
 		switch {
 		case c == '-':
 			b.WriteByte('_')

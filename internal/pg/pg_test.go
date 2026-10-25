@@ -53,17 +53,16 @@ func TestMatch(t *testing.T) {
 	}
 }
 
-// Worktree feature/x of user alice in project demo must never drop what it
-// does not own.
+// Worktree feature/x in project demo must never drop what it does not own.
 func TestMatchOnlyThisWorktree(t *testing.T) {
-	bases, suffix := []string{"demo_dev", "demo_test"}, naming.Suffix("alice", "feature-x")
+	bases, suffix := []string{"demo_dev", "demo_test"}, naming.Suffix("demo", "feature-x")
 	for _, other := range []string{
-		// alice's worktree feature/x1. Its suffix ends in "_", because
-		// demo_dev_alice_feature_x1 is indistinguishable from partition 1 of
+		// Worktree feature/x1. Its suffix ends in "_", because
+		// demo_dev_demo_feature_x1 is indistinguishable from partition 1 of
 		// feature/x (see the last check).
-		"demo_dev" + naming.Suffix("alice", "feature-x1"),
-		"demo_dev" + naming.Suffix("bob", "alice-feature-x"), // bob's worktree named alice-feature-x
-		"demoapp_dev_alice_feature_x",                        // another project
+		"demo_dev" + naming.Suffix("demo", "feature-x1"),
+		"demo_dev" + naming.Suffix("shop", "demo-feature-x"), // project shop's worktree demo-feature-x
+		"demoapp_dev_demo_feature_x",                         // another Mix app
 	} {
 		if got := pg.Match([]string{other}, []string{"demo"}, suffix); len(got) != 0 {
 			t.Errorf("base demo matched %s", other)
@@ -72,7 +71,7 @@ func TestMatchOnlyThisWorktree(t *testing.T) {
 			t.Errorf("bases %v matched %s", bases, other)
 		}
 	}
-	if got := pg.Match([]string{"demo_test_alice_feature_x1"}, bases, suffix); len(got) != 1 {
+	if got := pg.Match([]string{"demo_test_demo_feature_x1"}, bases, suffix); len(got) != 1 {
 		t.Fatal("test partition not matched")
 	}
 }

@@ -19,7 +19,7 @@ import (
 
 func TestDownRemovesEverythingItOwns(t *testing.T) {
 	d, c := newDeps(t, "phoenix")
-	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x", "demo_test_alice_feature_x1", "demo_dev_alice_other"}
+	d.PG.(*fakePG).names = []string{"demo_dev_demo_feature_x", "demo_test_demo_feature_x1", "demo_dev_demo_other"}
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	res, err := Down(context.Background(), d, c, false)
 	if err != nil {
@@ -30,7 +30,7 @@ func TestDownRemovesEverythingItOwns(t *testing.T) {
 			t.Fatalf("%+v", r)
 		}
 	}
-	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_alice_feature_x", "demo_test_alice_feature_x1"}) {
+	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_demo_feature_x", "demo_test_demo_feature_x1"}) {
 		t.Fatal(got)
 	}
 	if all, _, _ := d.Reg.All(); len(all) != 0 {
@@ -53,9 +53,9 @@ func TestDownUsesManifestBasesNotCurrentConfig(t *testing.T) {
 	d, c := newDeps(t, "phoenix")
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	os.WriteFile(filepath.Join(c.Worktree, "hades.toml"), []byte("databases = [\"other\"]\n"), 0o644)
-	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x", "other_dev_alice_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_demo_feature_x", "other_dev_demo_feature_x"}
 	Down(context.Background(), d, c, false)
-	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_alice_feature_x"}) {
+	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_demo_feature_x"}) {
 		t.Fatal(got)
 	}
 }
@@ -64,7 +64,7 @@ func TestDownBestEffortAndStrict(t *testing.T) {
 	d, c := newDeps(t, "phoenix")
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	d.PG.(*fakePG).failDrop = true
-	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_demo_feature_x"}
 	var log bytes.Buffer
 	d.Log = &log
 	res, err := Down(context.Background(), d, c, false)
@@ -257,16 +257,16 @@ func TestDownNeverDropsOtherWorktreesDatabases(t *testing.T) {
 	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
 	d.PG.(*fakePG).names = []string{
-		"demo_dev_alice_feature_x",
-		"demo_test_alice_feature_x2",   // this worktree's MIX_TEST_PARTITION=2
-		"demo_dev_alice_feature_x1_",   // alice's worktree feature/x1
-		"demo_dev_bob_alice_feature_x", // bob's worktree alice-feature-x
-		"demoapp_dev_alice_feature_x",  // another project
+		"demo_dev_demo_feature_x",
+		"demo_test_demo_feature_x2",    // this worktree's MIX_TEST_PARTITION=2
+		"demo_dev_demo_feature_x1_",    // worktree feature/x1
+		"demo_dev_shop_demo_feature_x", // project shop's worktree demo-feature-x
+		"demoapp_dev_demo_feature_x",   // another Mix app
 	}
 	if _, err := Down(context.Background(), d, c, true); err != nil {
 		t.Fatal(err)
 	}
-	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_alice_feature_x", "demo_test_alice_feature_x2"}) {
+	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_demo_feature_x", "demo_test_demo_feature_x2"}) {
 		t.Fatal(got)
 	}
 }
@@ -398,7 +398,7 @@ func TestGCReportsStepErrorsAndCarriesOn(t *testing.T) {
 	mustUp(t, d, c)
 	c2 := secondWorktree(t, "phoenix")
 	mustUp(t, d, c2)
-	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_demo_feature_x"}
 	d.PG.(*fakePG).failDrop = true
 	for _, wt := range []string{c.Worktree, c2.Worktree} {
 		if err := os.RemoveAll(wt); err != nil {
@@ -426,7 +426,7 @@ func TestGCReportsStepErrorsAndCarriesOn(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 0 {
 		t.Fatalf("retry: %+v %v", rep, err)
 	}
-	if !reflect.DeepEqual(d.PG.(*fakePG).dropped, []string{"demo_dev_alice_feature_x"}) {
+	if !reflect.DeepEqual(d.PG.(*fakePG).dropped, []string{"demo_dev_demo_feature_x"}) {
 		t.Fatal(d.PG.(*fakePG).dropped)
 	}
 }
@@ -455,7 +455,7 @@ func TestDownMissingPortLinkIsASkip(t *testing.T) {
 func TestKeptManifestPortReuseConverges(t *testing.T) {
 	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
-	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_demo_feature_x"}
 	d.PG.(*fakePG).failDrop = true
 	if err := os.RemoveAll(c.Worktree); err != nil {
 		t.Fatal(err)
