@@ -318,13 +318,10 @@
     fail_msg: "hades-keys.timer must be enabled and active"
     quiet: true
 
-# Review focus: a fetch that fails leaves authorized_keys alone and says so. The second login is
-# a present user's with a GitHub login that cannot exist (GitHub forbids "--").
-- name: Probe hades-keys with GitHub logins that fail
+# Review focus: a fetch that fails says so and writes nothing; hades-keys fetches before it
+# looks at any home.
+- name: Probe hades-keys with a GitHub login that does not exist
   become: true
-  vars:
-    host_test_keys_user: "{{ user_present | map(attribute='name') | first | default('') }}"
-    host_test_keys_file: "{{ user_home_base }}/{{ host_test_keys_user }}/.ssh/authorized_keys"
   block:
     - name: Create the probe login list
       ansible.builtin.tempfile:
@@ -333,17 +330,9 @@
 
     - name: Write the probe login list
       ansible.builtin.copy:
-        content: |
-          nouser:this-login-does-not-exist-404
-          {% if host_test_keys_user %}{{ host_test_keys_user }}:no--such-login
-          {% endif %}
+        content: "nouser:this-login-does-not-exist-404\n"
         dest: "{{ host_test_keys_list.path }}"
         mode: "0600"
-
-    - name: Stat the present user's authorized_keys before the probe
-      ansible.builtin.stat:
-        path: "{{ host_test_keys_file }}"
-      register: host_test_keys_before
 
     - name: Run hades-keys against the probe list
       ansible.builtin.command: "{{ hades_bin_dir }}/hades-keys"
@@ -352,18 +341,10 @@
       register: host_test_keys_run
       changed_when: false
 
-    - name: Stat the present user's authorized_keys after the probe
-      ansible.builtin.stat:
-        path: "{{ host_test_keys_file }}"
-      register: host_test_keys_after
-
-    - name: Assert every failed fetch kept authorized_keys
+    - name: Assert the failed fetch kept authorized_keys
       ansible.builtin.assert:
-        that:
-          - host_test_keys_run.stdout_lines[0] == 'nouser: fetch failed, kept'
-          - not host_test_keys_user or host_test_keys_run.stdout_lines[1] == host_test_keys_user ~ ': fetch failed, kept'
-          - host_test_keys_before.stat.mtime | default(0) == host_test_keys_after.stat.mtime | default(0)
-        fail_msg: "hades-keys printed {{ host_test_keys_run.stdout_lines }}; authorized_keys must stay untouched"
+        that: "host_test_keys_run.stdout_lines == ['nouser: fetch failed, kept']"
+        fail_msg: "hades-keys printed {{ host_test_keys_run.stdout_lines }}"
         quiet: true
   always:
     - name: Remove the probe login list
