@@ -130,6 +130,22 @@
       register: ingress_test_apps
       no_log: true
 
+    - name: Read the Access identity providers
+      ansible.builtin.uri:
+        url: "{{ ingress_cloudflare_api }}/accounts/{{ lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') }}/access/identity_providers"
+        headers:
+          Authorization: Bearer {{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}
+      delegate_to: localhost
+      become: false
+      register: ingress_test_idps
+      no_log: true
+
+    - name: Assert the account has the One-time PIN login
+      ansible.builtin.assert:
+        that: ingress_test_idps.json.result | selectattr('type', 'eq', 'onetimepin') | list | length == 1
+        fail_msg: "identity providers: {{ ingress_test_idps.json.result | map(attribute='type') | list }}"
+        quiet: true
+
     - name: Assert the Access policy admits exactly the inventory's list
       ansible.builtin.assert:
         that:

@@ -201,6 +201,29 @@
         - ingress_cf_org.status == 200
         - ingress_cf_org.json.result.session_duration != access_session
 
+    # Developers log in with a one-time PIN mailed to them. An account has at most one such
+    # provider; another provider is left as it is. Check mode on an account without Zero Trust
+    # reads none.
+    - name: Read the Access identity providers
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/access/identity_providers"
+      register: ingress_cf_idps
+      check_mode: false
+      when: ingress_cf_org.status == 200 or not ansible_check_mode
+
+    - name: Create the One-time PIN identity provider
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/access/identity_providers"
+        method: POST
+        body:
+          type: onetimepin
+          name: One-time PIN
+          config: {}
+      changed_when: true
+      when:
+        - ingress_cf_idps.json is defined
+        - ingress_cf_idps.json.result | selectattr('type', 'eq', 'onetimepin') | list == []
+
     # Compared as sets: Cloudflare keeps the order it was given, the inventory may reorder.
     - name: Set the Access allow-list
       ansible.builtin.uri:
