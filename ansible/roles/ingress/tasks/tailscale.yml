@@ -24,8 +24,6 @@
     state: present
     update_cache: true
     cache_valid_time: "{{ 0 if ingress_tailscale_repo is changed else 3600 }}"
-  environment:
-    NEEDRESTART_SUSPEND: "1"
   when: not (ansible_check_mode and ingress_tailscale_repo is changed)
 
 # Only where ufw is installed: without it nothing blocks tailscale0.

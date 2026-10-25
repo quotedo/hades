@@ -52,9 +52,6 @@
         name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin]
         state: present
         update_cache: true
-      # Keeps Ubuntu's needrestart from restarting services (running containers among them).
-      environment:
-        NEEDRESTART_SUSPEND: "1"
 
 - name: Create the services directory
   ansible.builtin.file:

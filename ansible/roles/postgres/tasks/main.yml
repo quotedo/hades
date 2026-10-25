@@ -91,9 +91,6 @@
     update_cache: true
     cache_valid_time: "{{ 0 if postgres_pgdg is changed else 3600 }}"
     install_recommends: false
-  # Keeps Ubuntu's needrestart from restarting services (the packaged Postgres among them).
-  environment:
-    NEEDRESTART_SUSPEND: "1"
 
 - name: Create the dev cluster account
   ansible.builtin.user:

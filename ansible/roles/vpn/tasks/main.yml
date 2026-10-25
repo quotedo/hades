@@ -40,8 +40,6 @@
     install_recommends: false
     update_cache: true
     cache_valid_time: "{{ 0 if vpn_ppa is changed else 3600 }}"
-  environment:
-    NEEDRESTART_SUSPEND: "1"
   when: not (ansible_check_mode and vpn_ppa is changed)
 
 - name: Create the AmneziaWG config directory

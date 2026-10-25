@@ -47,9 +47,6 @@
     state: present
     update_cache: true
     cache_valid_time: "{{ 0 if ingress_caddy_repo is changed else 3600 }}"
-  # Keeps Ubuntu's needrestart from restarting services after the install.
-  environment:
-    NEEDRESTART_SUSPEND: "1"
   when: not (ansible_check_mode and ingress_caddy_repo is changed)
 
 - name: Write the Caddyfile

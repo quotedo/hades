@@ -45,8 +45,6 @@
       ansible.builtin.apt:
         name: "{{ orca_packages }}"
         state: present
-      environment:
-        NEEDRESTART_SUSPEND: "1"
 
     - name: Create the Orca directory
       ansible.builtin.file:
