@@ -173,11 +173,11 @@ Orca pairs over Tailscale; Tailscale runs when a present user lists `orca`, or w
 
 | | |
 |---|---|
-| Installs | `ppa:amnezia/ppa`; `amneziawg` (DKMS kernel module), `amneziawg-tools`, the running kernel's headers, and the flavour's headers package such as `linux-headers-generic`. AmneziaWG 2.0 configs are accepted. |
+| Installs | `ppa:amnezia/ppa`; `amneziawg` (DKMS kernel module), `amneziawg-tools`, the running kernel's headers. AmneziaWG 2.0 configs are accepted. |
 | Writes | `/etc/amnezia/amneziawg/intranet.conf` (root 0600) over stdin; unit `awg-quick@intranet`. A changed config restarts the tunnel. |
 | Guards | Preflight rejects `0.0.0.0/0`, `::/0`, their `/1` halves and any `DNS =` line. Verify asserts no default route uses the tunnel, a handshake under 180 s, the DKMS module for the running kernel, and `vpn_probe` answering. `sudo hades-status` prints the handshake age. |
 | Scope | Host-wide: every account reaches the intranet; identity there comes from each developer's own credentials. |
-| Kernel upgrade | The headers package pulls each new kernel's headers, so DKMS builds the module when the kernel is installed. An HWE kernel such as `-generic-hwe-24.04` is not covered by `linux-headers-generic`: add `linux-headers-generic-hwe-24.04` to `host_extra_packages`. |
+| Kernel upgrade | The module is built for the running kernel only. After a reboot into a new kernel, apply `--tags vpn` again (verify fails until then). The vendor module can lag a new kernel; if its build fails, stay on the previous kernel until the PPA catches up. |
 | Rollback | `systemctl disable --now awg-quick@intranet`; `apt remove amneziawg amneziawg-dkms amneziawg-tools dkms` and the added `linux-headers-*`; delete `/etc/apt/sources.list.d/amnezia-ppa.sources` and `/etc/apt/keyrings/amnezia-ppa.asc`; set `vpn_enabled: false`. |
 
 ## Administrator and sshd
