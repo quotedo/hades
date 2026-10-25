@@ -1,0 +1,46 @@
+---
+# The packages, limits, erl_flags, service ports and credentials are shared defaults in
+# roles/host, as are the toolchain store and the ADE versions.
+
+vm_home: /home/{{ dev.name }}
+
+# Chrome for Testing; the binary is <chrome_root>/chrome, a link into <chrome_root>/<version>/.
+# chrome_channel names a channel of the Chrome for Testing index (stable, beta, dev, canary).
+chrome_root: /opt/chrome-for-testing
+chrome_channel: stable
+# Runtime libraries and fonts Chrome needs; on Ubuntu 24.04+ the first two are virtual
+# packages provided by their t64 builds.
+chrome_packages:
+  - libnss3
+  - libatk-bridge2.0-0
+  - libgtk-3-0
+  - libgbm1
+  - libasound2t64
+  - fonts-liberation
+
+# Private Hex repositories: {name, url, key_env, fingerprint_env}; the auth key and the public
+# key fingerprint are read from those controller environment variables.
+hex_repos: []
+
+# Set on Ubuntu's main cluster with ALTER SYSTEM. Throwaway dev data: durability is traded for speed.
+postgres_settings:
+  # 8GB, or a quarter of a smaller VM's memory.
+  shared_buffers: "{{ [8192, ansible_facts.memtotal_mb // 4] | min }}MB"
+  work_mem: 16MB
+  # Every worktree's app pool and test partitions share this one cluster.
+  max_connections: 1000
+  max_wal_size: 4GB
+  fsync: "off"
+  synchronous_commit: "off"
+  full_page_writes: "off"
+  log_min_messages: warning
+  huge_pages: "off"
+
+# The compose project hades, running dev_services.
+services_dir: "{{ hades_config_dir }}/services"
+rabbitmq_image: rabbitmq:4-management
+# The last tag that runs without a LocalStack auth token; newer releases use calendar versions.
+localstack_image: localstack/localstack:4
+redis_image: redis:7
+# Created at every LocalStack start: its state is not persisted.
+localstack_buckets: []

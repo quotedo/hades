@@ -1,6 +1,0 @@
-# {{ ansible_managed }}
-# TYPE  DATABASE  USER  ADDRESS  METHOD
-local   all  {{ dev_pg_os_user }}  peer
-{% for address in postgres_listen_addresses %}
-host    all  all  {{ address }}/{{ 128 if ':' in address else 32 }}  scram-sha-256
-{% endfor %}

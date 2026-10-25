@@ -1,7 +1,0 @@
----
-# --force-recreate: the plugins file and the init script are single-file bind mounts, which keep
-# the old inode when the template replaces them, and compose does not see a change to them.
-- name: Recreate the shared service containers
-  ansible.builtin.command: docker compose -f {{ services_dir }}/docker-compose.yml up -d --force-recreate --remove-orphans
-  changed_when: true
-  listen: services recreate

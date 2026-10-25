@@ -1,9 +1,0 @@
----
-# Ports, credentials, dev_services and hades_loopback_address are shared defaults in roles/host.
-services_dir: "{{ hades_registry_root }}/services"
-rabbitmq_image: rabbitmq:4-management
-# The last tag that runs without a LocalStack auth token; newer releases use calendar versions.
-localstack_image: localstack/localstack:4
-redis_image: redis:7
-# Created at every LocalStack start: its state is not persisted.
-localstack_buckets: []

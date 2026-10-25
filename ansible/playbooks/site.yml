@@ -26,9 +26,8 @@
 # Each developer's VM, reached as root through its box.
 - name: Configure the VMs
   hosts: dev_vms
-  gather_facts: false
+  # postgres_settings sizes shared_buffers by the VM's memory.
+  gather_subset: [hardware]
   roles:
     - { role: host, tags: [never], when: false }
-  tasks:
-    - name: Reach the VM through its box
-      ansible.builtin.ping:
+    - { role: vm, tags: [vm] }

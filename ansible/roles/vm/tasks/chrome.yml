@@ -1,0 +1,57 @@
+---
+# Chrome for Testing for the chrome-devtools MCP, from Google's own index, on the VM's own disk:
+# the shares refuse the shared memory maps Chrome makes of its data files.
+#
+# The index names the channel's current build. A newer build is unpacked beside the old one,
+# the link moves, and the old build goes; an unpack that stopped half way is removed by hand.
+- name: Read the Chrome for Testing index
+  ansible.builtin.uri:
+    url: https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json
+    return_content: true
+  register: vm_chrome_index
+  check_mode: false
+
+- name: Install the channel's Chrome for Testing build
+  vars:
+    vm_chrome_channel: "{{ vm_chrome_index.json.channels[chrome_channel | capitalize] }}"
+    vm_chrome_dir: "{{ chrome_root }}/{{ vm_chrome_channel.version }}"
+  block:
+    - name: Create the Chrome for Testing directory for the build
+      ansible.builtin.file:
+        path: "{{ vm_chrome_dir }}"
+        state: directory
+        mode: "0755"
+      register: vm_chrome_dir_created
+
+    - name: Download and unpack Chrome for Testing
+      ansible.builtin.unarchive:
+        src: "{{ (vm_chrome_channel.downloads.chrome | selectattr('platform', 'eq', 'linux64') | first).url }}"
+        remote_src: true
+        dest: "{{ vm_chrome_dir }}"
+        creates: "{{ vm_chrome_dir }}/chrome-linux64/chrome"
+      # In check mode a new build directory does not exist yet.
+      when: not (ansible_check_mode and vm_chrome_dir_created is changed)
+
+    - name: Link the Chrome binary to its fixed path
+      ansible.builtin.file:
+        src: "{{ vm_chrome_dir }}/chrome-linux64/chrome"
+        dest: "{{ chrome_root }}/chrome"
+        state: link
+        force: true
+
+    - name: Find other Chrome for Testing builds
+      ansible.builtin.find:
+        paths: "{{ chrome_root }}"
+        file_type: directory
+        patterns: ['^[0-9.]+$']
+        use_regex: true
+        excludes: ['^{{ vm_chrome_channel.version | regex_escape }}$']
+      register: vm_chrome_old
+
+    - name: Remove other Chrome for Testing builds
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ vm_chrome_old.files }}"
+      loop_control:
+        label: "{{ item.path }}"

@@ -1,0 +1,121 @@
+---
+# One developer's VM, as root inside it. The developer's probes run in their login shell
+# (`runuser -l`), which sees what an SSH login sees: ~/.profile, ~/.bashrc and env.sh. Not
+# `sudo -i`: sudo-rs hands its command to the login shell without quoting it.
+- name: Probe the VM as root
+  ansible.builtin.command: "{{ item.value }}"
+  register: vm_test_root
+  changed_when: false
+  failed_when: false
+  loop: "{{ vm_test_probes | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  vars:
+    vm_test_probes:
+      passwd: getent passwd {{ dev.name }}
+      groups: id -nG {{ dev.name }}
+      linger: loginctl show-user {{ dev.name }} -p Linger --value
+      manager_nofile: systemctl show user@{{ dev.uid }}.service -p LimitNOFILE --value
+      units_nofile: systemctl --user -M {{ dev.name }}@ show -p DefaultLimitNOFILE --value
+      inotify: sysctl -n fs.inotify.max_user_instances fs.inotify.max_user_watches
+      tailscaled_enabled: systemctl is-enabled tailscaled.service
+      tailscaled_active: systemctl is-active tailscaled.service
+
+- name: Probe as the developer, in a login shell
+  ansible.builtin.command:
+    argv: [runuser, -l, "{{ dev.name }}", -c, "{{ item.value }}"]
+    # Otherwise the module expands $PATH and the like with root's values first.
+    expand_argument_vars: false
+  register: vm_test_dev
+  changed_when: false
+  failed_when: false
+  loop: "{{ vm_test_probes | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  vars:
+    vm_test_probes:
+      # A non-interactive login prints nothing (scp, rsync).
+      login: "true"
+      env: printf '%s\n' "$PATH" "$ERL_FLAGS" "$CHROME_PATH" "$MIX_HOME" "$HOME" "$(command -v hades)" "$(command -v node)"
+      repos: cat .config/hades/repos
+      sudo: sudo -n true
+      docker: docker run --rm hello-world
+      postgis: >-
+        psql postgresql://postgres:postgres@127.0.0.1:5432/postgres -Atq -c 'create extension if not exists postgis'
+        -c 'select postgis_full_version()' -c 'show fsync'
+      mise: mise ls --json
+      node: node --version
+      elixir: elixir --version
+      erlang: >-
+        erl -noshell -eval '{ok, V} = file:read_file(filename:join([code:root_dir(), "releases",
+        erlang:system_info(otp_release), "OTP_VERSION"])), io:put_chars(V), halt().'
+      hex: ls "$MIX_HOME/archives"
+      chrome: '"$CHROME_PATH" --headless --dump-dom about:blank'
+      gpg: "{{ 'gpg --list-keys --with-colons ' ~ dev.name ~ '+' ~ hades_box ~ '@' ~ hades_domain if dev.gpg_key | default(false) else 'true' }}"
+      tailscale: tailscale version
+
+# The store's tools are the records `mise ls --json` reports installed under the store.
+- name: Assert the developer's account, limits, environment, tools and services
+  ansible.builtin.assert:
+    that:
+      - vm_test_pw[2] == dev.uid | string
+      - vm_test_pw[6] == '/bin/bash'
+      - vm_test.groups.stdout.split() is superset(['sudo', 'docker'])
+      - vm_test.linger.stdout == 'yes'
+      - vm_test.manager_nofile.stdout == default_limit_nofile | string
+      - vm_test.units_nofile.stdout == default_limit_nofile | string
+      - vm_test.inotify.stdout_lines == [inotify_max_user_instances | string, inotify_max_user_watches | string]
+      - vm_test.tailscaled_enabled.stdout == 'enabled'
+      - vm_test.tailscaled_active.stdout == 'active'
+      - vm_test.login.rc == 0
+      - vm_test.login.stdout == ''
+      - (hades_bin_dir ~ ':' ~ mise_shims ~ ':') in vm_test.env.stdout_lines[0]
+      - vm_test.env.stdout_lines[1:] == vm_test_env
+      - vm_test.repos.stdout_lines == dev.repos
+      - vm_test.sudo.rc == 0
+      - vm_test.docker.stdout is search('Hello from Docker!')
+      - vm_test.postgis.stdout_lines | length == 2
+      - vm_test.postgis.stdout_lines[0] is match('POSTGIS="')
+      - vm_test.postgis.stdout_lines[1] == 'off'
+      - vm_test_mise | sort == vm_test_tools | sort
+      - vm_test.node.stdout == 'v' ~ tools.node[0]
+      - "'elixir' not in tools or vm_test.elixir.stdout is search('^Elixir ' ~ tools.elixir[0].split('-')[0] ~ ' ', multiline=True)"
+      - "'erlang' not in tools or vm_test.erlang.stdout == tools.erlang[0]"
+      - "'elixir' not in tools or vm_test.hex.stdout_lines | select('match', 'hex-') | list | length == 1"
+      - vm_test.chrome.stdout is search('<body></body>')
+      - not dev.gpg_key | default(false) or vm_test.gpg.stdout_lines | select('match', 'pub:') | list | length == 1
+      - vm_test.tailscale.rc == 0
+    fail_msg: |-
+      {% for name, probe in vm_test.items() %}{{ name }}: rc {{ probe.rc }}: {{ (probe.stdout_lines + probe.stderr_lines) | join(' | ') | truncate(300) }}
+      {% endfor %}
+    quiet: true
+  vars:
+    vm_test_results: "{{ vm_test_root.results + vm_test_dev.results }}"
+    vm_test: "{{ dict(vm_test_results | map(attribute='item.key') | zip(vm_test_results)) }}"
+    vm_test_pw: "{{ (vm_test.passwd.stdout ~ '::::::').split(':') }}"
+    # ERL_FLAGS, CHROME_PATH, MIX_HOME, HOME, then where hades and node resolve.
+    vm_test_env: >-
+      {{ [erl_flags, chrome_root ~ '/chrome', vm_test_pw[5] ~ '/.mix', vm_test_pw[5], hades_bin_dir ~ '/hades', mise_shims ~ '/node'] }}
+    vm_test_tools: >-
+      {%- set out = [] -%}
+      {%- for tool, versions in tools.items() -%}{%- for v in versions -%}
+      {%- set _ = out.append(tool ~ '@' ~ v) -%}
+      {%- endfor -%}{%- endfor -%}
+      {{ out }}
+    vm_test_mise: >-
+      {%- set out = [] -%}
+      {%- for tool, records in (vm_test.mise.stdout if vm_test.mise.rc == 0 else '{}') | from_json | dictsort -%}
+      {%- for r in records if r.installed and r.install_path.startswith(mise_store ~ '/installs/') -%}
+      {%- set _ = out.append(tool ~ '@' ~ r.version) -%}
+      {%- endfor -%}{%- endfor -%}
+      {{ out }}
+
+# Retried while RabbitMQ or LocalStack is still starting.
+- name: Wait for each dev service port on the loopback address
+  ansible.builtin.wait_for:
+    host: "{{ hades_loopback_address }}"
+    port: "{{ item }}"
+    timeout: 60
+  loop: >-
+    {{ dev_services | map('extract', {'rabbitmq': [rabbitmq_amqp_port, rabbitmq_management_port, rabbitmq_mqtt_port],
+                                      'localstack': [localstack_port], 'redis': [redis_port]}) | flatten }}

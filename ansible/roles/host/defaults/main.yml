@@ -3,7 +3,7 @@
 # list in `roles:`, so every role sees them under any tag selection and inventory still wins.
 
 # The share every VM mounts read-only at the same path: bin/ (hades, hades-port, hades-onboard,
-# mise, orca-ide), chrome/ and orca/. The mise store and /etc/mise are shared the same way.
+# mise, orca-ide) and orca/. The mise store and /etc/mise are shared the same way.
 hades_share: /opt/hades
 hades_bin_dir: "{{ hades_share }}/bin"
 
@@ -54,12 +54,7 @@ caddy_config: /etc/caddy/Caddyfile
 caddy_reload_command: [systemctl, reload, caddy]
 hades_live_dir: /etc/caddy/hades-sites
 
-# Dev Postgres (postgres role)
-dev_pg_port: 5433
-dev_pg_user: postgres
-dev_pg_password: postgres
-
-# Shared dev services (services role)
+# Dev services in each VM (vm role)
 rabbitmq_management_port: 15672
 rabbitmq_amqp_port: 5672
 rabbitmq_user: guest
@@ -90,25 +85,11 @@ agent_clis:
   codex: "@openai/codex"
 paseo_version: "0.12.0"
 # One Orca AppImage in orca_root with the orca-ide wrapper in hades_bin_dir, only while a present
-# dev user lists orca. orca_packages are the Electron libraries beyond host_chrome_packages.
+# dev user lists orca. orca_packages are the Electron libraries beyond chrome_packages.
 orca_version: "1.4.232"
 orca_root: "{{ hades_share }}/orca"
 orca_packages: [libnotify4, libsecret-1-0, libxss1, libxtst6, xdg-utils]
 host_orca_wanted: "{{ dev_present | selectattr('ades', 'contains', 'orca') | list | length > 0 }}"
-
-# Chrome for Testing; the binary is <chrome_root>/chrome, a link into <chrome_root>/<version>/.
-# chrome_channel names a channel of the Chrome for Testing index (stable, beta, dev, canary).
-chrome_root: "{{ hades_share }}/chrome"
-chrome_channel: stable
-# Runtime libraries and fonts Chrome needs; on Ubuntu 24.04+ the first two are virtual
-# packages provided by their t64 builds.
-host_chrome_packages:
-  - libnss3
-  - libatk-bridge2.0-0
-  - libgtk-3-0
-  - libgbm1
-  - libasound2t64
-  - fonts-liberation
 
 # The loopback address Caddy, Paseo, Postgres and the shared services bind; worktree apps listen
 # there too.

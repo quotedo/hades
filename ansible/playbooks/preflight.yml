@@ -89,7 +89,7 @@
                  if users | length > 1 %}{{ uid }} [{{ users | map(attribute='name') | join(', ') }}] {% endfor %}
             quiet: true
 
-        # dev_services selects the compose services; postgres_settings fills the dev cluster's conf.d file.
+        # dev_services selects the compose services; postgres_settings tunes each VM's Postgres.
         - name: Assert dev_services is a list of known services and postgres_settings a mapping
           ansible.builtin.assert:
             that:
@@ -100,7 +100,7 @@
             fail_msg: dev_services must be a list drawn from rabbitmq, localstack and redis, postgres_settings a mapping
             quiet: true
 
-        # The user role adds each repository with the key and fingerprint these controller variables hold.
+        # The vm role adds each repository with the key and fingerprint these controller variables hold.
         - name: Assert every hex_repos entry is complete and its variables are set
           ansible.builtin.assert:
             that:

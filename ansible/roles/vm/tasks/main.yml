@@ -1,0 +1,50 @@
+---
+# One developer's VM (`dev`, their dev_present entry), configured as root.
+- name: Packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Write the kernel settings
+  ansible.builtin.template:
+    src: sysctl-hades.conf.j2
+    dest: /etc/sysctl.d/90-hades.conf
+    mode: "0644"
+  notify: sysctl reload
+
+- name: Chrome for Testing
+  ansible.builtin.import_tasks: chrome.yml
+
+# Ubuntu's AppArmor lets only profiled binaries create the user namespaces Chrome's sandbox needs.
+- name: Write the Chrome for Testing AppArmor profile
+  ansible.builtin.template:
+    src: apparmor-chrome-for-testing.j2
+    dest: /etc/apparmor.d/chrome-for-testing
+    mode: "0644"
+    validate: apparmor_parser -Q -K %s
+  notify: apparmor load chrome
+
+- name: Postgres
+  ansible.builtin.import_tasks: postgres.yml
+
+# Compose refuses an empty project.
+- name: Dev services
+  ansible.builtin.import_tasks: services.yml
+  when: dev_services | length > 0
+
+- name: Account and shell environment
+  ansible.builtin.import_tasks: account.yml
+
+- name: GPG key
+  ansible.builtin.import_tasks: gpg.yml
+  when: dev.gpg_key | default(false)
+  vars:
+    vm_gpg_uid: "{{ dev.name }}+{{ hades_box }}@{{ hades_domain }}"
+
+- name: Hex, as the developer
+  ansible.builtin.import_tasks: toolchain.yml
+  become: true
+  become_user: "{{ dev.name }}"
+  environment:
+    PATH: "{{ hades_bin_dir }}:{{ mise_shims }}:/usr/local/bin:/usr/bin:/bin"
+    # Otherwise mise points both into the root-owned Elixir install (env.sh.j2).
+    MIX_HOME: "{{ vm_home }}/.mix"
+    MIX_ARCHIVES: "{{ vm_home }}/.mix/archives"

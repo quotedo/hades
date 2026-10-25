@@ -47,7 +47,8 @@
   gather_facts: false
   roles:
     - { role: host, tags: [never], when: false }
+    - { role: vm, tags: [never], when: false }
   tasks:
-    - name: Reach the VM through its box
-      ansible.builtin.ping:
-      tags: [vms]
+    - name: VM tests
+      ansible.builtin.import_tasks: tasks/vm_tests.yml
+      tags: [vm]

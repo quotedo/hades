@@ -41,9 +41,6 @@
 - name: Agent CLIs, Paseo and Orca
   ansible.builtin.import_tasks: agents.yml
 
-- name: Chrome for Testing
-  ansible.builtin.import_tasks: chrome.yml
-
 - name: Hades CLI and hades-onboard
   ansible.builtin.import_tasks: hades.yml
 

@@ -1,0 +1,32 @@
+---
+# Run as the developer. Generated in the VM once and kept, also when edited by hand; it never
+# touches the controller's disk. hades-onboard shows it.
+- name: Generate the Paseo password, once
+  ansible.builtin.shell: |
+    umask 077
+    pw=$(openssl rand -hex 16)
+    printf 'PASEO_PASSWORD=%s\n' "$pw" > {{ (vm_home ~ '/.config/hades/paseo.env') | quote }}
+    echo "$pw"
+  args:
+    creates: "{{ vm_home }}/.config/hades/paseo.env"
+  register: vm_paseo_password
+  no_log: true
+
+- name: Write the Paseo unit
+  ansible.builtin.template:
+    src: ade.service.j2
+    dest: "{{ vm_home }}/.config/systemd/user/paseo.service"
+    mode: "0644"
+  vars:
+    ade: paseo
+  register: vm_paseo_unit
+
+- name: Enable and start Paseo, restarting it after a change
+  ansible.builtin.systemd_service:
+    name: paseo.service
+    scope: user
+    enabled: true
+    daemon_reload: "{{ vm_paseo_unit is changed }}"
+    state: "{{ 'restarted' if [vm_paseo_password, vm_paseo_unit] | select('changed') | list else 'started' }}"
+  # In check mode a new unit is not written yet, so systemd cannot find it.
+  when: not (ansible_check_mode and vm_paseo_unit is changed)

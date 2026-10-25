@@ -1,5 +1,0 @@
-# {{ ansible_managed }}
-listen_addresses = '{{ postgres_listen_addresses | join(',') }}'
-{% for name, value in postgres_settings.items() %}
-{{ name }} = '{{ value }}'
-{% endfor %}

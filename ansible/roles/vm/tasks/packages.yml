@@ -1,0 +1,42 @@
+---
+# Every package of the VM, never removed: the archive's, then Docker's and Tailscale's from their
+# own repositories. Their packages enable and start Docker, Postgres and tailscaled; the developer
+# logs Tailscale in during hades-onboard. The community.postgresql modules need psycopg2.
+- name: Install the packages from the Ubuntu archive
+  ansible.builtin.apt:
+    name: >-
+      {{ dev_packages + chrome_packages + (orca_packages if 'orca' in dev.ades else [])
+         + ['apparmor', 'postgresql', 'postgresql-postgis', 'python3-psycopg2'] + extra_packages }}
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    install_recommends: false
+
+- name: Add Docker's and Tailscale's repositories
+  ansible.builtin.deb822_repository:
+    name: "{{ item.name }}"
+    uris: "{{ item.uris }}"
+    suites: "{{ ansible_facts.distribution_release }}"
+    components: "{{ item.components }}"
+    signed_by: "{{ item.key }}"
+  loop:
+    - name: docker
+      uris: https://download.docker.com/linux/{{ vm_distro }}
+      components: stable
+      key: https://download.docker.com/linux/{{ vm_distro }}/gpg
+    - name: tailscale
+      uris: https://pkgs.tailscale.com/stable/{{ vm_distro }}
+      components: main
+      key: https://pkgs.tailscale.com/stable/{{ vm_distro }}/{{ ansible_facts.distribution_release }}.noarmor.gpg
+  loop_control:
+    label: "{{ item.name }}"
+  vars:
+    vm_distro: "{{ ansible_facts.distribution | lower }}"
+  register: vm_repos
+
+- name: Install Docker CE and Tailscale
+  ansible.builtin.apt:
+    name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin, tailscale]
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ 0 if vm_repos is changed else 3600 }}"
