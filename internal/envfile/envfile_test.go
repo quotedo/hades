@@ -3,6 +3,7 @@ package envfile
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -47,9 +48,9 @@ func TestUpdateEnvrcPreservesUserLinesAndIsIdempotent(t *testing.T) {
 func TestEnvWorktreeRoundTrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), ".env.worktree")
 	WriteEnvWorktree(p, []KV{{"A", "1"}, {"B", "two words"}})
-	m, _ := ReadEnvWorktree(p)
-	if m["A"] != "1" || m["B"] != "two words" {
-		t.Fatal(m)
+	kv, _ := ReadEnvWorktree(p)
+	if !slices.Equal(kv, []KV{{"A", "1"}, {"B", "two words"}}) {
+		t.Fatal(kv)
 	}
 	st, _ := os.Stat(p)
 	if st.Mode().Perm() != 0o600 {

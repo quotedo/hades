@@ -6,12 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/quotedo/hades/internal/envfile"
 	"github.com/quotedo/hades/internal/execx"
 )
 
@@ -78,7 +78,7 @@ func join(ctx *Context, args []string) int {
 		fmt.Fprintf(ctx.Stderr, "github: %v; run gh auth login and then hades join again, or send your key to the administrator\n", err)
 	}
 
-	changed, err := upsertSSHConfig(filepath.Join(home, ".ssh", "config"), alias, sshConfigBlock(alias, host, *login))
+	changed, err := envfile.UpsertBlock(filepath.Join(home, ".ssh", "config"), "# hades:begin "+alias+"\n", "# hades:end "+alias+"\n", sshConfigBlock(alias, host, *login))
 	if err != nil {
 		return failf("%v", err)
 	}
@@ -160,42 +160,8 @@ func githubKey(bg context.Context, run execx.Runner, pubPath, pub, alias string)
 	return login, nil
 }
 
-// sshConfigBlock is the ~/.ssh/config entry for the box.
+// sshConfigBlock is the ~/.ssh/config entry for the box, written between
+// "# hades:begin <alias>" and "# hades:end <alias>".
 func sshConfigBlock(alias, host, login string) string {
 	return "Host " + alias + "\n  HostName " + host + "\n  User " + login + "\n  ForwardAgent yes\n"
-}
-
-// upsertSSHConfig writes block between "# hades:begin <alias>" and
-// "# hades:end <alias>" in path, replacing an earlier block for the alias or
-// appending one. Everything else is kept byte for byte. A new file is 0600 in
-// a 0700 directory.
-func upsertSSHConfig(path, alias, block string) (changed bool, err error) {
-	begin, end := "# hades:begin "+alias+"\n", "# hades:end "+alias+"\n"
-	block = begin + block + end
-	cur, err := os.ReadFile(path)
-	missing := errors.Is(err, fs.ErrNotExist)
-	if err != nil && !missing {
-		return false, err
-	}
-	s := string(cur)
-	next := s
-	if i := strings.Index(s, begin); i >= 0 {
-		j := strings.Index(s[i:], end)
-		if j < 0 {
-			return false, fmt.Errorf("%s: %q has no %q line", path, strings.TrimSpace(begin), strings.TrimSpace(end))
-		}
-		next = s[:i] + block + s[i+j+len(end):]
-	} else {
-		if next != "" && !strings.HasSuffix(next, "\n") {
-			next += "\n"
-		}
-		next += block
-	}
-	if !missing && next == s {
-		return false, nil
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return false, err
-	}
-	return true, os.WriteFile(path, []byte(next), 0o600)
 }

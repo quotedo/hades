@@ -9,8 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 
 	"github.com/quotedo/hades/internal/envfile"
 )
@@ -42,25 +40,22 @@ func envCmd(ctx *Context, args []string) int {
 		fmt.Fprintf(ctx.Stderr, "hades: env: %v\n", err)
 		return 1
 	}
-	vars, err := envfile.ReadEnvWorktree(path)
+	kv, err := envfile.ReadEnvWorktree(path)
 	if err != nil {
 		fmt.Fprintf(ctx.Stderr, "hades: env: %v\n", err)
 		return 1
 	}
 	if ctx.Flags.JSON {
+		vars := make(map[string]string, len(kv))
+		for _, e := range kv {
+			vars[e.Key] = e.Value
+		}
 		if err := writeJSON(ctx.Stdout, vars); err != nil {
 			fmt.Fprintf(ctx.Stderr, "hades: env: %v\n", err)
 			return 1
 		}
 		return 0
 	}
-	keys := make([]string, 0, len(vars))
-	for k := range vars {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		fmt.Fprintf(ctx.Stdout, "export %s='%s'\n", k, strings.ReplaceAll(vars[k], "'", `'\''`))
-	}
+	fmt.Fprint(ctx.Stdout, envfile.Exports(kv))
 	return 0
 }

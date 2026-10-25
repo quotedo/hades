@@ -15,11 +15,7 @@ import (
 // KV is one environment entry; slices of KV keep a stable order.
 type KV struct{ Key, Value string }
 
-const (
-	envWorktreeHeader = "# written by hades; do not edit"
-	blockBegin        = "# hades:begin"
-	blockEnd          = "# hades:end"
-)
+const envWorktreeHeader = "# written by hades; do not edit"
 
 // WriteEnvWorktree atomically writes kv to path with mode 0600.
 func WriteEnvWorktree(path string, kv []KV) error {
@@ -60,17 +56,17 @@ func WriteEnvWorktree(path string, kv []KV) error {
 	return nil
 }
 
-// ReadEnvWorktree parses a file written by WriteEnvWorktree. A missing file
-// yields an empty map.
-func ReadEnvWorktree(path string) (map[string]string, error) {
-	m := map[string]string{}
+// ReadEnvWorktree parses a file written by WriteEnvWorktree, in file order.
+// A missing file yields nil.
+func ReadEnvWorktree(path string) ([]KV, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return m, nil
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	var kv []KV
 	for i, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -87,79 +83,61 @@ func ReadEnvWorktree(path string) (map[string]string, error) {
 			}
 			v = uq
 		}
-		m[k] = v
+		kv = append(kv, KV{k, v})
 	}
-	return m, nil
+	return kv, nil
 }
 
-// UpdateEnvrc replaces the hades-managed block in path with export lines for
-// kv, appending the block when absent. Everything outside the block is kept
-// byte for byte, and the file is not rewritten when nothing changes.
-func UpdateEnvrc(path string, kv []KV) error {
+// Exports renders kv as shell export lines, one per entry.
+func Exports(kv []KV) string {
 	var b strings.Builder
-	b.WriteString(blockBegin + "\n")
 	for _, e := range kv {
 		b.WriteString("export " + e.Key + "=" + shellQuote(e.Value) + "\n")
 	}
-	b.WriteString(blockEnd + "\n")
-	block := b.String()
+	return b.String()
+}
 
+// UpdateEnvrc replaces the hades-managed block in path with export lines for
+// kv, appending the block when absent.
+func UpdateEnvrc(path string, kv []KV) error {
+	_, err := UpsertBlock(path, "# hades:begin\n", "# hades:end\n", Exports(kv))
+	return err
+}
+
+// UpsertBlock writes begin+body+end into path, replacing the block from an
+// earlier begin line to the next end line or appending one. Everything else
+// is kept byte for byte, and the file is only rewritten when the result
+// differs. A new file is 0600 in a 0700 directory (the block may hold
+// secrets); an existing file keeps its mode.
+func UpsertBlock(path, begin, end, body string) (changed bool, err error) {
+	block := begin + body + end
 	cur, err := os.ReadFile(path)
 	missing := errors.Is(err, fs.ErrNotExist)
 	if err != nil && !missing {
-		return err
+		return false, err
 	}
-	content := string(cur)
-
-	var next string
-	if start, end, ok, err := findBlock(content); err != nil {
-		return fmt.Errorf("%s: %w", path, err)
-	} else if ok {
-		next = content[:start] + block + content[end:]
+	s := string(cur)
+	next := s
+	// The leading "\n" makes the begin marker match at a line start only.
+	if i := strings.Index("\n"+s, "\n"+begin); i >= 0 {
+		j := strings.Index(s[i:], end)
+		if j < 0 {
+			return false, fmt.Errorf("%s: %q has no %q line", path, strings.TrimSpace(begin), strings.TrimSpace(end))
+		}
+		next = s[:i] + block + s[i+j+len(end):]
 	} else {
-		next = content
 		if next != "" && !strings.HasSuffix(next, "\n") {
 			next += "\n"
 		}
 		next += block
 	}
-
-	if !missing && next == content {
-		return nil
+	if !missing && next == s {
+		return false, nil
 	}
-	// The block holds DB_PASSWORD and SECRET_KEY_BASE, so a new file is
-	// private like .env.worktree; an existing file keeps its mode.
-	return os.WriteFile(path, []byte(next), 0o600)
-}
-
-// findBlock returns the byte range of the managed block, from the start of the
-// begin line through the end of the end line (including its newline).
-func findBlock(content string) (start, end int, ok bool, err error) {
-	start = -1
-	pos := 0
-	for pos < len(content) {
-		lineEnd := len(content)
-		next := len(content)
-		if i := strings.IndexByte(content[pos:], '\n'); i >= 0 {
-			lineEnd = pos + i
-			next = lineEnd + 1
-		}
-		switch content[pos:lineEnd] {
-		case blockBegin:
-			if start < 0 {
-				start = pos
-			}
-		case blockEnd:
-			if start >= 0 {
-				return start, next, true, nil
-			}
-		}
-		pos = next
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return false, err
 	}
-	if start >= 0 {
-		return 0, 0, false, fmt.Errorf("%q without matching %q", blockBegin, blockEnd)
-	}
-	return 0, 0, false, nil
+	return true, os.WriteFile(path, []byte(next), 0o600)
 }
 
 func shellQuote(v string) string {

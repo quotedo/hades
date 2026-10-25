@@ -462,6 +462,10 @@ func (u *upRun) computeEnv() (*undo, error) {
 	if err != nil {
 		return nil, err
 	}
+	secret := ""
+	if i := slices.IndexFunc(prev, func(e envfile.KV) bool { return e.Key == "SECRET_KEY_BASE" }); i >= 0 {
+		secret = prev[i].Value
+	}
 	env, err := envfile.Compute(envfile.Inputs{
 		Port:           u.m.Port,
 		Label:          u.m.Label,
@@ -474,7 +478,7 @@ func (u *upRun) computeEnv() (*undo, error) {
 		HostCfg:        *u.d.Host,
 		Vhost:          u.vhost,
 		Extra:          u.cfg.Env,
-		ExistingSecret: prev["SECRET_KEY_BASE"],
+		ExistingSecret: secret,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("compute environment: %w", err)

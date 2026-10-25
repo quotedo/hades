@@ -194,7 +194,7 @@ func TestEnvShellOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errs = runMain(getenv, args("env")...)
-	if code != 0 || out != "export NAME='it'\\''s'\nexport PORT='4100'\n" {
+	if code != 0 || out != "export PORT=4100\nexport NAME='it'\\''s'\n" {
 		t.Fatalf("shell: code=%d out=%q err=%q", code, out, errs)
 	}
 	code, out, _ = runMain(getenv, args("env", "--json")...)

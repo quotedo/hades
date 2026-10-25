@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/quotedo/hades/internal/envfile"
 	"github.com/quotedo/hades/internal/execx"
 )
 
@@ -50,6 +51,9 @@ func TestFindPublicKey(t *testing.T) {
 
 func TestUpsertSSHConfigKeepsOtherContent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".ssh", "config")
+	upsertSSHConfig := func(path, alias, block string) (bool, error) {
+		return envfile.UpsertBlock(path, "# hades:begin "+alias+"\n", "# hades:end "+alias+"\n", block)
+	}
 	changed, err := upsertSSHConfig(path, "shop", sshConfigBlock("shop", "shop.example.test", "alice"))
 	if err != nil || !changed {
 		t.Fatalf("create: %v %v", changed, err)

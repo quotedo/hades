@@ -105,18 +105,19 @@ func Label(tmpl string, v Vars) (string, error) {
 }
 
 func render(tmpl string, v Vars) (string, error) {
+	return Render(tmpl, map[string]string{"project": v.Project, "user": v.User, "name": v.Name})
+}
+
+// Render replaces every {{name}} in tmpl with vars[name]. A name that is not
+// in vars is an error.
+func Render(tmpl string, vars map[string]string) (string, error) {
 	var bad error
 	out := placeholder.ReplaceAllStringFunc(tmpl, func(m string) string {
-		switch m[2 : len(m)-2] {
-		case "project":
-			return v.Project
-		case "user":
-			return v.User
-		case "name":
-			return v.Name
+		v, ok := vars[m[2:len(m)-2]]
+		if !ok {
+			bad = fmt.Errorf("naming: unknown placeholder %s", m)
 		}
-		bad = fmt.Errorf("naming: unknown placeholder %s", m)
-		return ""
+		return v
 	})
 	return out, bad
 }

@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -188,16 +187,11 @@ func teardown(ctx context.Context, d Deps, c wtctx.Context) *StepResult {
 	if len(cfg.Teardown) == 0 {
 		return nil
 	}
-	vals, err := envfile.ReadEnvWorktree(filepath.Join(c.Worktree, ".env.worktree"))
+	kv, err := envfile.ReadEnvWorktree(filepath.Join(c.Worktree, ".env.worktree"))
 	if err != nil {
 		r.Err = err
 		return r
 	}
-	kv := make([]envfile.KV, 0, len(vals))
-	for k, v := range vals {
-		kv = append(kv, envfile.KV{Key: k, Value: v})
-	}
-	sort.Slice(kv, func(i, j int) bool { return kv[i].Key < kv[j].Key })
 	env := mergeEnv(os.Environ(), kv)
 
 	var errs []error

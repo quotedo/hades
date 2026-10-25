@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -33,7 +34,7 @@ func TestUpPhoenixServerHappyPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	env, _ := envfile.ReadEnvWorktree(filepath.Join(c.Worktree, ".env.worktree"))
-	if env["PORT"] != "4100" || env["PHX_HOST"] != m.Host {
+	if !slices.Contains(env, envfile.KV{Key: "PORT", Value: "4100"}) || !slices.Contains(env, envfile.KV{Key: "PHX_HOST", Value: m.Host}) {
 		t.Fatal(env)
 	}
 	calls := argvs(d.Run.(*execx.Fake))
@@ -357,12 +358,12 @@ func TestUpNonWebPresetGetsNoPortOrURL(t *testing.T) {
 		t.Fatalf("%v", calls)
 	}
 	env, _ := envfile.ReadEnvWorktree(filepath.Join(c.Worktree, ".env.worktree"))
-	for _, k := range []string{"PORT", "PHX_HOST", "HADES_URL"} {
-		if _, ok := env[k]; ok {
-			t.Errorf(".env.worktree has %s", k)
+	for _, e := range env {
+		if slices.Contains([]string{"PORT", "PHX_HOST", "HADES_URL"}, e.Key) {
+			t.Errorf(".env.worktree has %s", e.Key)
 		}
 	}
-	if env["HADES_LABEL"] != "demo-feature-x" {
+	if !slices.Contains(env, envfile.KV{Key: "HADES_LABEL", Value: "demo-feature-x"}) {
 		t.Fatal(env)
 	}
 	if setup := lastCallWithPrefix(d.Run.(*execx.Fake), "sh"); envHas(setup.Env, "HADES_URL=") {
