@@ -1,13 +1,20 @@
 #!/bin/sh
 # {{ ansible_managed }}
-# hades-onboard: a developer's first-login steps on the box. Safe to run again: each step says
-# "already done" or does its work. hades doctor decides whether onboarding is complete.
+# hades-onboard [HOST]: a developer's first-login steps on the box; HOST, the name the developer
+# reaches it by, only appears in the Paseo Desktop address. Safe to run again: each step says
+# "already done" or does its work. hades doctor decides whether onboarding is complete; every
+# complete run prints the connection details.
 set -u
+[ -t 0 ] || { echo "hades-onboard needs a terminal: ssh -t $(hostname) hades-onboard" >&2; exit 2; }
+host=${1:-$(hostname)}
 dir=$HOME/.config/hades
 
 command -v gh >/dev/null 2>&1 || { echo "gh: not installed; the administrator adds gh to tools"; exit 1; }
-if gh auth status >/dev/null 2>&1; then echo "gh: already done"; else gh auth login; fi
-gh auth setup-git && echo "git: gh is the GitHub credential helper"
+if gh auth status >/dev/null 2>&1; then echo "gh: already done"; else gh auth login -h github.com -p https -w; fi
+case $(git config --global credential.https://github.com.helper) in
+*gh*) echo "git: already done" ;;
+*) gh auth setup-git && echo "git: credentials through gh" ;;
+esac
 
 if command -v claude >/dev/null 2>&1; then
   if claude auth status >/dev/null 2>&1; then echo "claude: already done"; else claude auth login; fi
@@ -16,18 +23,40 @@ if command -v codex >/dev/null 2>&1; then
   if codex login status >/dev/null 2>&1; then echo "codex: already done"; else codex login --device-auth; fi
 fi
 
+failed=
 if [ -f "$dir/repos" ]; then
   while read -r url; do
     [ -n "$url" ] || continue
     name=$(basename "$url" .git)
-    if [ -d "$HOME/$name" ]; then echo "clone $name: already done"; else git clone "$url" "$HOME/$name" </dev/null; fi
+    if [ -d "$HOME/$name" ]; then
+      echo "clone $name: already done"
+    else
+      git clone "$url" "$HOME/$name" </dev/null || failed="$failed $name"
+    fi
   done < "$dir/repos"
 fi
+if [ -n "$failed" ]; then
+  echo "onboarding incomplete: clone$failed failed; run hades-onboard again"
+  exit 1
+fi
 
-if {{ hades_bin_dir }}/hades doctor; then
-  mkdir -p "$dir" && touch "$dir/onboarded"
-  echo "onboarding complete"
-else
+if ! {{ hades_bin_dir }}/hades doctor; then
   echo "onboarding incomplete: fix the FAIL lines above and run hades-onboard again"
   exit 1
+fi
+mkdir -p "$dir" && touch "$dir/onboarded"
+echo "onboarding complete"
+
+# Paseo Desktop dials Paseo's default port, 6767, unless the address names another.
+if systemctl --user cat paseo.service >/dev/null 2>&1; then
+  port=$(systemctl --user show -p Environment --value paseo.service | sed -n 's/.*PASEO_LISTEN=[^ ]*:\([0-9]*\).*/\1/p')
+  query="?daemonPort=$port"
+  [ "$port" != 6767 ] || query=
+  echo "Paseo Desktop: Settings > Add host > Remote SSH"
+  echo "  ssh://$(id -un)@$host$query"
+  echo "  Daemon password: $(sed -n 's/^PASEO_PASSWORD=//p' "$dir/paseo.env")"
+fi
+if systemctl --user cat orca.service >/dev/null 2>&1; then
+  url=$(journalctl --user -u orca.service -o cat | grep -o 'https://[^ ]*' | tail -1)
+  if [ -n "$url" ]; then echo "Orca pairing: $url"; else echo "Orca pairing URL: journalctl --user -u orca.service"; fi
 fi

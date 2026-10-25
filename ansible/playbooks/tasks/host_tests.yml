@@ -167,3 +167,19 @@
       ansible.builtin.file:
         path: "{{ host_test_keys_list.path }}"
         state: absent
+
+# The laptop runs it over ssh -t; without a terminal its logins would hang.
+- name: Run hades-onboard without a terminal as the probe account
+  ansible.builtin.shell: runuser -u {{ verify_unprivileged_user }} -- {{ hades_bin_dir }}/hades-onboard </dev/null
+  become: true
+  register: host_test_onboard
+  changed_when: false
+  failed_when: false
+
+- name: Assert hades-onboard refuses to run without a terminal
+  ansible.builtin.assert:
+    that:
+      - host_test_onboard.rc == 2
+      - host_test_onboard.stderr is match('hades-onboard needs a terminal: ssh -t \\S+ hades-onboard$')
+    fail_msg: "hades-onboard </dev/null: rc {{ host_test_onboard.rc }}, {{ host_test_onboard.stderr }}"
+    quiet: true
