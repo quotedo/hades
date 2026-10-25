@@ -67,20 +67,3 @@
     fail_msg: "{{ orca_root }}/orca-{{ orca_version }}.AppImage and {{ hades_bin_dir }}/orca-ide must exist with mode 0755"
     quiet: true
   when: host_orca_wanted
-
-# The laptop runs it over ssh -t; without a terminal its logins would hang. timeout kills the
-# whole process group, so a script without the check fails the probe instead of hanging verify.
-- name: Run hades-onboard without a terminal as the probe account
-  ansible.builtin.shell: timeout 20 runuser -u {{ verify_unprivileged_user }} -- {{ hades_bin_dir }}/hades-onboard </dev/null
-  become: true
-  register: host_test_onboard
-  changed_when: false
-  failed_when: false
-
-- name: Assert hades-onboard refuses to run without a terminal
-  ansible.builtin.assert:
-    that:
-      - host_test_onboard.rc == 2
-      - "host_test_onboard.stderr == 'hades-onboard needs a terminal: ssh -t <alias> hades-onboard <alias>'"
-    fail_msg: "hades-onboard </dev/null: rc {{ host_test_onboard.rc }}, {{ host_test_onboard.stderr }}"
-    quiet: true

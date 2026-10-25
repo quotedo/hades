@@ -16,14 +16,15 @@ dev_services: []
 # Clone URLs every developer gets; a dev_users entry's repos replaces the list.
 dev_repos: []
 
-# The present developers, each combined onto its defaults, with its VM's address: the first two
-# octets of vm_subnet, then uid // 256 and uid % 256.
-dev_present: >-
-  {% set ns = namespace(devs=[]) %}{% for d in dev_users | default([]) if d.state | default('present') == 'present'
+# Every developer, combined onto its defaults, with its VM's address: the first two octets of
+# vm_subnet, then uid // 256 and uid % 256; dev_present and dev_absent split them by state.
+dev_entries: >-
+  {% set ns = namespace(devs=[]) %}{% for d in dev_users | default([])
   %}{% set ns.devs = ns.devs + [{'state': 'present', 'ades': ['paseo'], 'repos': dev_repos, 'memory': vm_memory, 'cpus': vm_cpus,
   'disk': vm_disk} | combine(d, {'address': (vm_subnet.split('.')[:2] + [d.uid // 256, d.uid % 256]) | join('.')})]
   %}{% endfor %}{{ ns.devs }}
-dev_absent: "{{ dev_users | default([]) | selectattr('state', 'defined') | selectattr('state', 'eq', 'absent') | list }}"
+dev_present: "{{ dev_entries | selectattr('state', 'eq', 'present') | list }}"
+dev_absent: "{{ dev_entries | selectattr('state', 'eq', 'absent') | list }}"
 # Offboarding keeps each absent developer's home as <backup_dir>/<name>-offboard-<time>.tar.gz.
 backup_dir: /var/backups/hades
 
@@ -50,9 +51,15 @@ vpn_enabled: false
 vpn_conf_env: ""
 vpn_probe: ""
 
-# Caddy: the host's (ingress role) and each VM's (vm role)
+# Caddy: the host's (ingress role) and each VM's (vm role), from Caddy's apt repository.
 caddy_port: 8090
 caddy_config: /etc/caddy/Caddyfile
+caddy_repo:
+  name: caddy
+  uris: https://dl.cloudsmith.io/public/caddy/stable/deb/debian
+  suite: any-version
+  components: main
+  key: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
 
 # Dev services in each VM (vm role)
 rabbitmq_management_port: 15672

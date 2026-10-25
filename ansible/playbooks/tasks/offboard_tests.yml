@@ -7,7 +7,7 @@
     for f in {{ backup_dir }}/{{ item.name }}-offboard-*.tar.gz; do :; done;
     stat -c '%U %a' "$f" && tar -tzf "$f" {{ item.name }}/ > /dev/null && echo archived;
     incus info {{ item.name }} > /dev/null 2>&1 && echo instance {{ item.name }};
-    grep -F 'permitopen="{{ offboard_test_address }}:22"' /var/lib/hades-jump/.ssh/authorized_keys;
+    grep -F 'permitopen="{{ item.address }}:22"' /var/lib/hades-jump/.ssh/authorized_keys;
     grep '^{{ item.name }}:' {{ hades_config_dir }}/github-logins; true
   become: true
   register: offboard_test_left
@@ -15,8 +15,6 @@
   loop: "{{ dev_absent }}"
   loop_control:
     label: "{{ item.name }}"
-  vars:
-    offboard_test_address: "{{ (vm_subnet.split('.')[:2] + [item.uid // 256, item.uid % 256]) | join('.') }}"
 
 - name: Assert each absent developer's home is archived and nothing else is left
   ansible.builtin.assert:

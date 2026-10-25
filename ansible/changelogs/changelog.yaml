@@ -1,3 +1,10 @@
 ---
 ancestor: null
-releases: {}
+releases:
+  0.2.0:
+    changes:
+      release_summary: >-
+        One Incus VM per developer on a shared Ubuntu box: the host role builds the VMs, the jump
+        account and the shared tool store, the vm role configures each VM, and the ingress role serves
+        the developers' sites through a Cloudflare tunnel behind Cloudflare Access.
+    release_date: "2026-10-26"

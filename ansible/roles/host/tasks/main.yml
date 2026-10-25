@@ -45,7 +45,7 @@
   ansible.builtin.import_tasks: hades.yml
 
 - name: CPU governor
-  ansible.builtin.import_tasks: sysctl.yml
+  ansible.builtin.import_tasks: governor.yml
 
 - name: Incus, its storage pool and bridge
   ansible.builtin.import_tasks: incus.yml
