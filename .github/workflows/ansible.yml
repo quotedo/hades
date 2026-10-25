@@ -37,6 +37,9 @@ jobs:
           bad-entry|dev_users entry j-smith is invalid
           bad-entry|dev_users entry bob is invalid
           bad-entry|dev_users entry carol is invalid
+          bad-entry|dev_users entry dave is invalid
+          bad-entry|dev_users entry erin is invalid
+          bad-entry|dev_users entry frank is invalid
           duplicate-names|Present dev_users share a name: alice
           duplicate-uids|Present dev_users share a uid: 3001 [alice, bob]
           tools-prefix|tools.node: versions must be exact
@@ -44,5 +47,7 @@ jobs:
           vpn-full-tunnel|intranet subnets in AllowedIPs
           vpn-overlap|overlaps the VPN's AllowedIPs 10.0.0.0/8
           oversized|the present VMs take
+          missing-host|ansible_host must be set
+          missing-host|ansible_user must be set
           EOF
           ansible-playbook -i tests/inventories/valid.yml playbooks/preflight.yml
