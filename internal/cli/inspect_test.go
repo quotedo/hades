@@ -65,10 +65,9 @@ func runMain(getenv func(string) string, args ...string) (code int, stdout, stde
 	return code, out.String(), errb.String()
 }
 
-func TestLsJSONAndMine(t *testing.T) {
+func TestLsJSONAndTable(t *testing.T) {
 	_, _, getenv := laptopUpFixture(t, "phoenix")
 	reg := laptopRegistry(t, getenv)
-	me := currentUserName(t)
 
 	// An empty registry lists as [], not null.
 	code, out, errs := runMain(getenv, "ls", "--json")
@@ -77,8 +76,8 @@ func TestLsJSONAndMine(t *testing.T) {
 	}
 
 	for _, m := range []*registry.Manifest{
-		{User: me, Label: "demo-a", Port: 4100, Host: "demo-a.example.test", Worktree: "/w/a", CreatedAt: time.Now().Add(-3 * time.Hour)},
-		{User: "other", Label: "demo-b", Port: 4101, Host: "demo-b.example.test", Worktree: "/w/b", CreatedAt: time.Now().Add(-49 * time.Hour)},
+		{Label: "demo-a", Port: 4100, Host: "demo-a.example.test", Worktree: "/w/a", CreatedAt: time.Now().Add(-3 * time.Hour)},
+		{Label: "demo-b", Port: 4101, Host: "demo-b.example.test", Worktree: "/w/b", CreatedAt: time.Now().Add(-49 * time.Hour)},
 	} {
 		if err := reg.WriteManifest(m); err != nil {
 			t.Fatal(err)
@@ -90,15 +89,10 @@ func TestLsJSONAndMine(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &all); err != nil || code != 0 || len(all) != 2 || all[0].Label != "demo-a" {
 		t.Fatalf("all: code=%d err=%v out=%q stderr=%q", code, err, out, errs)
 	}
-	code, out, _ = runMain(getenv, "ls", "--mine", "--json")
-	var mine []registry.Manifest
-	if err := json.Unmarshal([]byte(out), &mine); err != nil || code != 0 || len(mine) != 1 || mine[0].User != me {
-		t.Fatalf("mine: code=%d err=%v out=%q", code, err, out)
-	}
 
 	code, out, _ = runMain(getenv, "ls")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if code != 0 || len(lines) != 3 || strings.Fields(lines[0])[0] != "LABEL" ||
+	if code != 0 || len(lines) != 3 || strings.Join(strings.Fields(lines[0]), " ") != "LABEL PORT HOST WORKTREE AGE" ||
 		!strings.HasSuffix(lines[1], "3h") || !strings.HasSuffix(lines[2], "2d") {
 		t.Fatalf("table: code=%d out=%q", code, out)
 	}

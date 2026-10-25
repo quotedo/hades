@@ -128,7 +128,7 @@ sequenceDiagram
 | Databases | `<app>_dev<suffix>` and `<app>_test<suffix>`, suffix `_<user>_<name>`. The project's setup creates them; `hades down` drops only those. |
 | Variables | `hades env` prints them; the [CLI reference](cli.md#what-up-writes) lists them. |
 
-Day to day: `hades ls --mine` lists your worktrees, `hades env` and `hades port` describe the current
+Day to day: `hades ls` lists your worktrees, `hades env` and `hades port` describe the current
 one, and `hades doctor` says what is wrong and how to fix it. The [CLI reference](cli.md#commands)
 has every command.
 

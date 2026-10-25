@@ -15,11 +15,9 @@ import (
 	"github.com/quotedo/hades/internal/registry"
 )
 
-// ls lists the manifests of the host registry.
+// ls lists the manifests of the registry.
 func ls(ctx *Context, args []string) int {
-	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
-	mine := fs.Bool("mine", false, "only the current user's worktrees")
-	if code, ok := parseArgs(ctx, fs, "usage: hades ls [--mine] [--json]", args); !ok {
+	if code, ok := parseArgs(ctx, flag.NewFlagSet("ls", flag.ContinueOnError), "usage: hades ls [--json]", args); !ok {
 		return code
 	}
 	d, err := newDeps(ctx)
@@ -33,24 +31,20 @@ func ls(ctx *Context, args []string) int {
 	for _, p := range problems {
 		fmt.Fprintf(ctx.Stderr, "hades: ls: %s\n", p)
 	}
-	list := []registry.Manifest{} // never nil: JSON prints [] for an empty registry
-	for _, m := range all {
-		if *mine && m.User != d.User.Name {
-			continue
-		}
-		list = append(list, *m)
+	if all == nil {
+		all = []*registry.Manifest{} // JSON prints [] for an empty registry
 	}
 	if ctx.Flags.JSON {
-		if err := writeJSON(ctx.Stdout, list); err != nil {
+		if err := writeJSON(ctx.Stdout, all); err != nil {
 			return ctx.fail("ls", err)
 		}
 		return 0
 	}
 	tw := tabwriter.NewWriter(ctx.Stdout, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(tw, "LABEL\tUSER\tPORT\tHOST\tWORKTREE\tAGE")
+	fmt.Fprintln(tw, "LABEL\tPORT\tHOST\tWORKTREE\tAGE")
 	now := time.Now()
-	for _, m := range list {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", m.Label, m.User, strconv.Itoa(m.Port), m.Host, m.Worktree, age(now, m.CreatedAt))
+	for _, m := range all {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", m.Label, strconv.Itoa(m.Port), m.Host, m.Worktree, age(now, m.CreatedAt))
 	}
 	if err := tw.Flush(); err != nil {
 		return ctx.fail("ls", err)
