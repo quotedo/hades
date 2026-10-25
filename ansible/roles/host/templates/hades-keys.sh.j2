@@ -1,9 +1,9 @@
 #!/bin/sh
 # {{ ansible_managed }}
 # hades-keys [LOGIN]: rewrite each listed user's authorized_keys from GitHub. The list holds
-# `login:github` lines; the file is the user's static keys followed by the GitHub keys. A failed or
-# empty fetch keeps the file. The write runs as the user, so a link in their home reaches nothing
-# they could not write themselves.
+# `login:github` lines; the file is the user's static keys followed by the GitHub keys, or the
+# static keys alone when github is empty. A failed or empty fetch keeps the file. The write runs as
+# the user, so a link in their home reaches nothing they could not write themselves.
 set -u
 [ $# -le 1 ] || { echo "usage: hades-keys [LOGIN]" >&2; exit 2; }
 want=${1:-}
@@ -11,11 +11,15 @@ list=${HADES_KEYS_FILE:-{{ hades_config_dir }}/github-logins}
 [ -f "$list" ] || exit 0
 
 while IFS=: read -r login github; do
-  [ -n "$login" ] && [ -n "$github" ] || continue
+  case $login in '' | '#'*) continue ;; esac
   [ -z "$want" ] || [ "$login" = "$want" ] || continue
-  if ! keys=$(curl -fsS --max-time 20 "https://github.com/$github.keys") || [ -z "$keys" ]; then
-    echo "$login: fetch failed, kept"
-    continue
+  keys=
+  if [ -n "$github" ]; then
+    keys=$(curl -fsS --max-time 20 "https://github.com/$github.keys") || keys=
+    if [ -z "$keys" ]; then
+      echo "$login: fetch failed, kept"
+      continue
+    fi
   fi
   home=$(getent passwd "$login" | cut -d: -f6)
   if [ -z "$home" ] || [ ! -d "$home" ]; then
@@ -23,7 +27,7 @@ while IFS=: read -r login github; do
     continue
   fi
   static={{ hades_config_dir }}/ssh-keys/$login
-  result=$({ [ ! -f "$static" ] || cat "$static"; printf '%s\n' "$keys"; } |
+  result=$({ [ ! -f "$static" ] || cat "$static"; [ -z "$keys" ] || printf '%s\n' "$keys"; } |
     runuser -u "$login" -- sh -c '
       umask 077; new=$(cat); f=$1/authorized_keys
       [ -f "$f" ] && [ "$(cat "$f")" = "$new" ] && { echo unchanged; exit 0; }
