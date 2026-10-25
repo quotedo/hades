@@ -11,14 +11,13 @@ import (
 	"testing"
 
 	"github.com/quotedo/hades/internal/config"
-	"github.com/quotedo/hades/internal/naming"
 	"github.com/quotedo/hades/internal/registry"
 )
 
 // laptopRegistry creates the laptop registry under getenv's HOME.
 func laptopRegistry(t *testing.T, getenv func(string) string) *registry.Registry {
 	t.Helper()
-	host, err := config.LaptopHost(getenv("HOME"), getenv)
+	host, err := config.Load(getenv, getenv("HOME"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,28 +71,11 @@ func TestDownAndGCRejectUnknownFlagsAndArgs(t *testing.T) {
 	}
 }
 
-func TestGCRefusesNonRootOnServer(t *testing.T) {
-	_, getenv, _ := serverFixture(t, "")
-	prev := geteuid
-	geteuid = func() int { return 1000 }
-	t.Cleanup(func() { geteuid = prev })
-	var out, errb bytes.Buffer
-	if code := Main([]string{"gc"}, &out, &errb, getenv); code != 1 || errb.String() != "hades: gc: must run as root on a server\n" {
-		t.Fatalf("code=%d err=%q", code, errb.String())
-	}
-}
-
-func TestGCOnLaptopReleasesOnlyTheCurrentUsersVanishedWorktrees(t *testing.T) {
+func TestGCReleasesVanishedWorktreesThroughDispatcher(t *testing.T) {
 	_, _, getenv := laptopUpFixture(t, "phoenix")
 	reg := laptopRegistry(t, getenv)
-	gone := filepath.Join(t.TempDir(), "gone")
-	for _, m := range []*registry.Manifest{
-		{User: currentUserName(t), Label: "demo-gone", Name: "gone", DBSuffix: naming.Suffix(currentUserName(t), "gone"), Worktree: gone},
-		{User: "someone-else", Label: "demo-theirs", Worktree: gone},
-	} {
-		if err := reg.WriteManifest(m); err != nil {
-			t.Fatal(err)
-		}
+	if err := reg.WriteManifest(&registry.Manifest{Label: "demo-gone", Worktree: filepath.Join(t.TempDir(), "gone")}); err != nil {
+		t.Fatal(err)
 	}
 
 	var out, errb bytes.Buffer
@@ -110,9 +92,6 @@ func TestGCOnLaptopReleasesOnlyTheCurrentUsersVanishedWorktrees(t *testing.T) {
 	}
 	if _, err := reg.ByLabel("demo-gone"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("manifest left")
-	}
-	if _, err := reg.ByLabel("demo-theirs"); err != nil {
-		t.Fatal("released another user's manifest")
 	}
 }
 

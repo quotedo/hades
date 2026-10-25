@@ -25,7 +25,7 @@ func port(ctx *Context, args []string) int {
 	if err != nil {
 		return ctx.fail("port", err)
 	}
-	m, err := d.Reg.ByWorktree(wt.Worktree, d.User.UID)
+	m, err := d.Reg.ByWorktree(wt.Worktree)
 	if errors.Is(err, registry.ErrNoManifest) || errors.Is(err, fs.ErrNotExist) {
 		return ctx.fail("port", fmt.Errorf("no hades manifest for %s; run hades up", wt.Worktree))
 	}

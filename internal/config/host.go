@@ -1,5 +1,5 @@
-// Package config loads hades' host configuration (server mode), the laptop
-// defaults used when no host config exists, and the per-repository hades.toml.
+// Package config loads hades' host configuration (laptop defaults overlaid by
+// an optional host file) and the per-repository hades.toml.
 package config
 
 import (
@@ -8,33 +8,14 @@ import (
 	"io/fs"
 	"path/filepath"
 	"strconv"
-	"strings"
 
 	"github.com/BurntSushi/toml"
 
 	"github.com/quotedo/hades/internal/naming"
 )
 
-// Mode says whether hades runs against a shared server or a laptop.
-type Mode int
-
-const (
-	Server Mode = iota
-	Laptop
-)
-
-// ErrNoHost reports that the host config file does not exist.
-var ErrNoHost = fmt.Errorf("no host config: %w", fs.ErrNotExist)
-
-const defaultHostPath = "/etc/hades/host.toml"
-
-type Caddy struct {
-	Config string `toml:"config"`
-	// LiveDir is the root-owned directory Caddy imports; caddy-reload mirrors
-	// the validated sites into it.
-	LiveDir string   `toml:"live_dir"`
-	Reload  []string `toml:"reload"`
-}
+// DefaultHostPath is the host file Load reads when HADES_HOST_CONFIG is unset.
+var DefaultHostPath = "/etc/hades/host.toml"
 
 type Postgres struct {
 	Host     string
@@ -50,83 +31,57 @@ type RabbitMQ struct {
 	Password      string
 }
 
-// Host is what the machine offers: domain, registries, and shared services.
+// Host is what the machine offers. The host file sets Domain, ChromePath and
+// RabbitMQ; Load sets the rest.
 type Host struct {
-	Domain        string
-	LabelTemplate string    `toml:"label_template"`
-	PortRange     string    `toml:"port_range"`
+	Domain     string    `toml:"domain"`
+	ChromePath string    `toml:"chrome_path"`
+	RabbitMQ   *RabbitMQ `toml:"rabbitmq"`
+
+	Path          string    `toml:"-"` // the host file read; empty without one
+	LabelTemplate string    `toml:"-"`
+	PortRange     string    `toml:"-"`
 	Ports         PortRange `toml:"-"` // PortRange parsed
-	PortsDir      string    `toml:"ports_dir"`
-	SitesDir      string    `toml:"sites_dir"`
-	ManifestsDir  string    `toml:"manifests_dir"`
-	ToolPaths     []string  `toml:"tool_paths"`
-	ChromePath    string    `toml:"chrome_path"`
-	Caddy         Caddy
-	Postgres      Postgres
-	RabbitMQ      *RabbitMQ
+	PortsDir      string    `toml:"-"`
+	SitesDir      string    `toml:"-"`
+	ManifestsDir  string    `toml:"-"`
+	Postgres      Postgres  `toml:"-"`
 }
 
-// HostPath returns HADES_HOST_CONFIG or /etc/hades/host.toml.
-func HostPath(getenv func(string) string) string {
-	if p := getenv("HADES_HOST_CONFIG"); p != "" {
-		return p
-	}
-	return defaultHostPath
-}
-
-// LoadHost reads and validates the host config at path. It returns ErrNoHost
-// when the file does not exist.
-func LoadHost(path string) (*Host, error) {
-	var h Host
-	if _, err := toml.DecodeFile(path, &h); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("%w: %s", ErrNoHost, path)
-		}
+// Load returns the laptop defaults overlaid by the host file at
+// HADES_HOST_CONFIG, else at DefaultHostPath when that file exists. An
+// explicit path that does not exist is an error, and so are an unknown key,
+// an unparseable HADES_DB_PORT and an invalid HADES_PORT_RANGE.
+func Load(getenv func(string) string, home string) (*Host, error) {
+	h, err := laptop(home, getenv)
+	if err != nil {
 		return nil, err
 	}
-	if h.LabelTemplate == "" {
-		h.LabelTemplate = naming.DefaultLabelTemplate
+	path := getenv("HADES_HOST_CONFIG")
+	explicit := path != ""
+	if !explicit {
+		path = DefaultHostPath
 	}
-	var missing []string
-	for _, k := range []struct {
-		key string
-		val string
-	}{
-		{"domain", h.Domain},
-		{"port_range", h.PortRange},
-		{"ports_dir", h.PortsDir},
-		{"sites_dir", h.SitesDir},
-		{"manifests_dir", h.ManifestsDir},
-		{"caddy.config", h.Caddy.Config},
-		{"caddy.live_dir", h.Caddy.LiveDir},
-		{"postgres.host", h.Postgres.Host},
-		{"postgres.user", h.Postgres.User},
-		{"postgres.password", h.Postgres.Password},
-	} {
-		if k.val == "" {
-			missing = append(missing, k.key)
-		}
+	md, err := toml.DecodeFile(path, h)
+	switch {
+	case errors.Is(err, fs.ErrNotExist) && !explicit:
+		return h, nil
+	case err != nil:
+		return nil, fmt.Errorf("host config %s: %w", path, err)
 	}
-	if len(h.Caddy.Reload) == 0 {
-		missing = append(missing, "caddy.reload")
+	if err := unknownKeys(path, md); err != nil {
+		return nil, err
 	}
-	if h.Postgres.Port == 0 {
-		missing = append(missing, "postgres.port")
+	h.Path = path
+	if h.Domain != "" {
+		h.LabelTemplate = naming.DomainLabelTemplate
 	}
-	if len(missing) > 0 {
-		return nil, fmt.Errorf("%s: missing required keys: %s", path, strings.Join(missing, ", "))
-	}
-	ports, err := ParsePortRange(h.PortRange)
-	if err != nil {
-		return nil, fmt.Errorf("%s: port_range: %w", path, err)
-	}
-	h.Ports = ports
-	return &h, nil
+	return h, nil
 }
 
-// LaptopHost returns the defaults used when no host config exists. It fails
-// on an unparseable HADES_DB_PORT or an invalid HADES_PORT_RANGE.
-func LaptopHost(home string, getenv func(string) string) (*Host, error) {
+// laptop returns the defaults with the HADES_DB_* and HADES_PORT_RANGE
+// overrides applied.
+func laptop(home string, getenv func(string) string) (*Host, error) {
 	or := func(key, def string) string {
 		if v := getenv(key); v != "" {
 			return v
@@ -161,25 +116,4 @@ func LaptopHost(home string, getenv func(string) string) (*Host, error) {
 			Password: or("HADES_DB_PASSWORD", "postgres"),
 		},
 	}, nil
-}
-
-// Load reads the host config. Laptop defaults apply when
-// HADES_HOST_CONFIG=laptop, or when HADES_HOST_CONFIG is unset and the default
-// host config is absent. An explicit path that does not exist is an error.
-func Load(getenv func(string) string, home string) (*Host, Mode, error) {
-	explicit := getenv("HADES_HOST_CONFIG")
-	if explicit != "laptop" {
-		h, err := LoadHost(HostPath(getenv))
-		if err == nil {
-			return h, Server, nil
-		}
-		if explicit != "" || !errors.Is(err, ErrNoHost) {
-			return nil, Server, err
-		}
-	}
-	h, err := LaptopHost(home, getenv)
-	if err != nil {
-		return nil, Laptop, err
-	}
-	return h, Laptop, nil
 }

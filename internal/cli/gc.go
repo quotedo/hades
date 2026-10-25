@@ -5,38 +5,26 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"os"
 
-	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/lifecycle"
 	"github.com/quotedo/hades/internal/registry"
 )
 
-// geteuid is os.Geteuid; tests replace it.
-var geteuid = os.Geteuid
-
-// gc releases the manifests of vanished worktrees, or of one user. On a
-// server it must run as root; on a laptop it acts for the current user only.
+// gc releases the manifests of vanished worktrees.
 func gc(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
 	dryRun := fs.Bool("dry-run", false, "print what would be released; change nothing")
-	owner := fs.String("owner", "", "release every manifest whose file this user owns")
-	if code, ok := parseArgs(ctx, fs, "usage: hades gc [--dry-run] [--owner USER]", args); !ok {
+	if code, ok := parseArgs(ctx, fs, "usage: hades gc [--dry-run]", args); !ok {
 		return code
 	}
 	d, err := newDeps(ctx)
 	if err != nil {
 		return ctx.fail("gc", err)
 	}
-	if d.Mode == config.Server && geteuid() != 0 {
-		return ctx.fail("gc", errors.New("must run as root on a server"))
+	if err := d.Reg.Exists(); errors.Is(err, registry.ErrRegistryMissing) {
+		return 0 // nothing was ever set up here
 	}
-	if d.Mode == config.Laptop {
-		if err := d.Reg.Check(); errors.Is(err, registry.ErrRegistryMissing) {
-			return 0 // nothing was ever set up here
-		}
-	}
-	rep, err := lifecycle.GC(context.Background(), d, *owner, *dryRun)
+	rep, err := lifecycle.GC(context.Background(), d, *dryRun)
 	if err != nil {
 		return ctx.fail("gc", err)
 	}

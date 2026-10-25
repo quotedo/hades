@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -13,51 +12,30 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/quotedo/hades/internal/naming"
 	"github.com/quotedo/hades/internal/registry"
 	"github.com/quotedo/hades/internal/testutil"
 )
 
-// hadesBin is the hades binary TestMain builds. The end-to-end tests run every
-// command in-process through Main, except caddy-reload, which the stub sudo
-// runs as this binary, the way a server runs it.
-var hadesBin string
-
-func TestMain(m *testing.M) {
-	os.Exit(runTests(m))
-}
-
-func runTests(m *testing.M) int {
-	dir, err := os.MkdirTemp("", "hades-e2e-")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "e2e: temp dir:", err)
-		return 1
-	}
-	defer os.RemoveAll(dir)
-	hadesBin = filepath.Join(dir, "hades")
-	cmd := exec.Command("go", "build", "-o", hadesBin, "github.com/quotedo/hades/cmd/hades")
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "e2e: go build ./cmd/hades: %v\n%s", err, out)
-		return 1
-	}
-	return m.Run()
-}
-
-// e2e is a server host in temp directories with the phoenix-project fixture
-// committed in a worktree on branch feature/e2e of a repository named demo.
-// The process environment (PATH, HOME, HADES_HOST_CONFIG, HADES_BIN) points at
-// it, so the commands hades runs, and the hades binary sudo runs, see it too.
+// e2e is a host with domain example.test in temp directories, with the
+// phoenix-project fixture committed in a worktree on branch feature/e2e of a
+// repository named demo. The process environment (PATH, HOME,
+// HADES_HOST_CONFIG, HADES_DB_PORT) points at it, so the commands hades runs
+// see it too.
 type e2e struct {
 	t              *testing.T
 	reg            *registry.Registry
 	root, worktree string
+	label          string // <user>-demo-feature-e2e
 	bin            string // the stub tools; all of PATH besides /usr/bin and /bin
-	sitesDir, live string
-	log            string // STUB_LOG: what the stub mix recorded
+	log            string // STUB_LOG: what the stub mix and caddy recorded
 	stdout, stderr string // of the last run
 }
 
-const stubExit0 = "#!/bin/bash\nexit 0\n"
+const (
+	stubExit0   = "#!/bin/bash\nexit 0\n"
+	caddyReload = "caddy reload --config /etc/caddy/Caddyfile"
+)
 
 func newE2E(t *testing.T) *e2e {
 	t.Helper()
@@ -65,8 +43,7 @@ func newE2E(t *testing.T) *e2e {
 	if err != nil {
 		t.Fatalf("e2e needs git: %v", err)
 	}
-	reg, getenv, state := serverFixture(t, "")
-	sharedRegistry(t, state) // a server's up refuses anything else
+	reg, getenv, state := domainFixture(t, "")
 	root, wt := testutil.TempGitRepo(t, "demo", "feature/e2e")
 	testutil.CopyDir(t, filepath.Join("testdata", "phoenix-project"), wt)
 	for _, args := range [][]string{
@@ -78,19 +55,20 @@ func newE2E(t *testing.T) *e2e {
 		}
 	}
 
+	label, err := naming.Label(naming.DomainLabelTemplate, naming.Vars{Project: "demo", User: currentUserName(t), Name: "feature/e2e"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	h := &e2e{
-		t: t, reg: reg, root: root, worktree: wt,
-		bin:      filepath.Join(state, "bin"),
-		sitesDir: reg.SitesDir,
-		live:     filepath.Join(state, "live"),
-		log:      filepath.Join(state, "stub.log"),
+		t: t, reg: reg, root: root, worktree: wt, label: label,
+		bin: filepath.Join(state, "bin"),
+		log: filepath.Join(state, "stub.log"),
 	}
 	for name, script := range map[string]string{
-		"git":       "#!/bin/bash\nexec '" + realGit + "' \"$@\"\n",
-		"mix":       "#!/bin/bash\n{ echo \"mix $*\"; echo \"cwd=$(pwd -P)\"; env; } >> \"$STUB_LOG\"\n",
-		"direnv":    stubExit0,
-		"caddy":     stubExit0,
-		"systemctl": stubExit0,
+		"git":    "#!/bin/bash\nexec '" + realGit + "' \"$@\"\n",
+		"mix":    "#!/bin/bash\n{ echo \"mix $*\"; echo \"cwd=$(pwd -P)\"; env; } >> \"$STUB_LOG\"\n",
+		"direnv": stubExit0,
+		"caddy":  "#!/bin/bash\necho \"caddy $*\" >> \"$STUB_LOG\"\n",
 	} {
 		testutil.StubTool(t, h.bin, name, script)
 	}
@@ -98,7 +76,7 @@ func newE2E(t *testing.T) *e2e {
 	t.Setenv("PATH", h.bin+string(os.PathListSeparator)+"/usr/bin"+string(os.PathListSeparator)+"/bin")
 	t.Setenv("HOME", state)
 	t.Setenv("HADES_HOST_CONFIG", getenv("HADES_HOST_CONFIG"))
-	t.Setenv("HADES_BIN", hadesBin)
+	t.Setenv("HADES_DB_PORT", getenv("HADES_DB_PORT"))
 	t.Setenv("STUB_LOG", h.log)
 	// An ADE that runs these tests must not leak its worktree into them.
 	for _, k := range []string{
@@ -185,7 +163,7 @@ func TestEndToEndUpThenDown(t *testing.T) {
 	if code := h.run("up", "--ade", "shell"); code != 0 {
 		t.Fatalf("up: code=%d\n%s", code, h.stderr)
 	}
-	if !strings.Contains(h.stderr, "hades: demo-feature-e2e up at https://demo-feature-e2e.example.test\n") {
+	if !strings.Contains(h.stderr, "hades: "+h.label+" up at https://"+h.label+".example.test\n") {
 		t.Fatalf("up stderr:\n%s", h.stderr)
 	}
 	for _, bad := range []string{"skip-worktree", "direnv allow failed", "direnv not installed"} {
@@ -193,20 +171,20 @@ func TestEndToEndUpThenDown(t *testing.T) {
 			t.Fatalf("up stderr has %q:\n%s", bad, h.stderr)
 		}
 	}
-	m := h.manifestByLabel("demo-feature-e2e")
-	if m.Port != 4100 || m.Host != "demo-feature-e2e.example.test" || m.ADE != "shell" || m.Name != "feature/e2e" || m.Worktree != h.realWorktree() {
+	m := h.manifestByLabel(h.label)
+	if m.Port != 4100 || m.Host != h.label+".example.test" || m.ADE != "shell" || m.Name != "feature/e2e" || m.Worktree != h.realWorktree() {
 		t.Fatalf("manifest = %+v", m)
 	}
-	for _, line := range []string{"mix setup", "cwd=" + h.realWorktree(), "PORT=4100", "DEMO_ENDPOINT=demo-feature-e2e.example.test"} {
+	for _, line := range []string{"mix setup", "cwd=" + h.realWorktree(), "PORT=4100", "DEMO_ENDPOINT=" + h.label + ".example.test"} {
 		if !h.stubLogHas(line) {
 			t.Fatalf("stub log lacks %q:\n%s", line, h.stubLogExcerpt())
 		}
 	}
-	const siteLine = "import worktree demo-feature-e2e.example.test 4100\n"
-	for _, dir := range []string{h.sitesDir, h.live} {
-		if site := h.read(filepath.Join(dir, "demo-feature-e2e.caddy")); site != siteLine {
-			t.Fatalf("%s: site file = %q", dir, site)
-		}
+	if site := h.read(filepath.Join(h.reg.SitesDir, h.label+".caddy")); site != "import worktree "+h.label+".example.test 4100\n" {
+		t.Fatalf("site file = %q", site)
+	}
+	if !h.stubLogHas(caddyReload) {
+		t.Fatalf("stub log lacks %q", caddyReload)
 	}
 	if mcp := h.read(filepath.Join(h.worktree, ".mcp.json")); !strings.Contains(mcp, `"url": "http://localhost:4100/tidewave/mcp"`) {
 		t.Fatalf(".mcp.json:\n%s", mcp)
@@ -219,7 +197,7 @@ func TestEndToEndUpThenDown(t *testing.T) {
 		t.Fatalf("ls: code=%d\n%s", code, h.stderr)
 	}
 	var listed []registry.Manifest
-	if err := json.Unmarshal([]byte(h.stdout), &listed); err != nil || len(listed) != 1 || listed[0].Label != "demo-feature-e2e" {
+	if err := json.Unmarshal([]byte(h.stdout), &listed); err != nil || len(listed) != 1 || listed[0].Label != h.label {
 		t.Fatalf("ls --json: %v: %s", err, h.stdout)
 	}
 	if code := h.run("port"); code != 0 || h.stdout != "4100\n" {
@@ -240,9 +218,11 @@ func TestEndToEndUpThenDown(t *testing.T) {
 			t.Fatalf("down: %s\n%s", line, h.stderr)
 		}
 	}
-	assertGone(t, filepath.Join(h.sitesDir, "demo-feature-e2e.caddy"))
-	assertGone(t, filepath.Join(h.live, "demo-feature-e2e.caddy"))
+	assertGone(t, filepath.Join(h.reg.SitesDir, h.label+".caddy"))
 	assertGone(t, filepath.Join(h.reg.PortsDir, "4100"))
+	if n := strings.Count(h.stubLog(), caddyReload+"\n"); n != 2 {
+		t.Fatalf("caddy reloaded %d times, want 2 (up and down)", n)
+	}
 	if code := h.run("ls", "--json"); code != 0 {
 		t.Fatalf("ls after down: code=%d err=%q", code, h.stderr)
 	}
@@ -251,7 +231,7 @@ func TestEndToEndUpThenDown(t *testing.T) {
 		t.Fatalf("ls --json after down: %v: %s", err, h.stdout)
 	}
 	if dbFailed {
-		if !strings.Contains(downErr, "down: manifest kept (failed: databases); gc will retry\n") || len(listed) != 1 || listed[0].Label != "demo-feature-e2e" {
+		if !strings.Contains(downErr, "down: manifest kept (failed: databases); gc will retry\n") || len(listed) != 1 || listed[0].Label != h.label {
 			t.Fatalf("manifest not kept after a failed step: %s\n%s", h.stdout, downErr)
 		}
 	} else if len(listed) != 0 {
@@ -269,7 +249,7 @@ func TestEndToEndPaseoEnvAndDoctor(t *testing.T) {
 	if code := h.run("up"); code != 0 {
 		t.Fatalf("up: code=%d\n%s", code, h.stderr)
 	}
-	m := h.manifestByLabel("demo-feature-e2e")
+	m := h.manifestByLabel(h.label)
 	if m.ADE != "paseo" || m.Name != "feature/e2e" || m.Port != 4100 || m.Worktree != h.realWorktree() {
 		t.Fatalf("manifest = %+v", m)
 	}
@@ -284,7 +264,7 @@ func TestEndToEndPaseoEnvAndDoctor(t *testing.T) {
 	}
 	// Each check really ran against the stubs and the Paseo worktree.
 	for _, want := range []string{
-		"ok   caddy-reload: sudo -n " + hadesBin + " caddy-reload --check succeeded\n",
+		"ok   host-config: loaded " + os.Getenv("HADES_HOST_CONFIG") + " (domain example.test)\n",
 		"ok   postgres: reachable, 2 databases\n",
 		"ok   git: " + filepath.Join(h.bin, "git") + "\n",
 		"ok   tools: " + filepath.Join(h.bin, "mix") + "\n",

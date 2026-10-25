@@ -15,11 +15,12 @@ import (
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/envfile"
 	"github.com/quotedo/hades/internal/execx"
+	"github.com/quotedo/hades/internal/naming"
 	"github.com/quotedo/hades/internal/testutil"
 )
 
-func TestUpPhoenixServerHappyPath(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+func TestUpPhoenixHappyPath(t *testing.T) {
+	d, c := newDeps(t, "phoenix")
 	out, err := Up(context.Background(), d, c, UpOptions{})
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +40,7 @@ func TestUpPhoenixServerHappyPath(t *testing.T) {
 		t.Fatal(env)
 	}
 	calls := argvs(d.Run.(*execx.Fake))
-	if !slices.Contains(calls, "sudo -n /usr/local/bin/hades caddy-reload") || !slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "sh -c mix setup") }) {
+	if !slices.Contains(calls, reloadCall) || !slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "sh -c mix setup") }) {
 		t.Fatalf("%v", calls)
 	}
 	setup := lastCallWithPrefix(d.Run.(*execx.Fake), "sh")
@@ -49,7 +50,7 @@ func TestUpPhoenixServerHappyPath(t *testing.T) {
 }
 
 func TestUpIsIdempotentAndKeepsSecret(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	first, _ := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	second, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	if err != nil || second.Manifest.Port != first.Manifest.Port || toMap(second.Env)["SECRET_KEY_BASE"] != toMap(first.Env)["SECRET_KEY_BASE"] {
@@ -62,7 +63,7 @@ func TestUpIsIdempotentAndKeepsSecret(t *testing.T) {
 }
 
 func TestUpReusesManifestByPathWhenNameChanges(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	first, _ := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	c.Name = "renamed"
 	second, _ := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
@@ -72,7 +73,7 @@ func TestUpReusesManifestByPathWhenNameChanges(t *testing.T) {
 }
 
 func TestUpLabelTakenByOtherWorktree(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	other := c
 	other.Worktree = t.TempDir()
@@ -85,8 +86,8 @@ func TestUpLabelTakenByOtherWorktree(t *testing.T) {
 }
 
 func TestUpRollsBackWhenCaddyReloadFails(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
-	d.Run.(*execx.Fake).Handle = failWhen("sudo", 1)
+	d, c := newDeps(t, "phoenix")
+	d.Run.(*execx.Fake).Handle = failWhen("caddy", 1)
 	_, err := Up(context.Background(), d, c, UpOptions{})
 	if err == nil || !strings.Contains(err.Error(), "rolled back") {
 		t.Fatal(err)
@@ -103,7 +104,7 @@ func TestUpRollsBackWhenCaddyReloadFails(t *testing.T) {
 }
 
 func TestUpKeepsStateWhenSetupFails(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	d.Run.(*execx.Fake).Handle = failWhen("sh", 1)
 	_, err := Up(context.Background(), d, c, UpOptions{})
 	var se *SetupError
@@ -119,7 +120,7 @@ func TestUpKeepsStateWhenSetupFails(t *testing.T) {
 }
 
 func TestUpNonePresetDoesNothing(t *testing.T) {
-	d, c := newServerDeps(t, "none")
+	d, c := newDeps(t, "none")
 	out, err := Up(context.Background(), d, c, UpOptions{})
 	if err != nil || out.Manifest != nil {
 		t.Fatal(out, err)
@@ -129,19 +130,39 @@ func TestUpNonePresetDoesNothing(t *testing.T) {
 	}
 }
 
-func TestUpLaptopModeNoSiteNoSudo(t *testing.T) {
+func TestUpWithDomainPublishesSiteAndReloads(t *testing.T) {
+	d, c := newDeps(t, "phoenix")
+	d.Host.LabelTemplate = naming.DomainLabelTemplate
+	writeFile(t, filepath.Join(c.Root, "hades.toml"), "project = \"shop\"\n")
+	c.Name = "feat"
+	out, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
+	if err != nil || out.URL != "https://alice-shop-feat.example.test" {
+		t.Fatalf("%+v %v", out, err)
+	}
+	if site, _ := os.ReadFile(filepath.Join(d.Reg.SitesDir, "alice-shop-feat.caddy")); string(site) != "import worktree alice-shop-feat.example.test 4100\n" {
+		t.Fatalf("site file %q", site)
+	}
+	if calls := argvs(d.Run.(*execx.Fake)); !slices.Contains(calls, reloadCall) {
+		t.Fatalf("%v", calls)
+	}
+}
+
+func TestUpWithoutDomainUsesLocalhost(t *testing.T) {
 	d, c := newLaptopDeps(t, "phoenix")
 	out, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
-	if err != nil || toMap(out.Env)["HADES_URL"] != "http://localhost:4100" {
-		t.Fatal(err)
+	if err != nil || out.URL != "http://localhost:4100" {
+		t.Fatalf("%+v %v", out, err)
 	}
-	if slices.Contains(argvs(d.Run.(*execx.Fake)), "sudo -n /usr/local/bin/hades caddy-reload") {
-		t.Fatal("sudo on laptop")
+	if entries, _ := os.ReadDir(d.Reg.SitesDir); len(entries) != 0 {
+		t.Fatalf("site files %v", entries)
+	}
+	if calls := argvs(d.Run.(*execx.Fake)); slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "caddy") }) {
+		t.Fatalf("%v", calls)
 	}
 }
 
 func TestUpDryRunWritesNothing(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	var log bytes.Buffer
 	d.Log = &log
 	Up(context.Background(), d, c, UpOptions{DryRun: true})
@@ -154,7 +175,7 @@ func TestUpDryRunWritesNothing(t *testing.T) {
 }
 
 func TestUpInvalidNameFailsWithoutPanic(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	c.Name = "???"
 	_, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	if err == nil || !strings.Contains(err.Error(), "???") {
@@ -166,7 +187,7 @@ func TestUpInvalidNameFailsWithoutPanic(t *testing.T) {
 }
 
 func TestUpGitSecretFailureIsFatalWithRemedy(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	os.MkdirAll(filepath.Join(c.Worktree, ".gitsecret"), 0o755)
 	d.Run.(*execx.Fake).Handle = failWhen("git", 1) // git secret reveal fails
 	_, err := Up(context.Background(), d, c, UpOptions{})
@@ -178,7 +199,7 @@ func TestUpGitSecretFailureIsFatalWithRemedy(t *testing.T) {
 // Tests beyond the brief.
 
 func TestUpDryRunTouchesNoFiles(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	var log bytes.Buffer
 	d.Log = &log
 	mcpBefore, _ := os.ReadFile(filepath.Join(c.Worktree, ".mcp.json"))
@@ -202,7 +223,7 @@ func TestUpDryRunTouchesNoFiles(t *testing.T) {
 	if calls := argvs(d.Run.(*execx.Fake)); len(calls) != 0 {
 		t.Errorf("dry run reached the runner: %v", calls)
 	}
-	for _, want := range []string{"would claim port 4100", "would write manifest", "would run: sudo -n /usr/local/bin/hades caddy-reload", "would run: sh -c mix setup"} {
+	for _, want := range []string{"would claim port 4100", "would write manifest", "would run: " + reloadCall, "would run: sh -c mix setup"} {
 		if !strings.Contains(log.String(), want) {
 			t.Errorf("log lacks %q:\n%s", want, log.String())
 		}
@@ -210,11 +231,11 @@ func TestUpDryRunTouchesNoFiles(t *testing.T) {
 }
 
 func TestUpRerunFailureKeepsEarlierState(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	if _, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true}); err != nil {
 		t.Fatal(err)
 	}
-	d.Run.(*execx.Fake).Handle = failWhen("sudo", 1)
+	d.Run.(*execx.Fake).Handle = failWhen("caddy", 1)
 	if _, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true}); err == nil {
 		t.Fatal("expected failure")
 	}
@@ -230,7 +251,7 @@ func TestUpRerunFailureKeepsEarlierState(t *testing.T) {
 }
 
 func TestUpVhostCreatedAndRolledBack(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	rmq := &fakeRabbit{}
 	d.Rabbit = rmq
 	d.Host.RabbitMQ = &config.RabbitMQ{AMQPURL: "amqp://u:p@127.0.0.1:5672"}
@@ -243,12 +264,12 @@ func TestUpVhostCreatedAndRolledBack(t *testing.T) {
 		t.Fatal(rmq.ensured)
 	}
 
-	d2, c2 := newServerDeps(t, "phoenix")
+	d2, c2 := newDeps(t, "phoenix")
 	rmq2 := &fakeRabbit{}
 	d2.Rabbit = rmq2
 	d2.Host.RabbitMQ = d.Host.RabbitMQ
 	writeFile(t, filepath.Join(c2.Root, "hades.toml"), "project = \"demo\"\n[services.rabbitmq]\nvhost = true\n")
-	d2.Run.(*execx.Fake).Handle = failWhen("sudo", 1)
+	d2.Run.(*execx.Fake).Handle = failWhen("caddy", 1)
 	_, err = Up(context.Background(), d2, c2, UpOptions{SkipSetup: true})
 	if err == nil || !strings.Contains(err.Error(), "delete vhost demo-feature-x") {
 		t.Fatal(err)
@@ -259,7 +280,7 @@ func TestUpVhostCreatedAndRolledBack(t *testing.T) {
 }
 
 func TestUpVhostRequestedWithoutRabbitIsSkipped(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	var log bytes.Buffer
 	d.Log = &log
 	writeFile(t, filepath.Join(c.Root, "hades.toml"), "project = \"demo\"\n[services.rabbitmq]\nvhost = true\n")
@@ -273,7 +294,7 @@ func TestUpVhostRequestedWithoutRabbitIsSkipped(t *testing.T) {
 }
 
 func TestUpDirenvAllowOnlyWhenInstalledAndNotFatal(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	if _, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -281,7 +302,7 @@ func TestUpDirenvAllowOnlyWhenInstalledAndNotFatal(t *testing.T) {
 		t.Fatal("direnv run although not installed")
 	}
 
-	d, c = newServerDeps(t, "phoenix")
+	d, c = newDeps(t, "phoenix")
 	var log bytes.Buffer
 	d.Log = &log
 	d.LookPath = func(name string) (string, error) { return "/usr/bin/" + name, nil }
@@ -295,7 +316,7 @@ func TestUpDirenvAllowOnlyWhenInstalledAndNotFatal(t *testing.T) {
 }
 
 func TestUpGitSecretRevealOnlyWithGitsecretDir(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	if slices.Contains(argvs(d.Run.(*execx.Fake)), "git secret reveal -f") {
 		t.Fatal("reveal without .gitsecret")
@@ -308,7 +329,7 @@ func TestUpGitSecretRevealOnlyWithGitsecretDir(t *testing.T) {
 }
 
 func TestUpPresetErrorNamesWorktreeAndClaimsNothing(t *testing.T) {
-	d, c := newServerDeps(t, "none")
+	d, c := newDeps(t, "none")
 	writeFile(t, filepath.Join(c.Worktree, "mix.exs"), "defmodule X do end\n")
 	_, err := Up(context.Background(), d, c, UpOptions{})
 	if err == nil || !strings.HasPrefix(err.Error(), c.Worktree+": ") {
@@ -321,7 +342,7 @@ func TestUpPresetErrorNamesWorktreeAndClaimsNothing(t *testing.T) {
 
 func TestUpSetupEnvComputedWinsOverProcessEnv(t *testing.T) {
 	t.Setenv("PORT", "1")
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	if _, err := Up(context.Background(), d, c, UpOptions{}); err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +353,7 @@ func TestUpSetupEnvComputedWinsOverProcessEnv(t *testing.T) {
 }
 
 func TestUpNonWebPresetGetsNoPortOrURL(t *testing.T) {
-	d, c := newServerDeps(t, "go")
+	d, c := newDeps(t, "go")
 	// Tidewave asked for, but it needs a port.
 	writeFile(t, filepath.Join(c.Root, "hades.toml"), "project = \"demo\"\n[mcp]\ntidewave = true\n")
 	for run := 1; run <= 2; run++ { // the re-run must not trip over Port 0
@@ -344,7 +365,7 @@ func TestUpNonWebPresetGetsNoPortOrURL(t *testing.T) {
 			t.Fatalf("run %d: url=%q %+v", run, out.URL, out.Manifest)
 		}
 	}
-	m, err := d.Reg.ByWorktree(c.Worktree, d.User.UID)
+	m, err := d.Reg.ByWorktree(c.Worktree)
 	if err != nil || m.Port != 0 || m.Label != "demo-feature-x" {
 		t.Fatalf("%+v %v", m, err)
 	}
@@ -355,7 +376,7 @@ func TestUpNonWebPresetGetsNoPortOrURL(t *testing.T) {
 		t.Fatal("site written for a non-web preset")
 	}
 	calls := argvs(d.Run.(*execx.Fake))
-	if slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "sudo") }) || !slices.Contains(calls, "sh -c go mod download") {
+	if slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "caddy") }) || !slices.Contains(calls, "sh -c go mod download") {
 		t.Fatalf("%v", calls)
 	}
 	env, _ := envfile.ReadEnvWorktree(filepath.Join(c.Worktree, ".env.worktree"))
@@ -392,7 +413,7 @@ func TestUpNonePresetTouchesNoRegistry(t *testing.T) {
 // only grow and a vhost no longer asked for stays recorded, so down still
 // releases everything the first run created.
 func TestUpRerunKeepsRecordedBasesAndVhost(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	rmq := &fakeRabbit{}
 	d.Rabbit = rmq
 	d.Host.RabbitMQ = &config.RabbitMQ{AMQPURL: "amqp://u:p@127.0.0.1:5672"}
@@ -442,7 +463,7 @@ func TestUnion(t *testing.T) {
 
 // project from hades.toml is a slug like the directory-derived one.
 func TestUpProjectFromConfigIsSlugged(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	writeFile(t, filepath.Join(c.Root, "hades.toml"), "project = \"My Demo App\"\n[env]\nP = \"{{project}}\"\n")
 	out, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	if err != nil {
@@ -452,7 +473,7 @@ func TestUpProjectFromConfigIsSlugged(t *testing.T) {
 		t.Fatalf("%+v %v", out.Manifest, toMap(out.Env))
 	}
 
-	d2, c2 := newServerDeps(t, "phoenix")
+	d2, c2 := newDeps(t, "phoenix")
 	long := "My Very Long Project Name That Exceeds Thirty Characters!!"
 	writeFile(t, filepath.Join(c2.Root, "hades.toml"), "project = \""+long+"\"\n")
 	if _, err := Up(context.Background(), d2, c2, UpOptions{SkipSetup: true}); err == nil || !strings.Contains(err.Error(), long) || !strings.Contains(err.Error(), "30 characters") {
@@ -464,5 +485,62 @@ func TestUpProjectFromConfigIsSlugged(t *testing.T) {
 	writeFile(t, filepath.Join(c2.Root, "hades.toml"), "project = \"!!!\"\n")
 	if _, err := Up(context.Background(), d2, c2, UpOptions{SkipSetup: true}); err == nil || !strings.Contains(err.Error(), `"!!!"`) {
 		t.Fatal(err)
+	}
+}
+
+// After a down that kept the manifest, the next up in the same worktree
+// claims a fresh port instead of failing on the released one.
+func TestUpAfterKeptManifest(t *testing.T) {
+	d, c := newDeps(t, "phoenix")
+	mustUp(t, d, c)
+	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x"}
+	d.PG.(*fakePG).failDrop = true
+	if _, err := Down(context.Background(), d, c, false); err != nil {
+		t.Fatal(err)
+	}
+	if m, err := d.Reg.ByLabel("demo-feature-x"); err != nil || m.Port != 0 {
+		t.Fatalf("%+v %v", m, err)
+	}
+	d.PG.(*fakePG).failDrop = false
+	out, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
+	if err != nil || out.Manifest.Port != 4100 {
+		t.Fatalf("%+v %v", out, err)
+	}
+	if owner, _ := d.Reg.PortOwner(4100); owner != c.Worktree {
+		t.Fatal(owner)
+	}
+}
+
+// A manifest written before kept manifests were rewritten may still record a
+// port whose link is gone or is another worktree's; up claims a new one.
+func TestUpReclaimsPortWhenRecordedLinkIsGoneOrForeign(t *testing.T) {
+	d, c := newDeps(t, "phoenix")
+	mustUp(t, d, c)
+	link := filepath.Join(d.Reg.PortsDir, "4100")
+	other := t.TempDir()
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(other, link); err != nil {
+		t.Fatal(err)
+	}
+	var log bytes.Buffer
+	d.Log = &log
+	out, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true})
+	if err != nil || out.Manifest.Port != 4101 || !strings.Contains(log.String(), "is now claimed by "+other+"; claiming a new port") {
+		t.Fatalf("%+v %v\n%s", out, err, log.String())
+	}
+	if m, _ := d.Reg.ByLabel("demo-feature-x"); m.Port != 4101 {
+		t.Fatal(m.Port)
+	}
+	site, _ := os.ReadFile(sitePath(t, d, "demo-feature-x"))
+	if string(site) != "import worktree demo-feature-x.example.test 4101\n" {
+		t.Fatalf("%q", site)
+	}
+	if err := os.Remove(filepath.Join(d.Reg.PortsDir, "4101")); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := Up(context.Background(), d, c, UpOptions{SkipSetup: true}); err != nil || out.Manifest.Port != 4101 {
+		t.Fatalf("link gone: %+v %v", out, err)
 	}
 }

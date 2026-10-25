@@ -12,8 +12,13 @@ import (
 	"strings"
 )
 
-// DefaultLabelTemplate is the hostname label used when none is configured.
-const DefaultLabelTemplate = "{{project}}-{{name}}"
+const (
+	// DefaultLabelTemplate is the hostname label without a domain.
+	DefaultLabelTemplate = "{{project}}-{{name}}"
+	// DomainLabelTemplate is the hostname label with a domain. It starts with
+	// the user, so every label of a user shares the prefix "<user>-".
+	DomainLabelTemplate = "{{user}}-{{project}}-{{name}}"
+)
 
 const (
 	maxSlug   = 30

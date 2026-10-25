@@ -1,49 +1,64 @@
 package config
 
 import (
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestLoadHostValid(t *testing.T) {
-	h, err := LoadHost("testdata/host.toml")
+// useHostPath points DefaultHostPath at path for the test.
+func useHostPath(t *testing.T, path string) {
+	prev := DefaultHostPath
+	DefaultHostPath = path
+	t.Cleanup(func() { DefaultHostPath = prev })
+}
+
+var laptopPostgres = Postgres{"127.0.0.1", 5432, "postgres", "postgres"}
+
+func TestLoadWithoutHostFileUsesLaptopDefaults(t *testing.T) {
+	useHostPath(t, filepath.Join(t.TempDir(), "host.toml"))
+	h, err := Load(env(nil), "/h")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if h.Domain != "example.test" || h.LabelTemplate != "{{project}}-{{name}}" || h.Postgres.Port != 5433 || h.RabbitMQ == nil {
+	if h.Domain != "" || h.LabelTemplate != "{{project}}-{{name}}" || h.Ports != (PortRange{4100, 4999}) ||
+		h.PortsDir != "/h/.local/state/hades/ports" || h.Postgres != laptopPostgres || h.RabbitMQ != nil {
 		t.Fatalf("%+v", h)
 	}
-	if h.Ports.Lo != 4100 || h.Ports.Hi != 4999 {
-		t.Fatal(h.Ports)
-	}
 }
 
-func TestLoadHostMissingIsErrNoHost(t *testing.T) {
-	_, err := LoadHost(filepath.Join(t.TempDir(), "none.toml"))
-	if !errors.Is(err, ErrNoHost) {
+func TestLoadOverlaysHostFile(t *testing.T) {
+	useHostPath(t, "testdata/host.toml")
+	h, err := Load(env(nil), "/h")
+	if err != nil {
 		t.Fatal(err)
 	}
+	rmq := RabbitMQ{ManagementURL: "http://127.0.0.1:15672", AMQPURL: "amqp://guest:guest@127.0.0.1:5672", User: "guest", Password: "guest"}
+	if h.Domain != "example.test" || h.ChromePath != "/opt/hades/chrome/chrome" || h.RabbitMQ == nil || *h.RabbitMQ != rmq ||
+		h.LabelTemplate != "{{user}}-{{project}}-{{name}}" || h.Ports != (PortRange{4100, 4999}) ||
+		h.PortsDir != "/h/.local/state/hades/ports" || h.Postgres != laptopPostgres {
+		t.Fatalf("%+v", h)
+	}
 }
 
-func TestLoadHostRequiresKeys(t *testing.T) {
+func TestLoadRejectsUnknownKeys(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "host.toml")
-	os.WriteFile(p, []byte("domain = \"x\"\n"), 0o644)
-	_, err := LoadHost(p)
-	if err == nil || !strings.Contains(err.Error(), "port_range") {
+	os.WriteFile(p, []byte("ports_dir = \"/srv/hades/ports\"\n"), 0o644)
+	if _, err := Load(env(map[string]string{"HADES_HOST_CONFIG": p}), "/h"); err == nil || !strings.Contains(err.Error(), "ports_dir") {
 		t.Fatal(err)
+	}
+}
+
+func TestLoadExplicitMissingFileFails(t *testing.T) {
+	if _, err := Load(env(map[string]string{"HADES_HOST_CONFIG": "/nonexistent"}), "/h"); err == nil {
+		t.Fatal("missing explicit host config accepted")
 	}
 }
 
 func TestLaptopDefaults(t *testing.T) {
-	h, err := LaptopHost("/home/u", func(k string) string {
-		if k == "HADES_DB_PORT" {
-			return "5444"
-		}
-		return ""
-	})
+	useHostPath(t, filepath.Join(t.TempDir(), "host.toml"))
+	h, err := Load(env(map[string]string{"HADES_DB_PORT": "5444"}), "/home/u")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,29 +72,11 @@ func env(m map[string]string) func(string) string {
 }
 
 func TestLaptopRejectsBadValues(t *testing.T) {
-	if _, err := LaptopHost("/h", env(map[string]string{"HADES_DB_PORT": "abc"})); err == nil {
+	if _, err := Load(env(map[string]string{"HADES_DB_PORT": "abc"}), "/h"); err == nil {
 		t.Fatal("bad HADES_DB_PORT accepted")
 	}
-	if _, err := LaptopHost("/h", env(map[string]string{"HADES_PORT_RANGE": "5000-4000"})); err == nil {
+	if _, err := Load(env(map[string]string{"HADES_PORT_RANGE": "5000-4000"}), "/h"); err == nil {
 		t.Fatal("bad HADES_PORT_RANGE accepted")
-	}
-	if _, _, err := Load(env(map[string]string{"HADES_HOST_CONFIG": "laptop", "HADES_PORT_RANGE": "x"}), "/h"); err == nil {
-		t.Fatal("Load accepted bad HADES_PORT_RANGE")
-	}
-}
-
-func TestLoadLaptopOverride(t *testing.T) {
-	_, mode, err := Load(env(map[string]string{"HADES_HOST_CONFIG": "laptop"}), "/home/u")
-	if err != nil || mode != Laptop {
-		t.Fatal(mode, err)
-	}
-}
-
-func TestLoadExplicitMissingPathIsError(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "nope.toml")
-	_, _, err := Load(env(map[string]string{"HADES_HOST_CONFIG": p}), "/home/u")
-	if !errors.Is(err, ErrNoHost) || !strings.Contains(err.Error(), p) {
-		t.Fatal(err)
 	}
 }
 

@@ -16,10 +16,7 @@ import (
 	"github.com/quotedo/hades/internal/naming"
 )
 
-// Manifest records everything hades set up for one worktree. The registry is
-// shared by every developer of a host, so a manifest read from disk is
-// untrusted input: User and UID are informational, and decisions use the
-// owner of the file it was read from (OwnerUID).
+// Manifest records everything hades set up for one worktree.
 type Manifest struct {
 	HadesVersion string    `toml:"hades_version"`
 	CreatedAt    time.Time `toml:"created_at"`
@@ -37,24 +34,7 @@ type Manifest struct {
 	DBBases      []string  `toml:"db_bases"` // database names minus DBSuffix
 	Vhost        string    `toml:"vhost"`
 	ADE          string    `toml:"ade"`
-
-	// Set when read from disk, never encoded.
-	path     string
-	ownerUID int
-	fromDisk bool
 }
-
-// OwnerUID is the uid owning the file m was read from, or -1 for a manifest
-// that was not read from disk.
-func (m *Manifest) OwnerUID() int {
-	if !m.fromDisk {
-		return -1
-	}
-	return m.ownerUID
-}
-
-// Path is the file m was read from; empty for a manifest not read from disk.
-func (m *Manifest) Path() string { return m.path }
 
 // Problem is a file in the manifests directory that All skipped, and why.
 type Problem struct {
@@ -73,8 +53,6 @@ func (r *Registry) ManifestPath(label string) (string, error) {
 }
 
 // WriteManifest atomically writes m to ManifestsDir/<label>.toml (mode 0644).
-// Rewriting a manifest read from disk keeps its file owner, so a manifest
-// root rewrites (gc) stays its owner's.
 func (r *Registry) WriteManifest(m *Manifest) error {
 	path, err := r.ManifestPath(m.Label)
 	if err != nil {
@@ -96,12 +74,6 @@ func (r *Registry) WriteManifest(m *Manifest) error {
 		tmp.Close()
 		return err
 	}
-	if m.fromDisk && m.ownerUID != os.Geteuid() {
-		if err := tmp.Chown(m.ownerUID, -1); err != nil {
-			tmp.Close()
-			return fmt.Errorf("keep owner uid %d of %s: %w", m.ownerUID, path, err)
-		}
-	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
@@ -111,8 +83,8 @@ func (r *Registry) WriteManifest(m *Manifest) error {
 // errNotRegular marks a manifest path that is not a regular file.
 var errNotRegular = errors.New("not a regular file")
 
-// readManifest reads the regular file at path without following a symlink
-// and records the file's owner. A missing file is fs.ErrNotExist.
+// readManifest reads the regular file at path without following a symlink. A
+// missing file is fs.ErrNotExist.
 func readManifest(path string) (*Manifest, error) {
 	// O_NOFOLLOW refuses a symlink; O_NONBLOCK keeps a FIFO from blocking
 	// the open.
@@ -128,15 +100,10 @@ func readManifest(path string) (*Manifest, error) {
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("manifest %s: %w", path, errNotRegular)
 	}
-	uid, err := ownerOf(fi, path)
-	if err != nil {
-		return nil, err
-	}
 	var m Manifest
 	if _, err := toml.NewDecoder(f).Decode(&m); err != nil {
 		return nil, &parseError{path: path, err: err}
 	}
-	m.path, m.ownerUID, m.fromDisk = path, uid, true
 	return &m, nil
 }
 
@@ -230,20 +197,15 @@ func canonical(p string) string {
 	return filepath.Clean(p)
 }
 
-// ByWorktree finds the manifest owned by uid whose worktree is path (symlinks
-// resolved); uid 0 considers every owner. A manifest of another user naming
-// this path is not a match, so nobody can shadow another user's worktree.
+// ByWorktree finds the manifest whose worktree is path (symlinks resolved).
 // Unreadable entries are skipped as in All.
-func (r *Registry) ByWorktree(path string, uid int) (*Manifest, error) {
+func (r *Registry) ByWorktree(path string) (*Manifest, error) {
 	all, _, err := r.All()
 	if err != nil {
 		return nil, err
 	}
 	want := canonical(path)
 	for _, m := range all {
-		if uid != 0 && m.OwnerUID() != uid {
-			continue
-		}
 		if canonical(m.Worktree) == want {
 			return m, nil
 		}
@@ -258,12 +220,4 @@ func (r *Registry) RemoveManifest(label string) error {
 		return err
 	}
 	return os.Remove(path)
-}
-
-func ownerOf(fi fs.FileInfo, path string) (int, error) {
-	st, ok := fi.Sys().(*syscall.Stat_t)
-	if !ok {
-		return 0, fmt.Errorf("%s: no owner information on this platform", path)
-	}
-	return int(st.Uid), nil
 }

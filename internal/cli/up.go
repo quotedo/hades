@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/quotedo/hades/internal/caddy"
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/execx"
 	"github.com/quotedo/hades/internal/lifecycle"
@@ -75,8 +74,8 @@ func resolveWorktree(bg context.Context, ctx *Context) (wtctx.Context, error) {
 }
 
 // newDeps builds the lifecycle dependencies from the current user and the
-// host config. PG is always set (a host always has Postgres settings, server
-// or laptop defaults); Rabbit only when the host has a RabbitMQ block.
+// host config. PG is always set (Postgres has laptop defaults); Rabbit only
+// when the host config has a RabbitMQ block.
 func newDeps(ctx *Context) (lifecycle.Deps, error) {
 	user, err := lifecycle.CurrentUser()
 	if err != nil {
@@ -85,23 +84,19 @@ func newDeps(ctx *Context) (lifecycle.Deps, error) {
 	if h := ctx.Getenv("HOME"); h != "" {
 		user.Home = h
 	}
-	host, mode, err := config.Load(ctx.Getenv, user.Home)
+	host, err := config.Load(ctx.Getenv, user.Home)
 	if err != nil {
 		return lifecycle.Deps{}, err
 	}
-	reg := registry.New(host)
-	reg.Shared = mode == config.Server
 	d := lifecycle.Deps{
 		Host: host,
-		Mode: mode,
-		Reg:  reg,
-		Run:  &execx.Real{Prepend: execx.ToolPrepend(user.Home, host.ToolPaths)},
+		Reg:  registry.New(host),
+		Run:  &execx.Real{Prepend: execx.ToolPrepend(user.Home)},
 		// The client connects only when a command lists or drops databases.
 		PG:      &pg.Client{DSN: pg.DSN(host.Postgres, "postgres")},
 		User:    user,
 		Version: version.Version,
 		Log:     ctx.Stderr,
-		Bin:     caddy.BinaryPath(ctx.Getenv),
 	}
 	if r := host.RabbitMQ; r != nil {
 		d.Rabbit = &rabbit.Client{ManagementURL: r.ManagementURL, User: r.User, Password: r.Password, HTTP: &http.Client{Timeout: 30 * time.Second}}

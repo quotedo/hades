@@ -11,7 +11,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/lifecycle"
 	"github.com/quotedo/hades/internal/registry"
 )
@@ -60,11 +59,10 @@ func ls(ctx *Context, args []string) int {
 }
 
 // allManifests returns every readable manifest and the entries the registry
-// skipped. On a laptop a registry that was never created is empty; on a
-// server a missing directory is an error.
+// skipped. A registry that was never created is empty.
 func allManifests(d lifecycle.Deps) ([]*registry.Manifest, []registry.Problem, error) {
 	all, problems, err := d.Reg.All()
-	if err != nil && d.Mode == config.Laptop && errors.Is(err, fs.ErrNotExist) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil, nil
 	}
 	return all, problems, err
