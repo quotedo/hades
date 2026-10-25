@@ -57,7 +57,7 @@
 
 # hades-keys (host role) is the one writer of authorized_keys, here and hourly from its timer:
 # the static keys, then the GitHub keys (none for an empty login). A failed fetch keeps the file
-# and fails this task.
+# and fails the assert after it.
 - name: Write the static SSH keys
   ansible.builtin.copy:
     content: "{% for key in user.ssh_keys | default([]) %}{{ key }}\n{% endfor %}"
@@ -76,7 +76,13 @@
   ansible.builtin.command: "{{ hades_bin_dir }}/hades-keys {{ user.name }}"
   register: user_keys
   changed_when: "'updated' in user_keys.stdout"
-  failed_when: "user_keys.rc != 0 or 'write failed' in user_keys.stdout or ('fetch failed' in user_keys.stdout and user.github is defined)"
+  failed_when: "user_keys.rc != 0 or 'write failed' in user_keys.stdout"
+
+- name: Assert GitHub served keys for the login
+  ansible.builtin.assert:
+    that: user.github is not defined or 'fetch failed' not in user_keys.stdout | default('')
+    fail_msg: "GitHub served no keys for {{ user.github }} (dev user {{ user.name }}): check the GitHub login"
+    quiet: true
 
 # A locked or unset password only: the role never touches a set one. Generated on the host and
 # printed once below; nothing stores it. A missed print: `passwd -l <name>`, then apply again.

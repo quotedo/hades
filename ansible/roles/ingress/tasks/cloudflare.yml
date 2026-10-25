@@ -16,7 +16,7 @@
 
 # no_log: every request carries the API token in its Authorization header, and the tunnel's
 # create and token responses carry the tunnel token. Failures the operator can fix are asserted
-# in the open; for any other failure, repeat the request with curl to read Cloudflare's error.
+# in the open; for any other failure the rescue shows Cloudflare's errors, never the request.
 - name: Cloudflare tunnel, DNS record and Access application
   delegate_to: localhost
   become: false
@@ -84,7 +84,9 @@
     - name: Assert the zone exists
       ansible.builtin.assert:
         that: ingress_cf_zones.json.result | length == 1
-        fail_msg: the API token sees no Cloudflare zone named hades_domain ({{ hades_domain }})
+        fail_msg: >-
+          the API token sees no Cloudflare zone named hades_domain ({{ hades_domain }}): check the
+          zone name and the token's Zone permissions
         quiet: true
       no_log: false
 
@@ -212,3 +214,10 @@
       when:
         - ingress_cf_app != {}
         - ingress_cf_policy == {} or ingress_cf_policy.include | symmetric_difference(ingress_access_include) != []
+  rescue:
+    - name: Fail with Cloudflare's errors
+      ansible.builtin.fail:
+        msg: >-
+          {{ ansible_failed_task.name }}: {{ ansible_failed_result.json.errors | default([]) | to_json
+             if ansible_failed_result.json is defined else ansible_failed_result.msg | default('failed') }}
+      no_log: false
