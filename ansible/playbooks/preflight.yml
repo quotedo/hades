@@ -4,10 +4,14 @@
   hosts: dev_servers
   gather_facts: false
   vars:
-    # Each user is combined onto {'state': 'present', 'ades': []}, so one without state counts as
-    # present.
+    # user_present (roles/user/defaults): each present user combined onto its defaults.
     hades_present_users: >-
-      {{ [{'state': 'present', 'ades': []}] | product(dev_users | default([])) | map('combine') | selectattr('state', 'eq', 'present') | list }}
+      {% set ns = namespace(users=[]) %}{% for u in dev_users | default([])
+      if u.state | default('present') == 'present' %}{% set ns.users = ns.users + [{'state': 'present', 'ades': ['paseo'], 'paseo_port': u.uid + 10000,
+      'orca_port': u.uid + 20000, 'repos': dev_repos | default([])} | combine(u)] %}{% endfor %}{{ ns.users }}
+    hades_ade_ports: >-
+      {{ hades_present_users | selectattr('ades', 'contains', 'paseo') | map(attribute='paseo_port') | list
+         + hades_present_users | selectattr('ades', 'contains', 'orca') | map(attribute='orca_port') | list }}
   tasks:
     - name: Assert hades_domain is a non-empty string
       ansible.builtin.assert:
@@ -106,9 +110,17 @@
       vars:
         hades_ports: >-
           {{ ([dev_pg_port] if dev_pg_port is defined else []) + ([caddy_port] if caddy_port is defined else [])
-             + hades_present_users | selectattr('ades', 'contains', 'paseo') | map(attribute='paseo_port', default='') | list
-             + hades_present_users | selectattr('ades', 'contains', 'orca') | map(attribute='orca_port', default='') | list
-             + (protected | default({})).blocked_ports | default([]) }}
+             + hades_ade_ports + (protected | default({})).blocked_ports | default([]) }}
+
+    # paseo_port defaults to uid + 10000, orca_port to uid + 20000; explicit values may collide.
+    - name: Assert the ADE ports of present dev users are unique
+      ansible.builtin.assert:
+        that:
+          - hades_ade_ports | unique | length == hades_ade_ports | length
+        fail_msg: >-
+          Present dev_users share an ADE port:
+          {% for port in hades_ade_ports | unique if hades_ade_ports.count(port) > 1 %}{{ port }} {% endfor %}
+        quiet: true
 
     # dev_services selects the compose services; postgres_settings fills the dev cluster's conf.d file.
     - name: Assert dev_services is a list of known services and postgres_settings a mapping

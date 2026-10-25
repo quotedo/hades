@@ -6,7 +6,7 @@
 # Caddy creates mode 0200 for its own account keeps local users from rewriting the config.
 ingress_caddy_api_socket: /var/lib/caddy/api.sock
 # Orca pairs over Tailscale.
-tailscale_enabled: "{{ user_present | map(attribute='ades', default=[]) | flatten is contains('orca') }}"
+tailscale_enabled: "{{ user_present | map(attribute='ades') | flatten is contains('orca') }}"
 
 # Cloudflare, managed through the API by cloudflare.yml.
 ingress_cloudflare_api: https://api.cloudflare.com/client/v4

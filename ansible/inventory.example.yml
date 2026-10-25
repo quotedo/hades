@@ -13,7 +13,9 @@ dev_servers:
       access_allow: []
       # cloudflare_team: hades-<DOMAIN with dots replaced by dashes>  # the default; Zero Trust team name when the role creates it
       dev_services: [rabbitmq, localstack]
-      tailscale_enabled: false  # true when a dev user lists orca
+      # tailscale_enabled: false  # the default is true exactly when a present dev user lists orca
+      # Clone URLs every developer gets; hades-onboard clones them after the GitHub login.
+      dev_repos: []
       vpn_enabled: false
       vpn_conf_env: AMNEZIA_WG_CONF_BOX  # the environment variable holding this host's AmneziaWG config
       vpn_probe: ""  # "<IP>:<PORT>", one intranet TCP endpoint verify must reach
@@ -37,12 +39,13 @@ dev_servers:
       dev_users:
         - name: dev1
           uid: 2001
-          state: present
-          admin: false  # the box's one administrator: group sudo, password required
-          email: <EMAIL>  # their Cloudflare Access login
           github: <GITHUB_LOGIN>  # authorized_keys follows https://github.com/<login>.keys, refreshed hourly
-          ssh_keys: []  # static public keys, added to the GitHub ones
-          ades: [paseo]
-          paseo_port: 6767
-          gpg_key: true
-          repos: []
+          email: <EMAIL>  # their Cloudflare Access login
+          # ades: [paseo]  # the default; paseo, orca or both
+          # paseo_port: 12001  # the default: uid + 10000
+          # orca_port: 22001  # the default: uid + 20000
+          # admin: false  # true: the box's one administrator, group sudo, password required
+          # ssh_keys: []  # static public keys, added to the GitHub ones
+          # gpg_key: false  # true: a signing key generated on the box
+          # repos: []  # the default: dev_repos
+          # state: present  # absent offboards the developer

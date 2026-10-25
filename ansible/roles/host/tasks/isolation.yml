@@ -25,13 +25,12 @@
           + ([rabbitmq_amqp_port, rabbitmq_management_port, rabbitmq_mqtt_port] if 'rabbitmq' in dev_services else [])
           + ([localstack_port] if 'localstack' in dev_services else [])
           + ([redis_port] if 'redis' in dev_services else [])
-          + (user_present | selectattr('paseo_port', 'defined') | map(attribute='paseo_port') | list)
-          + (user_present | selectattr('orca_port', 'defined') | map(attribute='orca_port') | list))
+          + (user_present | selectattr('ades', 'contains', 'paseo') | map(attribute='paseo_port') | list)
+          + (user_present | selectattr('ades', 'contains', 'orca') | map(attribute='orca_port') | list))
          | map('string') | unique | sort }}
     # Orca binds every address; the input chain keeps these to loopback and Tailscale.
     host_isolation_orca_ports: >-
-      {{ user_present | selectattr('ades', 'defined') | selectattr('ades', 'contains', 'orca')
-         | selectattr('orca_port', 'defined') | map(attribute='orca_port') | map('int') | unique | sort }}
+      {{ user_present | selectattr('ades', 'contains', 'orca') | map(attribute='orca_port') | map('int') | unique | sort }}
     host_isolation_blocked_ports: >-
       {{ (protected | default({})).blocked_ports | default([]) | map('int') | unique | sort }}
 

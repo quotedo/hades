@@ -86,7 +86,9 @@
       register: host_test_probe_dev
       changed_when: false
       failed_when: false
-      loop: "{{ [host_test_probe_port, dev_pg_port, caddy_port] + user_present | selectattr('paseo_port', 'defined') | map(attribute='paseo_port') | list }}"
+      loop: >-
+        {{ [host_test_probe_port, dev_pg_port, caddy_port]
+           + user_present | selectattr('ades', 'contains', 'paseo') | map(attribute='paseo_port') | list }}
 
     - name: Connect to the listener as root
       ansible.builtin.command: nc -z -w 3 {{ hades_loopback_address }} {{ host_test_probe_port }}
