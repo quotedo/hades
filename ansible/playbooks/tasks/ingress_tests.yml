@@ -33,8 +33,8 @@
     ingress_test_bind: " {{ hades_loopback_address | regex_escape }}:{{ caddy_port }} "
     ingress_test_port_lines: "{{ ingress_test_ss.stdout_lines | select('search', ':' ~ caddy_port ~ ' ') | list }}"
 
-# Through the host's Caddy: unknown names, the plain one and each developer's (which their VM's
-# Caddy answers), redirect to the apex.
+# Through the host's Caddy: unknown names redirect to the apex. A developer's names reach their
+# VM's Caddy, whose own redirect comes back with the Via header the host's proxy adds.
 - name: Request unknown names through Caddy
   ansible.builtin.uri:
     url: http://{{ hades_loopback_address }}:{{ caddy_port }}/
@@ -45,34 +45,36 @@
   register: ingress_test_unknown
   loop: "{{ ['nothing'] + dev_present | map(attribute='name') | product(['-nothing']) | map('join') | list }}"
 
-- name: Assert unknown names redirect to the apex
+- name: Assert unknown names redirect to the apex, a developer's through their VM
   ansible.builtin.assert:
-    that: ingress_test_unknown.results | map(attribute='location') | unique == ['https://' ~ hades_domain]
-    fail_msg: "Location: {{ ingress_test_unknown.results | map(attribute='location') | unique }}"
+    that:
+      - ingress_test_unknown.results | map(attribute='location') | unique == ['https://' ~ hades_domain]
+      - ingress_test_unknown.results | map(attribute='via', default='') | list == [''] + ['1.1 Caddy'] * (dev_present | length)
+    fail_msg: >-
+      Location, Via: {{ ingress_test_unknown.results | map(attribute='location')
+                        | zip(ingress_test_unknown.results | map(attribute='via', default='')) }}
     quiet: true
 
-- name: Assert a gated path without the Access header is refused
+# A developer's dev paths: refused without the Access token and with the token and another email;
+# with the token and their own email they reach the VM.
+- name: Request each developer's dev path without the token, with another email and with theirs
   ansible.builtin.uri:
     url: http://{{ hades_loopback_address }}:{{ caddy_port }}/dev/x
-    headers:
-      Host: nothing.{{ hades_domain }}
-    status_code: 403
-
-# The VM's 302 looks like the host's own, so each VM's Caddy stops for one request: a 502 shows
-# the host sent that developer's names to that VM.
-- name: Request each developer's names with their VM's Caddy stopped
-  ansible.builtin.shell: >-
-    incus exec {{ item.name }} -- systemctl stop caddy;
-    curl -s -o /dev/null -w '%{http_code}' -H 'Host: {{ item.name }}-nothing.{{ hades_domain }}'
-    http://{{ hades_loopback_address }}:{{ caddy_port }}/;
-    incus exec {{ item.name }} -- systemctl start caddy
-  become: true
-  register: ingress_test_stopped
-  changed_when: false
-  failed_when: ingress_test_stopped.rc != 0 or ingress_test_stopped.stdout != '502'
-  loop: "{{ dev_present }}"
+    headers: >-
+      {{ {'Host': item.0.name ~ '-nothing.' ~ hades_domain} | combine({} if item.1 == 'none' else
+         {'Cf-Access-Jwt-Assertion': 'probe', 'Cf-Access-Authenticated-User-Email': ('' if item.1 == 'own' else 'x') ~ item.0.email}) }}
+    status_code: "{{ 302 if item.1 == 'own' else 403 }}"
+    follow_redirects: none
+  register: ingress_test_gate
+  loop: "{{ dev_present | selectattr('email', 'defined') | product(['none', 'other', 'own']) | list }}"
   loop_control:
-    label: "{{ item.name }}"
+    label: "{{ item.0.name }} {{ item.1 }}"
+
+- name: Assert a developer's own email reaches their VM
+  ansible.builtin.assert:
+    that: ingress_test_gate.results | selectattr('item.1', 'eq', 'own') | map(attribute='via', default='') | reject('eq', '1.1 Caddy') | list == []
+    fail_msg: "{{ ingress_test_gate.results | selectattr('item.1', 'eq', 'own') | map(attribute='via', default='no Via') | list }}"
+    quiet: true
 
 # Skipped without Cloudflare credentials unless the tag is requested: a host with no zone runs no
 # tunnel.
