@@ -1,6 +1,6 @@
 ---
 # Per present dev user. The login checks go through `runuser -l`, so they see what a login sees:
-# ~/.profile, ~/.bashrc and /etc/profile.d. Not `sudo -i`: sudo-rs hands its command to the
+# ~/.profile and ~/.bashrc. Not `sudo -i`: sudo-rs hands its command to the
 # login shell without quoting it.
 - name: Read the passwd entries
   ansible.builtin.getent:

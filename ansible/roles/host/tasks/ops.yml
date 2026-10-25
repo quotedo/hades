@@ -1,6 +1,5 @@
 ---
-# Ops: gc, backup and keys timers, hades-status, hades-onboard, the journal cap and the
-# login environment of group hades.
+# Ops: gc, backup and keys timers, hades-status, hades-onboard and the journal cap.
 - name: Install hades-backup, hades-status, hades-keys and hades-onboard
   ansible.builtin.template:
     src: "{{ item }}.sh.j2"
@@ -41,9 +40,3 @@
     dest: /etc/systemd/journald.conf.d/hades.conf
     mode: "0644"
   notify: journald restart
-
-- name: Set the login environment of group hades
-  ansible.builtin.template:
-    src: profile-hades.sh.j2
-    dest: /etc/profile.d/hades.sh
-    mode: "0644"

@@ -3,7 +3,7 @@
 Description={{ ade | capitalize }} for {{ user.name }}
 
 [Service]
-# User units do not read /etc/profile.d, so the login environment is repeated here.
+# User units do not read env.sh, so the login environment is repeated here.
 Environment=PATH=%h/.local/bin:{{ mise_shims }}:/usr/local/bin:/usr/bin:/bin
 Environment="ERL_FLAGS={{ erl_flags }}" CHROME_PATH={{ chrome_root }}/chrome MIX_HOME=%h/.mix MIX_ARCHIVES=%h/.mix/archives DISABLE_AUTOUPDATER=1
 {# The version comments make a host-level bump rewrite the unit, which restarts it. #}

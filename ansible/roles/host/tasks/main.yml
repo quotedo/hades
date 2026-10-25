@@ -73,7 +73,7 @@
 - name: Hades CLI, host config and sudoers
   ansible.builtin.import_tasks: hades.yml
 
-- name: Gc and backup timers, status, journal cap, login environment
+- name: Gc, backup and keys timers, status and the journal cap
   ansible.builtin.import_tasks: ops.yml
 
 - name: Chrome for Testing

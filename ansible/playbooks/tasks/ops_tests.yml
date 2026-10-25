@@ -67,33 +67,6 @@
     fail_msg: "hades-status exited {{ host_test_status.rc }}: {{ host_test_status.stderr | default('') }}"
     quiet: true
 
-- name: Source the profile script as an account outside group hades
-  ansible.builtin.shell: . /etc/profile.d/hades.sh && echo "${CHROME_PATH-unset} ${ERL_FLAGS-unset}"
-  become: true
-  register: host_test_profile_root
-  changed_when: false
-  failed_when: false
-
-- name: Read the profile script
-  ansible.builtin.slurp:
-    src: /etc/profile.d/hades.sh
-  register: host_test_profile
-  failed_when: false
-
-- name: Assert the profile script exports CHROME_PATH and ERL_FLAGS only for group hades
-  ansible.builtin.assert:
-    that:
-      - host_test_profile_root.rc == 0
-      - host_test_profile_root.stdout == 'unset unset'
-      - ('export CHROME_PATH=' ~ (chrome_root ~ '/chrome') | quote) in host_test_profile_text
-      - ('export ERL_FLAGS=' ~ erl_flags | quote) in host_test_profile_text
-    fail_msg: >-
-      /etc/profile.d/hades.sh must export CHROME_PATH and ERL_FLAGS for group {{ hades_group }}
-      only; sourced as root it printed: {{ host_test_profile_root.stdout | default('') }}
-    quiet: true
-  vars:
-    host_test_profile_text: "{{ host_test_profile.content | default('') | b64decode }}"
-
 - name: Stat Chrome for Testing
   ansible.builtin.stat:
     path: "{{ chrome_root }}/chrome"
