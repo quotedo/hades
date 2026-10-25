@@ -168,15 +168,12 @@ func LaptopHost(home string, getenv func(string) string) (*Host, error) {
 	}, nil
 }
 
-// LaptopOverride is the HADES_HOST_CONFIG value that forces laptop mode.
-const LaptopOverride = "laptop"
-
 // Load reads the host config. Laptop defaults apply when
 // HADES_HOST_CONFIG=laptop, or when HADES_HOST_CONFIG is unset and the default
 // host config is absent. An explicit path that does not exist is an error.
 func Load(getenv func(string) string, home string) (*Host, Mode, error) {
 	explicit := getenv("HADES_HOST_CONFIG")
-	if explicit != LaptopOverride {
+	if explicit != "laptop" {
 		h, err := LoadHost(HostPath(getenv))
 		if err == nil {
 			return h, Server, nil

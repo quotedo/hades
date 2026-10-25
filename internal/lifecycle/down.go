@@ -9,15 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/quotedo/hades/internal/caddy"
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/envfile"
 	"github.com/quotedo/hades/internal/execx"
-	"github.com/quotedo/hades/internal/naming"
 	"github.com/quotedo/hades/internal/pg"
 	"github.com/quotedo/hades/internal/registry"
 	"github.com/quotedo/hades/internal/wtctx"
@@ -98,9 +95,6 @@ func ownManifest(d Deps, c wtctx.Context) (m *registry.Manifest, owner bool, r S
 	m, err := d.Reg.ByWorktree(c.Worktree, d.User.UID)
 	if errors.Is(err, registry.ErrNoManifest) {
 		r.Skipped, r.Reason = true, err.Error()
-		if p, ok := ignoredManifestFor(d, c); ok {
-			r.Reason += "; " + p.String()
-		}
 		return nil, false, r
 	}
 	if err != nil {
@@ -123,48 +117,6 @@ func ownManifest(d Deps, c wtctx.Context) (m *registry.Manifest, owner bool, r S
 		return m, true, r
 	}
 	return nil, false, r
-}
-
-// ignoredManifestFor finds a manifests directory entry the registry ignored
-// that is probably this worktree's: its file is named for the label up would
-// derive, or it mentions the worktree path. It only improves down's message.
-func ignoredManifestFor(d Deps, c wtctx.Context) (registry.Problem, bool) {
-	_, problems, err := d.Reg.All()
-	if err != nil || len(problems) == 0 {
-		return registry.Problem{}, false
-	}
-	label := ""
-	if cfg, err := config.LoadProject(c.Worktree, c.Root); err == nil {
-		if project, err := projectSlug(cfg, c.Root); err == nil {
-			label, _ = naming.Label(d.Host.LabelTemplate, naming.Vars{Project: project, User: d.User.Name, Name: c.Name})
-		}
-	}
-	quoted := strconv.Quote(c.Worktree)
-	for _, p := range problems {
-		if label != "" && filepath.Base(p.Path) == label+".toml" {
-			return p, true
-		}
-		if mentionsPath(p.Path, quoted) {
-			return p, true
-		}
-	}
-	return registry.Problem{}, false
-}
-
-// mentionsPath reports whether the regular file at path contains needle in
-// its first 64 KiB. Symlinks are not followed.
-func mentionsPath(path, needle string) bool {
-	fi, err := os.Lstat(path)
-	if err != nil || !fi.Mode().IsRegular() {
-		return false
-	}
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, 64<<10))
-	return err == nil && strings.Contains(string(data), needle)
 }
 
 // teardown runs the project's teardown commands from the worktree, with the

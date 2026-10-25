@@ -5,15 +5,12 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/fs"
 	"os"
 
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/lifecycle"
 	"github.com/quotedo/hades/internal/registry"
 )
-
-var errRootOnServer = errors.New("must run as root on a server")
 
 // geteuid is os.Geteuid; tests replace it.
 var geteuid = os.Geteuid
@@ -27,17 +24,12 @@ func gc(ctx *Context, args []string) int {
 	if !parseArgs(ctx, fs, "usage: hades gc [--dry-run] [--owner USER]", args) {
 		return 2
 	}
-	// Checked before loading the host config, which a non-root user may not
-	// be allowed to read, and again after, in case the file appeared since.
-	if serverHost(ctx.Getenv) && geteuid() != 0 {
-		return ctx.fail("gc", errRootOnServer)
-	}
 	d, err := newDeps(ctx)
 	if err != nil {
 		return ctx.fail("gc", err)
 	}
 	if d.Mode == config.Server && geteuid() != 0 {
-		return ctx.fail("gc", errRootOnServer)
+		return ctx.fail("gc", errors.New("must run as root on a server"))
 	}
 	if d.Mode == config.Laptop {
 		if err := d.Reg.Check(); errors.Is(err, registry.ErrRegistryMissing) {
@@ -65,15 +57,4 @@ func gc(ctx *Context, args []string) int {
 		return 1
 	}
 	return 0
-}
-
-// serverHost reports whether config.Load would use a server host config,
-// without reading it: the file exists (or cannot even be checked) and laptop
-// mode is not forced. A missing explicit path is left to config.Load to report.
-func serverHost(getenv func(string) string) bool {
-	if getenv("HADES_HOST_CONFIG") == config.LaptopOverride {
-		return false
-	}
-	_, err := os.Stat(config.HostPath(getenv))
-	return !errors.Is(err, fs.ErrNotExist)
 }

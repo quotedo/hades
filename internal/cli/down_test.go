@@ -106,15 +106,6 @@ password = "postgres"
 	if code := Main([]string{"gc"}, &out, &errb, getenv); code != 1 || errb.String() != "hades: gc: must run as root on a server\n" {
 		t.Fatalf("code=%d err=%q", code, errb.String())
 	}
-	// A host config the user cannot read still gets the root message, not a
-	// permission error.
-	if err := os.Chmod(hostFile, 0); err != nil {
-		t.Fatal(err)
-	}
-	errb.Reset()
-	if code := Main([]string{"gc"}, &out, &errb, getenv); code != 1 || errb.String() != "hades: gc: must run as root on a server\n" {
-		t.Fatalf("code=%d err=%q", code, errb.String())
-	}
 }
 
 func TestGCOnLaptopReleasesOnlyTheCurrentUsersVanishedWorktrees(t *testing.T) {

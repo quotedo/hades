@@ -77,7 +77,6 @@ type upRun struct {
 	project     string
 	label       string
 	vhost       string             // the vhost this run asks for; the manifest may also record an earlier one
-	noRegistry  bool               // dry run on a laptop whose registry does not exist yet
 	reclaimPort bool               // the earlier run's port is no longer this worktree's
 	existing    *registry.Manifest // this worktree's manifest from an earlier up
 	m           *registry.Manifest
@@ -183,20 +182,10 @@ func (u *upRun) detect() error {
 // prepareRegistry checks the provisioned registry on a server and creates the
 // per-user one on a laptop.
 func (u *upRun) prepareRegistry() error {
-	reg := u.d.Reg
 	if u.d.Mode == config.Server {
-		return reg.Check()
+		return u.d.Reg.Check()
 	}
-	if !u.opt.DryRun {
-		return reg.EnsureDirs(0o700)
-	}
-	err := reg.Check()
-	if errors.Is(err, registry.ErrRegistryMissing) {
-		u.would("create the registry directories %s, %s, %s", reg.PortsDir, reg.SitesDir, reg.ManifestsDir)
-		u.noRegistry = true
-		return nil
-	}
-	return err
+	return u.d.Reg.EnsureDirs(0o700)
 }
 
 // identify is step 1b: find an earlier manifest of this worktree (identity is
@@ -204,17 +193,15 @@ func (u *upRun) prepareRegistry() error {
 // make sure nobody else holds it.
 func (u *upRun) identify() error {
 	d, c := u.d, u.c
-	if !u.noRegistry {
-		m, err := d.Reg.ByWorktree(c.Worktree, d.User.UID)
-		switch {
-		case err == nil:
-			if err := u.checkOwned(m); err != nil {
-				return err
-			}
-			u.existing = m
-		case !errors.Is(err, registry.ErrNoManifest):
+	m, err := d.Reg.ByWorktree(c.Worktree, d.User.UID)
+	switch {
+	case err == nil:
+		if err := u.checkOwned(m); err != nil {
 			return err
 		}
+		u.existing = m
+	case !errors.Is(err, registry.ErrNoManifest):
+		return err
 	}
 
 	project, err := projectSlug(u.cfg, c.Root)
@@ -232,10 +219,7 @@ func (u *upRun) identify() error {
 		return fmt.Errorf("label for worktree name %q: %w", c.Name, err)
 	}
 	u.label = label
-	if u.noRegistry {
-		return nil
-	}
-	m, err := d.Reg.ByLabel(label)
+	m, err = d.Reg.ByLabel(label)
 	switch {
 	case err == nil:
 		if err := u.checkOwned(m); err != nil {

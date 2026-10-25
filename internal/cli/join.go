@@ -140,9 +140,6 @@ func githubKey(bg context.Context, run execx.Runner, pubPath, pub, alias string)
 		res, err := run.Run(bg, execx.Cmd{Argv: append([]string{"gh"}, args...)})
 		return strings.TrimSpace(res.Stdout), err
 	}
-	if _, err := gh("auth", "status"); err != nil {
-		return "", errors.New("gh is not installed or not logged in")
-	}
 	login, err := gh("api", "user", "--jq", ".login")
 	if err != nil {
 		return "", err
