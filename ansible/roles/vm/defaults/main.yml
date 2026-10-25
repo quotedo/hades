@@ -24,8 +24,9 @@ hex_repos: []
 
 # Set on Ubuntu's main cluster with ALTER SYSTEM. Throwaway dev data: durability is traded for speed.
 postgres_settings:
-  # 8GB, or a quarter of a smaller VM's memory.
-  shared_buffers: "{{ [8192, ansible_facts.memtotal_mb // 4] | min }}MB"
+  # 8GB, or a quarter of a smaller VM's memory in 256MB steps: MemTotal drifting by a few MB (a new
+  # guest kernel) changes it, and restarts Postgres, only across a step.
+  shared_buffers: "{{ [8192, ansible_facts.memtotal_mb // 4 // 256 * 256] | min }}MB"
   work_mem: 16MB
   # Every worktree's app pool and test partitions share this one cluster.
   max_connections: 1000

@@ -40,3 +40,4 @@
     state: present
     update_cache: true
     cache_valid_time: "{{ 0 if vm_repos is changed else 3600 }}"
+    install_recommends: false

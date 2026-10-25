@@ -91,8 +91,7 @@ orca_root: "{{ hades_share }}/orca"
 orca_packages: [libnotify4, libsecret-1-0, libxss1, libxtst6, xdg-utils]
 host_orca_wanted: "{{ dev_present | selectattr('ades', 'contains', 'orca') | list | length > 0 }}"
 
-# The loopback address Caddy, Paseo, Postgres and the shared services bind; worktree apps listen
-# there too.
+# The loopback address the host's Caddy binds, and the one each VM publishes its dev services on.
 hades_loopback_address: 127.0.0.1
 
 # Inside the VMs.

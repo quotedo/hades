@@ -69,7 +69,7 @@
       - vm_test.tailscaled_active.stdout == 'active'
       - vm_test.login.rc == 0
       - vm_test.login.stdout == ''
-      - (hades_bin_dir ~ ':' ~ mise_shims ~ ':') in vm_test.env.stdout_lines[0]
+      - vm_test.env.stdout_lines[0] is match((hades_bin_dir ~ ':' ~ mise_shims ~ ':') | regex_escape)
       - vm_test.env.stdout_lines[1:] == vm_test_env
       - vm_test.repos.stdout_lines == dev.repos
       - vm_test.sudo.rc == 0
