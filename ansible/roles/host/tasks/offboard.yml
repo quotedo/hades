@@ -34,6 +34,15 @@
       loop_control:
         label: "{{ item.name }}"
 
+    # The VM leaves the developer's tailnet; one that never joined it fails here, harmlessly.
+    - name: Log each VM out of Tailscale
+      ansible.builtin.command: incus exec {{ item.name }} -- timeout 60 tailscale logout
+      changed_when: true
+      failed_when: false
+      loop: "{{ host_offboard }}"
+      loop_control:
+        label: "{{ item.name }}"
+
     # tar's status 1 means a file changed while it was read; the listing proves the archive whole.
     - name: Archive each home from inside its VM
       ansible.builtin.shell: >-
