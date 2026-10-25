@@ -81,7 +81,7 @@
 - name: Assert GitHub served keys for the login
   ansible.builtin.assert:
     that: user.github is not defined or 'fetch failed' not in user_keys.stdout | default('')
-    fail_msg: "GitHub served no keys for {{ user.github }} (dev user {{ user.name }}): check the GitHub login"
+    fail_msg: "GitHub served no keys for {{ user.github | default('') }} (dev user {{ user.name }}): check the GitHub login"
     quiet: true
 
 # A locked or unset password only: the role never touches a set one. Generated on the host and
