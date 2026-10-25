@@ -153,8 +153,10 @@ func join(ctx *Context, args []string) int {
 				key = k
 			}
 		}
-		if ghUser == "" || ghUser != ghLogin {
+		if ghUser == "" {
 			fmt.Fprintln(ctx.Stderr, "github: gh is not logged in; your key was not added. Run gh auth login, then hades join again, or add the key below at https://github.com/settings/keys.")
+		} else if ghUser != ghLogin {
+			fmt.Fprintf(ctx.Stderr, "github: gh is logged in as %s, not %s; your key was not added. Add the key below at https://github.com/settings/keys.\n", ghUser, ghLogin)
 		} else if res, err := run.Run(bg, execx.Cmd{Argv: []string{"gh", "ssh-key", "add", key.file, "--title", "hades " + alias}}); err == nil {
 			onGitHub = true
 		} else if strings.Contains(res.Stdout+res.Stderr, "admin:public_key") {
