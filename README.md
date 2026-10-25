@@ -1,6 +1,7 @@
 # Hades
 
-A shared Linux dev server for agentic development, and the CLI that runs on it.
+Host for ADEs: a shared Linux dev server for agentic development environments, and the CLI that
+runs on it.
 
 Each developer has their own account, their own agentic development environment (ADE:
 [Paseo](https://getpaseo.com) or [Orca](https://github.com/stablyai/orca)) running as a daemon, and
