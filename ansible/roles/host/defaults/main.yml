@@ -97,9 +97,6 @@ host_chrome_packages:
 backup_dir: /var/backups/hades
 host_backup_keep: 7
 journald_system_max_use: 2G
-# Fallbacks for hades-status when /etc/login.defs has no UID_MIN/UID_MAX.
-host_uid_min: 1000
-host_uid_max: 60000
 
 # The loopback address Caddy, Paseo, Postgres and the shared services bind; worktree apps listen
 # there too.

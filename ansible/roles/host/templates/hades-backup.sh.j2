@@ -26,14 +26,10 @@ for user in $members; do
   fi
 
   present=()
-  found=0
   for p in "${paths[@]}"; do
-    if [ -e "$home/$p" ]; then
-      present+=("$p")
-      found=$((found + 1))
-    fi
+    [ -e "$home/$p" ] && present+=("$p")
   done
-  if [ "$found" -eq 0 ]; then
+  if [ -z "${present[*]}" ]; then
     echo "hades-backup: $user: nothing to back up"
     continue
   fi
