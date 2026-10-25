@@ -31,6 +31,8 @@
 
         # The name starts the developer's web labels (<name>-<project>-<worktree>), so no dash. The
         # uid gives the VM's address; 1000 is the image's own account, 65535 the bridge's broadcast.
+        # memory and disk are sizes in Incus' units, memory also a share of the box's memory; cpus
+        # is a thread count.
         - name: Assert every dev_users entry is well formed
           ansible.builtin.assert:
             that:
@@ -47,10 +49,14 @@
               - (item.ades | default([])) is subset(['paseo', 'orca'])
               - (item.ssh_keys | default([])) is sequence
               - (item.ssh_keys | default([])) is not string
+              - (item.memory | default(vm_memory) | string) is match('^[1-9][0-9]*(%|B|[kMGTPE]B|[KMGTPE]iB)?$')
+              - (item.disk | default(vm_disk) | string) is match('^[1-9][0-9]*(B|[kMGTPE]B|[KMGTPE]iB)?$')
+              - (item.cpus | default(vm_cpus) | string) is match('^[1-9][0-9]*$')
             fail_msg: >-
               dev_users entry {{ item.name | default('<unnamed>') }} is invalid: name must match
               ^[a-z][a-z0-9]*$, uid must be an integer from 1001 to 65534, state must be present or
-              absent, ades must be a list drawn from paseo and orca, ssh_keys a list
+              absent, ades must be a list drawn from paseo and orca, ssh_keys a list, memory and disk
+              sizes such as 28GiB or 200GB (memory also a share such as 50%), cpus a thread count
             quiet: true
           loop: "{{ dev_users }}"
           loop_control:
@@ -197,6 +203,15 @@
                   %}{% set bits = [16, (cidr.split('/') + ['32'])[1] | int] | min %}{% if (a[0] * 256 + a[1]) // 2 ** (16 - bits)
                   == (s[0] * 256 + s[1]) // 2 ** (16 - bits) %}{% set ns.hits = ns.hits + [cidr] %}{% endif %}{% endfor %}{{ ns.hits }}
 
+        # vm_hosts.yml reaches the VMs through ansible_user@ansible_host; the VMs' root takes
+        # ansible_user's SSH keys.
+        - name: Assert ansible_host and ansible_user are set
+          ansible.builtin.assert:
+            that: hostvars[inventory_hostname][item] | default('') | string | length > 0
+            fail_msg: "{{ item }} must be set for {{ inventory_hostname }}: the box's address and its sudo account"
+            quiet: true
+          loop: [ansible_host, ansible_user]
+
         # Last, so that each fixture above fails on its own check on any machine. A percentage is
         # that share of the host's memory.
         - name: Assert the present VMs' memory leaves the host 8 GiB
@@ -214,3 +229,18 @@
               {% set ns = namespace(sum=0) %}{% for m in dev_present | map(attribute='memory') | map('string')
               %}{% set ns.sum = ns.sum + ((m[:-1] | float / 100 * hades_host_bytes | float) if m.endswith('%')
               else (m | regex_replace('iB$', 'B') | human_to_bytes)) %}{% endfor %}{{ ns.sum }}
+
+        # A VM's disk takes room in the storage pool only as the VM writes to it: disks that add up
+        # to more than the filesystem under the pool are allowed, with a warning.
+        - name: Warn when the present VMs' disks add up to more than the storage pool's filesystem
+          ansible.builtin.debug:
+            msg: >-
+              warning: the present VMs' disks add up to {{ (hades_disk_bytes | float / 1024**3) | round(1) }} GiB,
+              more than the {{ (hades_pool_fs.size_total / 1024**3) | round(1) }} GiB of the filesystem at
+              {{ hades_pool_fs.mount }}, which holds the storage pool
+          when: hades_pool_fs.size_total | default(0) > 0 and hades_disk_bytes | float > hades_pool_fs.size_total
+          vars:
+            hades_pool_fs: >-
+              {{ ansible_facts.mounts | default([]) | selectattr('mount', 'in', ['/', '/var', '/var/lib', '/var/lib/incus',
+                 '/var/lib/incus/storage-pools', '/var/lib/incus/storage-pools/default']) | sort(attribute='mount') | last | default({}) }}
+            hades_disk_bytes: "{{ dev_present | map(attribute='disk') | map('string') | map('regex_replace', 'iB$', 'B') | map('human_to_bytes') | sum }}"
