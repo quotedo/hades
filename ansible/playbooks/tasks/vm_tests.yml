@@ -69,7 +69,11 @@
       - vm_test.tailscaled_active.stdout == 'active'
       - vm_test.login.rc == 0
       - vm_test.login.stdout == ''
-      - vm_test.env.stdout_lines[0] is match((hades_bin_dir ~ ':' ~ mise_shims ~ ':') | regex_escape)
+      # The share's bin, then the shims, ahead of the system's; the developer's own dirs may come first.
+      - hades_bin_dir in vm_test_path
+      - vm_test_path[vm_test_path.index(hades_bin_dir) + 1:][:1] == [mise_shims]
+      - vm_test_path.index(hades_bin_dir) < (vm_test_path + ['/usr/local/bin']).index('/usr/local/bin')
+      - vm_test_path.index(hades_bin_dir) < (vm_test_path + ['/usr/bin']).index('/usr/bin')
       - vm_test.env.stdout_lines[1:] == vm_test_env
       - vm_test.repos.stdout_lines == dev.repos
       - vm_test.sudo.rc == 0
@@ -93,6 +97,7 @@
     vm_test_results: "{{ vm_test_root.results + vm_test_dev.results }}"
     vm_test: "{{ dict(vm_test_results | map(attribute='item.key') | zip(vm_test_results)) }}"
     vm_test_pw: "{{ (vm_test.passwd.stdout ~ '::::::').split(':') }}"
+    vm_test_path: "{{ (vm_test.env.stdout_lines[:1] | join).split(':') }}"
     # ERL_FLAGS, CHROME_PATH, MIX_HOME, HOME, then where hades and node resolve.
     vm_test_env: >-
       {{ [erl_flags, chrome_root ~ '/chrome', vm_test_pw[5] ~ '/.mix', vm_test_pw[5], hades_bin_dir ~ '/hades', mise_shims ~ '/node'] }}
