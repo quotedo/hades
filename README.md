@@ -12,6 +12,19 @@ a laptop. The Ansible collection `quotedo.hades` builds and runs the server.
 A worktree's URL is `https://<label>.<domain>`; the [CLI reference](docs/cli.md#commands) defines
 the label.
 
+## What you get
+
+- One Linux account per developer, with its own ADE daemon, CPU and memory slice, and git worktrees.
+- Per worktree: a port, database names, a RabbitMQ vhost, `.env.worktree` and `.envrc` (direnv), written by `hades up` and removed by `hades down`.
+- A public URL per worktree, `https://<label>.<domain>`, through a Cloudflare tunnel and behind Cloudflare Access: email one-time PIN, 30-day sessions, an allow-list you edit in the inventory.
+- MCP entries written into the worktree's agent configs: Tidewave at the worktree's port for Phoenix projects, chrome-devtools with a Chrome for Testing on the box.
+- A shared toolchain store (Erlang, Elixir, Node, Python, Go, kubectl, gh) pinned to exact versions in the inventory; the agent CLIs (Claude Code, Codex, Paseo, Orca) installed once for everyone.
+- Dev Postgres, RabbitMQ and LocalStack on loopback, with nftables rules so no account reaches another account's ports.
+- Developer onboarding in one laptop command, `hades join <host>`: SSH keys from GitHub, refreshed hourly; a first-login script that logs the developer into GitHub and the agent CLIs and prints the Paseo Desktop address.
+- Offboarding by `state: absent`: the account, its worktrees, ports and databases go; the home is archived.
+- Optional: an intranet VPN (AmneziaWG) for the whole box, Tailscale for Orca pairing and node sharing.
+- The same CLI works alone on a laptop against a local Postgres, without the server.
+
 ```mermaid
 flowchart LR
   laptop["Developer laptop<br/>Paseo or Orca app, browser"]
