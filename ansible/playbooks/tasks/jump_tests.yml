@@ -1,8 +1,35 @@
 ---
 # The jump account. Each key in its authorized_keys only opens a tunnel to its developer's VM's SSH
-# and prints that VM's address. The controller probes offer only the test developer's key,
-# HADES_TEST_KEY; the test developer is the one whose ssh_keys hold its public key.
-- name: Probe the jump account
+# and prints `<login>@<address>`. The probes after the first two offer only the test developer's
+# key, HADES_TEST_KEY; the test developer is the one whose ssh_keys hold its public key.
+- name: Read the jump account, the hades-keys timer and the jump account's authorized_keys
+  ansible.builtin.shell: >-
+    getent passwd hades > /dev/null && systemctl is-enabled hades-keys.timer && systemctl is-active hades-keys.timer &&
+    stat -c '%U %a' /var/lib/hades-jump /var/lib/hades-jump/.ssh {{ jump_test_keys }} && cat {{ jump_test_keys }}
+  become: true
+  register: jump_test_account
+  changed_when: false
+  vars:
+    jump_test_keys: /var/lib/hades-jump/.ssh/authorized_keys
+
+- name: Assert root owns the jump keys and each one only tunnels to its VM's SSH and prints the login and address
+  ansible.builtin.assert:
+    that:
+      - jump_test_account.stdout_lines[:5] == ['enabled', 'active', 'root 755', 'root 755', 'root 644']
+      - jump_test_lines | length > 0
+      - jump_test_lines | reject('match', '^restrict,port-forwarding,permitopen="([0-9.]+):22",command="echo [a-z][a-z0-9]*@\\1" \\S+ \\S+') | list == []
+    fail_msg: "{{ jump_test_account.stdout }}"
+    quiet: true
+  vars:
+    jump_test_lines: "{{ jump_test_account.stdout_lines[5:] }}"
+
+- name: Say why the probes with the test developer's key are skipped
+  ansible.builtin.debug:
+    msg: "skipped: the probes with the test developer's key need HADES_TEST_KEY, the path of its private key"
+  when: lookup('ansible.builtin.env', 'HADES_TEST_KEY') | length == 0
+
+- name: Probe the jump account with the test developer's key
+  when: lookup('ansible.builtin.env', 'HADES_TEST_KEY') | length > 0
   vars:
     jump_test_dev: >-
       {{ dev_present | selectattr('ssh_keys', 'defined') | selectattr('ssh_keys', 'contains',
@@ -10,28 +37,7 @@
     jump_test_ssh: >-
       ssh -i {{ lookup('ansible.builtin.env', 'HADES_TEST_KEY') }} -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes
       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
-    jump_test_keys: /var/lib/hades-jump/.ssh/authorized_keys
   block:
-    # Then the timer's state, the owner and mode of the home, its .ssh and the file, and the file.
-    - name: Read the jump account, the hades-keys timer and the jump account's authorized_keys
-      ansible.builtin.shell: >-
-        getent passwd hades > /dev/null && systemctl is-enabled hades-keys.timer && systemctl is-active hades-keys.timer &&
-        stat -c '%U %a' /var/lib/hades-jump /var/lib/hades-jump/.ssh {{ jump_test_keys }} && cat {{ jump_test_keys }}
-      become: true
-      register: jump_test_account
-      changed_when: false
-
-    - name: Assert root owns the jump keys and each one only tunnels to its VM's SSH and prints the address
-      ansible.builtin.assert:
-        that:
-          - jump_test_account.stdout_lines[:5] == ['enabled', 'active', 'root 755', 'root 755', 'root 644']
-          - jump_test_lines | length > 0
-          - jump_test_lines | reject('match', '^restrict,port-forwarding,permitopen="([0-9.]+):22",command="echo \\1" \\S+ \\S+') | list == []
-        fail_msg: "{{ jump_test_account.stdout }}"
-        quiet: true
-      vars:
-        jump_test_lines: "{{ jump_test_account.stdout_lines[5:] }}"
-
     # The real list with the test developer's GitHub login replaced by one that does not exist; then
     # the test developer's authorized_keys inside their VM.
     - name: Run hades-keys with a GitHub login that does not exist and read the VM's authorized_keys
@@ -51,15 +57,13 @@
         quiet: true
 
     - name: Probe the jump account from the controller with the test developer's key
-      ansible.builtin.command: "{{ item.value }}"
+      ansible.builtin.command: "{{ jump_test_probes[item] }}"
       delegate_to: localhost
       become: false
       register: jump_test_ssh_probes
       changed_when: false
       failed_when: false
-      loop: "{{ jump_test_probes | dict2items }}"
-      loop_control:
-        label: "{{ item.key }}"
+      loop: [address, other, socket, remote, tunnel, shell]
       vars:
         jump_test_other: >-
           {{ dev_present | map(attribute='address') | reject('eq', jump_test_dev.address) | first | default(vm_subnet | regex_replace('0/16$', '1')) }}
@@ -76,17 +80,18 @@
     # Every account may connect to the journal's socket, so only a refused forward fails (sshd
     # reports a refusal as `connect failed: open failed`).
     # ssh -tt gives up on a refused terminal, mostly before the address arrives.
-    - name: Assert the jump prints the test VM's address, tunnels only to its SSH and runs no shell
+    - name: Assert the jump prints the test developer's login and VM address, tunnels only to its SSH and runs no shell
       ansible.builtin.assert:
         that:
-          - jump_test_p.address.rc == 0 and jump_test_p.address.stdout == jump_test_dev.address
+          - jump_test_p.address.rc == 0 and jump_test_p.address.stdout == jump_test_login
           - jump_test_p.other.rc != 0 and jump_test_p.other.stderr is search('administratively prohibited')
           - jump_test_p.socket.rc != 0 and jump_test_p.socket.stderr is search('open failed')
           - jump_test_p.remote.rc != 0 and jump_test_p.remote.stderr is search('remote port forwarding failed')
           - jump_test_p.tunnel.rc == 0
           - jump_test_p.shell.stderr is search('PTY allocation request failed')
-          - jump_test_p.shell.stdout | trim in ['', jump_test_dev.address]
+          - jump_test_p.shell.stdout | trim in ['', jump_test_login]
         fail_msg: "{% for k, r in jump_test_p.items() %}{{ k }}: rc {{ r.rc }} {{ r.stdout }} {{ r.stderr }}; {% endfor %}"
         quiet: true
       vars:
-        jump_test_p: "{{ dict(jump_test_ssh_probes.results | map(attribute='item.key') | zip(jump_test_ssh_probes.results)) }}"
+        jump_test_login: "{{ jump_test_dev.name }}@{{ jump_test_dev.address }}"
+        jump_test_p: "{{ dict(jump_test_ssh_probes.results | map(attribute='item') | zip(jump_test_ssh_probes.results)) }}"

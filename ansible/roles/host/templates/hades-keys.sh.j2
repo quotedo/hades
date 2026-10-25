@@ -3,10 +3,11 @@
 # hades-keys [LOGIN]: write the jump account's authorized_keys and, inside each developer's VM, the
 # developer's own. The list holds `login:github:address` lines; a developer's keys are their static
 # keys, then their GitHub keys (none for an empty login). In the jump file each key may only open a
-# tunnel to the developer's VM's SSH, and a session prints the VM's address. A key already written
-# for an earlier login is left out of both files. A failed or empty fetch keeps the developer's jump
-# lines and VM file; with LOGIN, the other developers' jump lines are kept as they are. The VM file
-# is written as the developer, so a link in their home reaches nothing they could not write.
+# tunnel to the developer's VM's SSH, and a session prints `<login>@<address>`. A key already
+# written for an earlier login is left out of both files. A failed fetch keeps the developer's jump
+# lines and VM file; an empty one is an empty set of GitHub keys. With LOGIN, the other developers'
+# jump lines are kept as they are. The VM file is written as the developer, so a link in their home
+# reaches nothing they could not write.
 set -u
 [ $# -le 1 ] || { echo "usage: hades-keys [LOGIN]" >&2; exit 2; }
 want=${1:-}
@@ -14,7 +15,8 @@ list=${HADES_KEYS_FILE:-{{ hades_config_dir }}/github-logins}
 jump=/var/lib/hades-jump/.ssh/authorized_keys
 [ -f "$list" ] || exit 0
 # One run at a time: the VMs' applies call it side by side, and the timer may too.
-exec 9> /run/hades-keys.lock && flock 9
+exec 9> /run/hades-keys.lock
+flock -w 600 9 || { echo "locked, skipped"; exit 0; }
 
 out= seen=
 while IFS=: read -r login github address; do
@@ -23,8 +25,7 @@ while IFS=: read -r login github address; do
   keys=$(grep -sF "permitopen=\"$address:22\"" "$jump" | cut -d' ' -f3-) vm=
   if [ -z "$want" ] || [ "$login" = "$want" ]; then
     gh=
-    [ -z "$github" ] || gh=$(curl -fsS --max-time 20 "https://github.com/$github.keys") || gh=
-    if [ -n "$github" ] && [ -z "$gh" ]; then
+    if [ -n "$github" ] && ! gh=$(curl -fsS --max-time 20 "https://github.com/$github.keys"); then
       echo "$login: fetch failed, kept"
     else
       keys=$(cat "{{ hades_config_dir }}/ssh-keys/$login" 2>/dev/null; [ -z "$gh" ] || printf '%s\n' "$gh") vm=1
@@ -43,7 +44,7 @@ while IFS=: read -r login github address; do
 "
     mine="$mine$key
 "
-    out="${out}restrict,port-forwarding,permitopen=\"$address:22\",command=\"echo $address\" $key
+    out="${out}restrict,port-forwarding,permitopen=\"$address:22\",command=\"echo $login@$address\" $key
 "
   done <<EOF
 $keys
