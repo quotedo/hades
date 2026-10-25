@@ -111,6 +111,9 @@ func Up(ctx context.Context, d Deps, c wtctx.Context, opt UpOptions) (*Outcome, 
 		return nil, err
 	}
 	u.plan()
+	if err := u.checkDatabases(); err != nil {
+		return nil, err
+	}
 	if u.existing != nil && u.existing.Port != 0 {
 		if err := u.checkPortOwned(u.existing.Port); err != nil {
 			return nil, err
@@ -300,6 +303,23 @@ func union(a, b []string) []string {
 func (u *upRun) checkOwned(m *registry.Manifest) error {
 	if !sameDir(m.Worktree, u.c.Worktree) {
 		return &ErrLabelTaken{Label: m.Label, User: m.User, Worktree: m.Worktree}
+	}
+	return nil
+}
+
+// checkDatabases fails when another worktree's manifest records one of this
+// run's databases (the same base and suffix): down there would drop it.
+func (u *upRun) checkDatabases() error {
+	all, _, err := u.d.Reg.All()
+	if err != nil {
+		return err
+	}
+	for _, m := range all {
+		for _, b := range u.m.DBBases {
+			if m.Label != u.label && m.DBSuffix == u.m.DBSuffix && slices.Contains(m.DBBases, b) {
+				return fmt.Errorf("database %s%s is %s's (%s); give this worktree another name: hades --name NAME up", b, m.DBSuffix, m.Label, m.Worktree)
+			}
+		}
 	}
 	return nil
 }

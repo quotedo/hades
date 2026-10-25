@@ -85,6 +85,23 @@ func TestUpLabelTakenByOtherWorktree(t *testing.T) {
 	}
 }
 
+// Another project with the same Mix app and worktree name would share the
+// databases, and down there would drop them here.
+func TestUpRefusesDatabasesOfAnotherWorktree(t *testing.T) {
+	d, c := newDeps(t, "phoenix")
+	mustUp(t, d, c)
+	other := secondWorktree(t, "phoenix")
+	other.Name = c.Name
+	writeFile(t, filepath.Join(other.Root, "hades.toml"), "project = \"shop\"\n")
+	_, err := Up(context.Background(), d, other, UpOptions{SkipSetup: true})
+	if err == nil || !strings.Contains(err.Error(), "database demo_dev_alice_feature_x is demo-feature-x's") {
+		t.Fatal(err)
+	}
+	if all, _, _ := d.Reg.All(); len(all) != 1 {
+		t.Fatal(len(all))
+	}
+}
+
 func TestUpRollsBackWhenCaddyReloadFails(t *testing.T) {
 	d, c := newDeps(t, "phoenix")
 	d.Run.(*execx.Fake).Handle = failWhen("caddy", 1)

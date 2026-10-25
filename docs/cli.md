@@ -98,6 +98,8 @@ at most 63 characters (the name is shortened to fit). The name, label and hostna
 first `up` and recorded in the manifest; a renamed branch keeps them. `down` then `up` gives a fresh
 label. A label held by the manifest of another worktree path fails `up` with
 `label <l> taken by <user> for <path>`.
+A database another worktree's manifest records (the same Mix app and worktree name in two projects)
+fails `up` with `database <db> is <label>'s (<path>); give this worktree another name: hades --name NAME up`.
 
 ## `join`
 
