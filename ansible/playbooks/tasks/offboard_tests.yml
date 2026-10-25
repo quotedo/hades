@@ -21,7 +21,7 @@
 - name: Find what each absent dev user left in the hades config directory
   ansible.builtin.shell: >-
     grep -s '^{{ item.name }}:' github-logins;
-    ls -d ssh-keys/{{ item.name }} admin-password.{{ item.name }} 2>/dev/null; true
+    ls -d ssh-keys/{{ item.name }} 2>/dev/null; true
   args:
     chdir: "{{ hades_config_dir }}"
   become: true

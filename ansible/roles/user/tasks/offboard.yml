@@ -36,7 +36,7 @@
   changed_when: true
 
 # The role created all of them for this user.
-- name: Remove the per-uid resource policy, static keys and administrator password
+- name: Remove the per-uid resource policy and static keys
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
@@ -44,7 +44,6 @@
     - /etc/systemd/system/user-{{ user_uid }}.slice.d
     - /etc/systemd/system/user@{{ user_uid }}.service.d
     - "{{ hades_config_dir }}/ssh-keys/{{ user.name }}"
-    - "{{ hades_config_dir }}/admin-password.{{ user.name }}"
 
 - name: Remove the user from the GitHub login list
   ansible.builtin.lineinfile:

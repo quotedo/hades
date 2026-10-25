@@ -100,8 +100,8 @@
   changed_when: "'updated' in user_keys.stdout"
   failed_when: "user_keys.rc != 0 or 'write failed' in user_keys.stdout or ('fetch failed' in user_keys.stdout and user.github is defined)"
 
-# A locked or unset password only: the role never touches a set one. Generated on the host,
-# printed once below, then readable by root alone.
+# A locked or unset password only: the role never touches a set one. Generated on the host and
+# printed once below; nothing stores it. A missed print: `passwd -l <name>`, then apply again.
 - name: Read the administrator's password status
   ansible.builtin.command: passwd -S {{ user.name }}
   register: user_passwd
@@ -111,9 +111,8 @@
 
 - name: Generate the administrator's password
   ansible.builtin.shell: |
-    set -e; umask 077
+    set -e
     pw=$(openssl rand -base64 18)
-    printf '%s\n' "$pw" > {{ (hades_config_dir ~ '/admin-password.' ~ user.name) | quote }}
     chpasswd <<EOF
     {{ user.name }}:$pw
     EOF
@@ -125,7 +124,7 @@
 
 - name: Show the administrator's password, once
   ansible.builtin.debug:
-    msg: "{{ user.name }}'s sudo password, stored only in {{ hades_config_dir }}/admin-password.{{ user.name }}: {{ user_admin_password.stdout }}"
+    msg: "{{ user.name }}'s sudo password, shown only now: {{ user_admin_password.stdout }}"
   when: user_admin_password is changed and not ansible_check_mode
 
 - name: Source the shell environment from ~/.bashrc
