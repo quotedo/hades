@@ -9,23 +9,25 @@
 | darwin/arm64, linux/amd64 | tested in CI |
 | darwin/amd64, linux/arm64 | built, untested |
 
-The repository and its releases are private: the download needs `gh` logged in with read access to
-the repository. Replace `<os>_<arch>` with `darwin_arm64`, `darwin_amd64`, `linux_amd64` or
-`linux_arm64`. `~/.local/bin` must be on your `PATH`.
+The repository and its [releases](https://github.com/quotedo/hades/releases) are public. Set `v` to
+the release to install and replace `<os>_<arch>` with `darwin_arm64`, `darwin_amd64`, `linux_amd64`
+or `linux_arm64`. `~/.local/bin` must be on your `PATH`.
 
 ```sh
-gh release download --repo quotedo/hades --pattern '*_<os>_<arch>.tar.gz' --pattern checksums.txt
-shasum -a 256 --check --ignore-missing checksums.txt
-tar -xzf hades_*_<os>_<arch>.tar.gz hades hades-port
+v=0.2.0
+base=https://github.com/quotedo/hades/releases/download/v$v
+curl -fsSLO "$base/hades_${v}_<os>_<arch>.tar.gz"
+curl -fsSLO "$base/checksums.txt"
+shasum -a 256 -c --ignore-missing checksums.txt
+tar -xzf "hades_${v}_<os>_<arch>.tar.gz" hades hades-port
 install -d ~/.local/bin && install -m 0755 hades hades-port ~/.local/bin/
 hades version
 ```
 
-Without a tag, `gh release download` takes the latest release. From source (Go 1.25+, with git
-credentials for the private repository):
+From source (Go 1.25+):
 
 ```sh
-GOPRIVATE=github.com/quotedo/* go install github.com/quotedo/hades/cmd/...@latest   # both binaries into $(go env GOPATH)/bin
+go install github.com/quotedo/hades/cmd/...@latest   # both binaries into $(go env GOPATH)/bin
 ```
 
 In a hades VM, `hades` and `hades-port` are on `PATH` from the box's read-only share; see the [server reference](server.md#vms).
