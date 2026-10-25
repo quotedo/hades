@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,20 +21,12 @@ import (
 	"github.com/quotedo/hades/internal/wtctx"
 )
 
-const upUsage = "usage: hades up [--dry-run] [--skip-setup]"
-
 // up turns the resolved worktree into a running dev environment.
 func up(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("up", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
 	dryRun := fs.Bool("dry-run", false, "print what would be done; change nothing")
 	skipSetup := fs.Bool("skip-setup", false, "skip the project's setup commands")
-	if err := fs.Parse(args); err != nil {
-		fmt.Fprintf(ctx.Stderr, "up: %v\n%s\n", err, upUsage)
-		return 2
-	}
-	if fs.NArg() > 0 {
-		fmt.Fprintf(ctx.Stderr, "up: unexpected arguments %q\n%s\n", fs.Args(), upUsage)
+	if !parseArgs(ctx, fs, "usage: hades up [--dry-run] [--skip-setup]", args) {
 		return 2
 	}
 	opt := lifecycle.UpOptions{DryRun: *dryRun, SkipSetup: *skipSetup}
@@ -45,8 +36,7 @@ func up(ctx *Context, args []string) int {
 	defer stop()
 	out, err := runUp(bg, ctx, opt)
 	if err != nil {
-		fmt.Fprintf(ctx.Stderr, "hades: up: %v\n", err)
-		return 1
+		return ctx.fail("up", err)
 	}
 	if out.Manifest == nil { // nothing to do; Up said so
 		return 0
@@ -81,11 +71,7 @@ func resolveWorktree(bg context.Context, ctx *Context) (wtctx.Context, error) {
 	if err != nil {
 		return wtctx.Context{}, err
 	}
-	return wtctx.Resolve(bg, wtFlags(ctx.Flags), ctx.Getenv, cwd, &execx.Real{})
-}
-
-func wtFlags(g Globals) wtctx.Flags {
-	return wtctx.Flags{Root: g.Root, Worktree: g.Worktree, Name: g.Name, ADE: g.ADE}
+	return wtctx.Resolve(bg, ctx.Flags.Flags, ctx.Getenv, cwd, &execx.Real{})
 }
 
 // newDeps builds the lifecycle dependencies from the current user and the

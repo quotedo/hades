@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -48,15 +47,8 @@ func loadReloadConfig(euid int, getenv func(string) string, path string) (*confi
 // through sudo, so it takes no input beyond --check and the host config.
 func caddyReload(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("caddy-reload", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
 	check := fs.Bool("check", false, "validate only; do not reload")
-	// usage() would make the command table depend on itself, so report here.
-	if err := fs.Parse(args); err != nil {
-		fmt.Fprintf(ctx.Stderr, "caddy-reload: %v\nusage: hades caddy-reload [--check]\n", err)
-		return 2
-	}
-	if fs.NArg() > 0 {
-		fmt.Fprintf(ctx.Stderr, "caddy-reload: unexpected arguments %q\nusage: hades caddy-reload [--check]\n", fs.Args())
+	if !parseArgs(ctx, fs, "usage: hades caddy-reload [--check]", args) {
 		return 2
 	}
 	host, mode, err := loadReloadConfig(os.Geteuid(), ctx.Getenv, rootHostConfig)

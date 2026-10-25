@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 
@@ -14,7 +13,7 @@ import (
 	"github.com/quotedo/hades/internal/registry"
 )
 
-const gcUsage = "usage: hades gc [--dry-run] [--owner USER]"
+var errRootOnServer = errors.New("must run as root on a server")
 
 // geteuid is os.Geteuid; tests replace it.
 var geteuid = os.Geteuid
@@ -23,31 +22,22 @@ var geteuid = os.Geteuid
 // server it must run as root; on a laptop it acts for the current user only.
 func gc(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
 	dryRun := fs.Bool("dry-run", false, "print what would be released; change nothing")
 	owner := fs.String("owner", "", "release every manifest whose file this user owns")
-	if err := fs.Parse(args); err != nil {
-		fmt.Fprintf(ctx.Stderr, "gc: %v\n%s\n", err, gcUsage)
-		return 2
-	}
-	if fs.NArg() > 0 {
-		fmt.Fprintf(ctx.Stderr, "gc: unexpected arguments %q\n%s\n", fs.Args(), gcUsage)
+	if !parseArgs(ctx, fs, "usage: hades gc [--dry-run] [--owner USER]", args) {
 		return 2
 	}
 	// Checked before loading the host config, which a non-root user may not
 	// be allowed to read, and again after, in case the file appeared since.
 	if serverHost(ctx.Getenv) && geteuid() != 0 {
-		fmt.Fprintln(ctx.Stderr, "hades: gc: must run as root on a server")
-		return 1
+		return ctx.fail("gc", errRootOnServer)
 	}
 	d, err := newDeps(ctx)
 	if err != nil {
-		fmt.Fprintf(ctx.Stderr, "hades: gc: %v\n", err)
-		return 1
+		return ctx.fail("gc", err)
 	}
 	if d.Mode == config.Server && geteuid() != 0 {
-		fmt.Fprintln(ctx.Stderr, "hades: gc: must run as root on a server")
-		return 1
+		return ctx.fail("gc", errRootOnServer)
 	}
 	if d.Mode == config.Laptop {
 		if err := d.Reg.Check(); errors.Is(err, registry.ErrRegistryMissing) {
@@ -56,8 +46,7 @@ func gc(ctx *Context, args []string) int {
 	}
 	rep, err := lifecycle.GC(context.Background(), d, *owner, *dryRun)
 	if err != nil {
-		fmt.Fprintf(ctx.Stderr, "hades: gc: %v\n", err)
-		return 1
+		return ctx.fail("gc", err)
 	}
 	for _, p := range rep.Ignored {
 		fmt.Fprintf(ctx.Stderr, "hades: gc: %s\n", p)

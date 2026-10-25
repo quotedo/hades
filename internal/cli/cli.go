@@ -11,12 +11,13 @@ import (
 
 	"github.com/quotedo/hades/internal/execx"
 	"github.com/quotedo/hades/internal/version"
+	"github.com/quotedo/hades/internal/wtctx"
 )
 
 // Globals are the flags accepted by every command.
 type Globals struct {
-	Root, Worktree, Name, ADE string
-	JSON                      bool
+	wtctx.Flags
+	JSON bool
 }
 
 // Context carries the process environment into a command.
@@ -25,6 +26,28 @@ type Context struct {
 	Getenv         func(string) string
 	Flags          Globals
 	Runner         execx.Runner // runs external commands; tests pass an execx.Fake
+}
+
+// fail reports why cmd failed and returns exit code 1.
+func (c *Context) fail(cmd string, err error) int {
+	fmt.Fprintf(c.Stderr, "hades: %s: %v\n", cmd, err)
+	return 1
+}
+
+// parseArgs parses a command's own flags and reports whether it can go on. A
+// bad flag or a leftover argument is explained with usage; the command then
+// exits 2.
+func parseArgs(ctx *Context, fs *flag.FlagSet, usage string, args []string) bool {
+	fs.SetOutput(io.Discard)
+	err := fs.Parse(args)
+	if err == nil && fs.NArg() > 0 {
+		err = fmt.Errorf("unexpected arguments %q", fs.Args())
+	}
+	if err != nil {
+		fmt.Fprintf(ctx.Stderr, "%s: %v\n%s\n", fs.Name(), err, usage)
+		return false
+	}
+	return true
 }
 
 // Command runs one subcommand with the arguments left after global flag

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -49,13 +48,7 @@ func warnIf(name, problem, okDetail string) check {
 // doctor verifies that this machine can run hades and reports every check.
 // It exits 1 when a check that is not warn-only fails.
 func doctor(ctx *Context, args []string) int {
-	flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	flags.SetOutput(io.Discard)
-	if err := flags.Parse(args); err != nil || flags.NArg() > 0 {
-		if err == nil {
-			err = fmt.Errorf("unexpected arguments %q", flags.Args())
-		}
-		fmt.Fprintf(ctx.Stderr, "doctor: %v\nusage: hades doctor [--json]\n", err)
+	if !parseArgs(ctx, flag.NewFlagSet("doctor", flag.ContinueOnError), "usage: hades doctor [--json]", args) {
 		return 2
 	}
 	checks := runChecks(context.Background(), ctx)
@@ -68,8 +61,7 @@ func doctor(ctx *Context, args []string) int {
 	}
 	if ctx.Flags.JSON {
 		if err := writeJSON(ctx.Stdout, checks); err != nil {
-			fmt.Fprintf(ctx.Stderr, "hades: doctor: %v\n", err)
-			return 1
+			return ctx.fail("doctor", err)
 		}
 		return code
 	}
@@ -169,7 +161,7 @@ const skipNoRepo = "skipped: not inside a git worktree"
 // said no. A git that cannot start, or a resolution failure, is returned as
 // err.
 func repoWorktree(bg context.Context, ctx *Context, d lifecycle.Deps) (wt wtctx.Context, err error, inRepo bool) {
-	if wtctx.NamesWorktree(wtFlags(ctx.Flags), ctx.Getenv) {
+	if wtctx.NamesWorktree(ctx.Flags.Flags, ctx.Getenv) {
 		wt, err = resolveWorktree(bg, ctx)
 		return wt, err, true
 	}

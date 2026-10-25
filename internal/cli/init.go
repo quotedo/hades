@@ -43,14 +43,8 @@ var gitignoreEntries = []string{".env.worktree", ".envrc"}
 // .gitignore entries, plus the snippets that must be added by hand.
 func initCmd(ctx *Context, args []string) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
 	force := fs.Bool("force", false, "overwrite existing hades.toml, paseo.json and orca.yaml")
-	if err := fs.Parse(args); err != nil {
-		fmt.Fprintf(ctx.Stderr, "init: %v\n%s\n", err, initUsage)
-		return 2
-	}
-	if fs.NArg() > 0 {
-		fmt.Fprintf(ctx.Stderr, "init: unexpected arguments %q\n%s\n", fs.Args(), initUsage)
+	if !parseArgs(ctx, fs, initUsage, args) {
 		return 2
 	}
 	ades := ctx.Flags.ADE // the global --ade flag; init reads it as the list of ADEs to wire
@@ -69,13 +63,11 @@ func initCmd(ctx *Context, args []string) int {
 
 	root, err := repoRoot()
 	if err != nil {
-		fmt.Fprintf(ctx.Stderr, "hades: init: %v\n", err)
-		return 1
+		return ctx.fail("init", err)
 	}
 	p, err := preset.Detect(root)
 	if err != nil {
-		fmt.Fprintf(ctx.Stderr, "hades: init: %v\n", err)
-		return 1
+		return ctx.fail("init", err)
 	}
 
 	w := &initWriter{root: root, stderr: ctx.Stderr, force: *force}
@@ -88,8 +80,7 @@ func initCmd(ctx *Context, args []string) int {
 	}
 	w.gitignore()
 	if w.err != nil {
-		fmt.Fprintf(ctx.Stderr, "hades: init: %v\n", w.err)
-		return 1
+		return ctx.fail("init", w.err)
 	}
 
 	if want["wt"] {
