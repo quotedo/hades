@@ -1,7 +1,38 @@
 ---
 # Loopback isolation (isolation.yml) is included by site.yml at the end of the play.
-- name: Packages
-  ansible.builtin.import_tasks: packages.yml
+- name: Install the host packages
+  ansible.builtin.apt:
+    name: "{{ host_packages + host_extra_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    install_recommends: false
+
+- name: Create group hades
+  ansible.builtin.group:
+    name: "{{ hades_group }}"
+    system: true
+
+# The registry directories are setgid so entries get the group, sticky so users cannot remove
+# each other's entries.
+- name: Create the registry, Caddy live, host config, backup and journald drop-in directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    group: "{{ item.group | default(omit) }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - { path: "{{ hades_registry_root }}" }
+    - { path: "{{ hades_registry_root }}/ports", group: "{{ hades_group }}", mode: "3775" }
+    - { path: "{{ hades_registry_root }}/sites", group: "{{ hades_group }}", mode: "3775" }
+    - { path: "{{ hades_registry_root }}/manifests", group: "{{ hades_group }}", mode: "3775" }
+    - { path: "{{ hades_live_dir | dirname }}" }
+    - { path: "{{ hades_live_dir }}" }
+    - { path: "{{ hades_config_dir }}" }
+    - { path: "{{ backup_dir }}", mode: "0700" }
+    - { path: /etc/systemd/journald.conf.d }
+  loop_control:
+    label: "{{ item.path }}"
 
 - name: Shared tool store
   ansible.builtin.import_tasks: toolchain.yml
@@ -12,13 +43,17 @@
 - name: Kernel settings and CPU governor
   ansible.builtin.import_tasks: sysctl.yml
 
-- name: Dev services slice
-  ansible.builtin.import_tasks: slices.yml
+- name: Write hades.slice
+  ansible.builtin.template:
+    src: hades.slice.j2
+    dest: /etc/systemd/system/hades.slice
+    mode: "0644"
+  notify: daemon-reload
 
-- name: Hades CLI, registry, host config and sudoers
+- name: Hades CLI, host config and sudoers
   ansible.builtin.import_tasks: hades.yml
 
-- name: Gc and backup timers, status, journal and Docker log caps, login environment
+- name: Gc and backup timers, status, journal cap, login environment
   ansible.builtin.import_tasks: ops.yml
 
 - name: Chrome for Testing

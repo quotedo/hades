@@ -79,16 +79,9 @@
 # and fails this task.
 - name: Write the static SSH keys
   ansible.builtin.copy:
-    content: "{{ user.ssh_keys | join('\n') }}\n"
+    content: "{% for key in user.ssh_keys | default([]) %}{{ key }}\n{% endfor %}"
     dest: "{{ hades_config_dir }}/ssh-keys/{{ user.name }}"
     mode: "0644"
-  when: user.ssh_keys | default([]) | length > 0
-
-- name: Remove the static SSH keys
-  ansible.builtin.file:
-    path: "{{ hades_config_dir }}/ssh-keys/{{ user.name }}"
-    state: absent
-  when: user.ssh_keys | default([]) | length == 0
 
 - name: List the GitHub login for hades-keys
   ansible.builtin.lineinfile:

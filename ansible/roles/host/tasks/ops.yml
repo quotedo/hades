@@ -1,12 +1,6 @@
 ---
 # Ops: gc, backup and keys timers, hades-status, hades-onboard, the journal cap and the
 # login environment of group hades.
-- name: Create the backup directory
-  ansible.builtin.file:
-    path: "{{ backup_dir }}"
-    state: directory
-    mode: "0700"
-
 - name: Install hades-backup, hades-status, hades-keys and hades-onboard
   ansible.builtin.template:
     src: "{{ item }}.sh.j2"
@@ -40,12 +34,6 @@
     state: started
   loop: [hades-gc.timer, hades-backup.timer, hades-keys.timer]
   when: not (ansible_check_mode and host_ops_units is changed)
-
-- name: Create the journald drop-in directory
-  ansible.builtin.file:
-    path: /etc/systemd/journald.conf.d
-    state: directory
-    mode: "0755"
 
 - name: Cap the journal size
   ansible.builtin.template:

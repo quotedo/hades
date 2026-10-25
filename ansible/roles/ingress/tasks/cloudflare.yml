@@ -135,12 +135,13 @@
       register: ingress_cf_apps
       check_mode: false
 
-    - name: Create the Access application
+    # The organization caps every application's session, so both carry access_session.
+    - name: Create the Access application or set its session length and login flags
       ansible.builtin.uri:
-        url: "{{ ingress_cf_account }}/access/apps"
-        method: POST
+        url: "{{ ingress_cf_account }}/access/apps{{ ('/' ~ ingress_cf_app.id) if ingress_cf_app else '' }}"
+        method: "{{ 'PUT' if ingress_cf_app else 'POST' }}"
         body:
-          name: hades dev sites
+          name: "{{ ingress_cf_app.name | default('hades dev sites') }}"
           type: self_hosted
           domain: "*.{{ hades_domain }}"
           session_duration: "{{ access_session }}"
@@ -148,7 +149,9 @@
           auto_redirect_to_identity: true
       register: ingress_cf_app_new
       changed_when: true
-      when: ingress_cf_app == {}
+      when: >-
+        ingress_cf_app == {} or ingress_cf_app.session_duration != access_session
+        or ingress_cf_app.app_launcher_visible or not ingress_cf_app.auto_redirect_to_identity
 
     # An account without Zero Trust answers with an error: the organization is then created, which
     # enables Zero Trust where the account allows it through the API.
@@ -183,7 +186,6 @@
         - ingress_cf_org_new is not skipped
         - not ingress_cf_org_new.json.success | default(false)
 
-    # The organization caps every application's session, so both carry access_session.
     - name: Set the Access organization's session length
       ansible.builtin.uri:
         url: "{{ ingress_cf_account }}/access/organizations"
@@ -196,23 +198,6 @@
       when:
         - ingress_cf_org.status == 200
         - ingress_cf_org.json.result.session_duration != access_session
-
-    - name: Set the Access application's session length and login flags
-      ansible.builtin.uri:
-        url: "{{ ingress_cf_account }}/access/apps/{{ ingress_cf_app.id }}"
-        method: PUT
-        body:
-          name: "{{ ingress_cf_app.name }}"
-          type: "{{ ingress_cf_app.type }}"
-          domain: "{{ ingress_cf_app.domain }}"
-          session_duration: "{{ access_session }}"
-          app_launcher_visible: false
-          auto_redirect_to_identity: true
-      changed_when: true
-      when:
-        - ingress_cf_app != {}
-        - ingress_cf_app.session_duration != access_session or ingress_cf_app.app_launcher_visible
-          or not ingress_cf_app.auto_redirect_to_identity
 
     # Compared as sets: Cloudflare keeps the order it was given, the inventory may reorder.
     - name: Set the Access allow-list

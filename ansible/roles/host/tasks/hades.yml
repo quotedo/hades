@@ -1,33 +1,4 @@
 ---
-- name: Create group hades
-  ansible.builtin.group:
-    name: "{{ hades_group }}"
-    system: true
-
-- name: Create the registry root
-  ansible.builtin.file:
-    path: "{{ hades_registry_root }}"
-    state: directory
-    mode: "0755"
-
-# setgid so entries get the group, sticky so users cannot remove each other's entries.
-- name: Create the registry directories
-  ansible.builtin.file:
-    path: "{{ hades_registry_root }}/{{ item }}"
-    state: directory
-    group: "{{ hades_group }}"
-    mode: "3775"
-  loop: [ports, sites, manifests]
-
-- name: Create the Caddy live directory
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: directory
-    mode: "0755"
-  loop:
-    - "{{ hades_live_dir | dirname }}"
-    - "{{ hades_live_dir }}"
-
 - name: Read the installed hades version
   ansible.builtin.command: "{{ hades_bin_dir }}/hades version"
   register: host_hades_installed
@@ -80,12 +51,6 @@
         owner: root
         group: root
         mode: "0755"
-
-- name: Create the host config directory
-  ansible.builtin.file:
-    path: "{{ hades_config_dir }}"
-    state: directory
-    mode: "0755"
 
 # caddy-reload refuses a host config that is not root-owned or is group- or world-writable.
 - name: Write the host config

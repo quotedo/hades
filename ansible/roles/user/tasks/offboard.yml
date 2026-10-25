@@ -35,20 +35,14 @@
     -C {{ ansible_facts.getent_passwd[user.name][4] | quote }} .
   changed_when: true
 
-# The role created both directories for this uid.
-- name: Remove the per-uid resource policy
+# The role created all of them for this user.
+- name: Remove the per-uid resource policy, static keys and administrator password
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
   loop:
     - /etc/systemd/system/user-{{ user_uid }}.slice.d
     - /etc/systemd/system/user@{{ user_uid }}.service.d
-
-- name: Remove the user's static keys and administrator password
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
     - "{{ hades_config_dir }}/ssh-keys/{{ user.name }}"
     - "{{ hades_config_dir }}/admin-password.{{ user.name }}"
 
