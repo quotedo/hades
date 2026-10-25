@@ -19,12 +19,10 @@
     hades_box: "{{ item.0 }}"
     dev: "{{ item.1 }}"
   changed_when: false
-  # The box's variables without Ansible's own and its facts.
+  # The box's variables without Ansible's own.
   args: "{{ dict(vm_hosts_keys | zip(vm_hosts_keys | map('extract', hostvars[item.0]))) }}"
   vars:
-    vm_hosts_keys: >-
-      {{ hostvars[item.0].keys() | reject('match', '^(ansible_|inventory_|group|hostvars|omit|play|role)')
-         | reject('in', hostvars[item.0].ansible_facts | default({})) | list }}
+    vm_hosts_keys: "{{ hostvars[item.0].keys() | reject('match', '^(ansible_|inventory_|group|hostvars|omit|play|role)') | list }}"
   loop: "{{ ansible_play_hosts | map('extract', hostvars, 'vm_hosts_pairs') | flatten(levels=1) }}"
   loop_control:
     label: "{{ item.1.name }}.{{ item.0 }}"

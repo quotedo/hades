@@ -36,6 +36,7 @@ jobs:
           missing-domain|hades_domain must be defined
           bad-entry|dev_users entry j-smith is invalid
           bad-entry|dev_users entry bob is invalid
+          bad-entry|dev_users entry carol is invalid
           duplicate-names|Present dev_users share a name: alice
           duplicate-uids|Present dev_users share a uid: 3001 [alice, bob]
           tools-prefix|tools.node: versions must be exact

@@ -33,6 +33,7 @@
 # Probes run from the last present developer's VM (a) towards the first one's (b), whose SSH the
 # box reaches: so a refused connection is the firewall's doing, not a closed port.
 - name: Probe the VMs' network from inside
+  when: dev_present | length > 0
   become: true
   vars:
     isolation_test_a: "{{ dev_present[-1].name }}"

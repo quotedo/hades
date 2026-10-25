@@ -16,7 +16,7 @@
     host_vms_names: "{{ host_vms | map(attribute='name') | list }}"
     # Present VMs that never ran: the ones this run creates and any an interrupted run created.
     host_vms_new: >-
-      {{ dev_present | map(attribute='name') | reject('in', host_vms | rejectattr('last_used_at', 'match', '^1970-')
+      {{ dev_present | map(attribute='name') | reject('in', host_vms | rejectattr('last_used_at', 'match', '^(1970|0001)-')
          | map(attribute='name') | list) | list }}
     host_vm: "{{ host_vms | selectattr('name', 'eq', item.name) | first }}"
     host_vm_config:

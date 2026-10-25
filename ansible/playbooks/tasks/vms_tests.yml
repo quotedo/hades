@@ -40,12 +40,13 @@
   loop_control:
     label: "{{ item.name }}"
 
-# The guest kernel keeps a little of its memory for itself; a percentage is that share of the host.
-- name: Assert each VM sees its cpus and, within 5 %, its memory
+# The guest kernel keeps some of its memory for itself (about 4 %, more for small VMs); a
+# percentage is that share of the host.
+- name: Assert each VM sees its cpus and, within 5 % or 512 MiB, its memory
   ansible.builtin.assert:
     that:
       - item.stdout_lines[0] | int == item.item.cpus | int
-      - (item.stdout_lines[1] | float - vms_test_want | float) | abs <= 0.05 * vms_test_want | float
+      - (item.stdout_lines[1] | float - vms_test_want | float) | abs <= [0.05 * vms_test_want | float, 512 * 1024 ** 2] | max
     fail_msg: >-
       {{ item.item.name }}: nproc {{ item.stdout_lines[0] }}, memory {{ item.stdout_lines[1] }} bytes;
       want {{ item.item.cpus }} and {{ vms_test_want }}

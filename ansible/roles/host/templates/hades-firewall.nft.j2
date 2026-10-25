@@ -18,9 +18,11 @@ table inet hades {
 	}
 
 	# Port isolation keeps VMs apart on the bridge; this keeps a VM from routing to another
-	# through the host. A drop here is final whatever other tables accept.
+	# through the host, and from host ports that Docker publishes (DNAT before input, so they
+	# arrive here). A drop here is final whatever other tables accept.
 	chain forward {
 		type filter hook forward priority filter; policy accept;
 		iifname "{{ vm_bridge }}" oifname "{{ vm_bridge }}" counter drop
+		iifname "{{ vm_bridge }}" ct status dnat counter drop
 	}
 }
