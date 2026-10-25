@@ -42,10 +42,11 @@
   when: not (ansible_check_mode and host_mise_binary is changed)
 
 # Every listed version in one command, in inventory order: installed ones are skipped, and an
-# Elixir build finds the Erlang listed before it.
+# Elixir build finds the Erlang listed before it. A low CPU and IO weight leaves the running VMs
+# their share while a toolchain builds.
 - name: Install the listed tool versions
   ansible.builtin.command:
-    argv: "{{ ['mise', 'install', '--system'] + host_tools_listed }}"
+    argv: "{{ ['systemd-run', '--scope', '-q', '-p', 'CPUWeight=20', '-p', 'IOWeight=20', 'mise', 'install', '--system'] + host_tools_listed }}"
   environment:
     KERL_CONFIGURE_OPTIONS: "{{ kerl_configure_options }}"
     MISE_YES: "1"
@@ -54,7 +55,9 @@
   when: host_tools_listed | difference(host_tools_installed) | length > 0
 
 # Prune guard: a version stays while a process in a running VM maps a file under its install
-# directory (its binary or a library); the run fails naming the VM.
+# directory (a binary or a library) or names it on its command line (Elixir's code is read, not
+# mapped); the run names it and removes the rest. The path goes in on stdin, so that the probing
+# shell's own command line does not hold it.
 - name: Read the running VMs
   ansible.builtin.command: incus list status=running -c n -f csv
   register: host_tools_vms
@@ -64,15 +67,16 @@
 
 - name: Look in the running VMs for processes that use a version to remove
   ansible.builtin.command:
-    argv: [incus, exec, "{{ item.0 }}", --, sh, -c, 'grep -lsF "$1" /proc/[0-9]*/maps || :', sh, "{{ mise_store }}/installs/{{ item.1 | replace('@', '/') }}/"]
+    argv: [incus, exec, "{{ item.0 }}", --, sh, -c, 'grep -lsFf - /proc/[0-9]*/maps /proc/[0-9]*/cmdline || :']
+    stdin: "{{ mise_store }}/installs/{{ item.1 | replace('@', '/') }}/"
   register: host_tools_inuse
   changed_when: false
   check_mode: false
   loop: "{{ host_tools_vms.stdout_lines | default([]) | product(host_tools_installed | difference(host_tools_listed)) | list }}"
 
-- name: Refuse to remove a version in use
-  ansible.builtin.fail:
-    msg: "{{ item.item.1 }} is in use in {{ item.item.0 }}"
+- name: Keep the versions in use
+  ansible.builtin.debug:
+    msg: "{{ item.item.1 }} kept: in use in {{ item.item.0 }}"
   when: item.stdout | default('') | length > 0
   loop: "{{ host_tools_inuse.results | default([]) }}"
   loop_control:
@@ -80,9 +84,13 @@
 
 - name: Remove unlisted tool versions
   ansible.builtin.command:
-    argv: "{{ ['mise', 'uninstall'] + host_tools_installed | difference(host_tools_listed) }}"
+    argv: "{{ ['mise', 'uninstall'] + host_tools_unused }}"
   changed_when: true
-  when: host_tools_installed | difference(host_tools_listed) | length > 0
+  when: host_tools_unused | length > 0
+  vars:
+    host_tools_unused: >-
+      {{ host_tools_installed | difference(host_tools_listed) | difference(host_tools_inuse.results | default([])
+         | rejectattr('stdout', 'eq', '') | map(attribute='item.1') | list) }}
 
 - name: Stat the node shim
   ansible.builtin.stat:

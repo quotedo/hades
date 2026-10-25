@@ -15,6 +15,10 @@
   loop: ["{{ hades_share }}", "{{ hades_bin_dir }}"]
   register: host_dirs
 
+# Before the tool store, whose prune guard looks into the running VMs.
+- name: Incus, its storage pool and bridge
+  ansible.builtin.import_tasks: incus.yml
+
 - name: Shared tool store
   ansible.builtin.import_tasks: toolchain.yml
   vars:
@@ -46,9 +50,6 @@
 
 - name: CPU governor
   ansible.builtin.import_tasks: governor.yml
-
-- name: Incus, its storage pool and bridge
-  ansible.builtin.import_tasks: incus.yml
 
 - name: Bridge firewall
   ansible.builtin.import_tasks: firewall.yml

@@ -25,6 +25,15 @@
   changed_when: true
   when: host_npm is changed # noqa: no-handler
 
+# Otherwise every version ever installed stays in root's caches: mise's downloads and builds,
+# npm's packages.
+- name: Clear mise's and npm's caches
+  ansible.builtin.shell: mise cache clear && {{ mise_shims }}/npm cache clean --force
+  args:
+    chdir: /
+  changed_when: true
+  when: host_tools_install is changed or host_npm is changed # noqa: no-handler
+
 # The VMs install the libraries Orca needs.
 - name: Orca
   when: host_orca_wanted
