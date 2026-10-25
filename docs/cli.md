@@ -28,7 +28,7 @@ credentials for the private repository):
 GOPRIVATE=github.com/quotedo/* go install github.com/quotedo/hades/cmd/...@latest   # both binaries into $(go env GOPATH)/bin
 ```
 
-On a server the Ansible collection installs the CLI; see the [server reference](server.md#inventory).
+In a hades VM, `hades` and `hades-port` are on `PATH` from the box's read-only share; see the [server reference](server.md#vms).
 
 ## Host config
 
@@ -37,10 +37,10 @@ The registry is the user's own: `~/.local/state/hades/{ports,sites,manifests}`, 
 it exists. A `HADES_HOST_CONFIG` file that does not exist is an error, and so is an unknown key.
 
 ```toml
-domain = "example.test"                    # per-worktree HTTPS addresses and Caddy site files
-chrome_path = "/opt/hades/chrome/chrome"   # enables the chrome-devtools MCP entry
+domain = "example.test"                        # per-worktree HTTPS addresses and Caddy site files
+chrome_path = "/opt/chrome-for-testing/chrome" # enables the chrome-devtools MCP entry
 
-[rabbitmq]                                 # enables vhosts and the doctor check
+[rabbitmq]                                     # enables vhosts and the doctor check
 management_url = "http://127.0.0.1:15672"
 amqp_url = "amqp://guest:guest@127.0.0.1:5672"
 user = "guest"
@@ -109,7 +109,8 @@ Steps, in order. Every ssh that `join` runs, except the hand-off, has `-o BatchM
 
 | Step | Action |
 |---|---|
-| Key, GitHub | As in the [developer guide](developer.md#join). |
+| Key | The first key in `~/.ssh/*.pub` or your SSH agent that GitHub serves at `https://github.com/<GitHub login>.keys`. Without one: `~/.ssh/id_ed25519.pub`, else the first `~/.ssh/*.pub`, else a new `~/.ssh/id_ed25519` without a passphrase. |
+| GitHub | Uploads that key with `gh ssh-key add`, titled `hades <alias>`, only when GitHub serves none of your keys and `gh` is logged in as that GitHub login. |
 | Address | `ssh [-i <key>] -l hades <host>`: the box's jump account prints your VM's address. |
 | `<alias>-via-host` | Writes the alias, then logs in once: `ssh <alias>-via-host true`. |
 | Hand-off | `ssh -t <alias>-via-host hades-onboard <alias>` on your terminal. |
@@ -139,17 +140,16 @@ Each alias is a block between `# hades:begin <name>` and `# hades:end <name>` in
 | 2 | `not authorised yet`: the jump account or the VM refused the key. Also a usage error. |
 | 1 | Any other failure, as `join: <reason>`; an unreachable host or a refused host key is `join: ssh: <ssh's message>`, jump-account output that is no address `join: ssh -l hades <host> printed "<output>", not an address`. |
 
-## Server scripts and files
+## VM scripts and files
 
-The Ansible collection installs these beside `hades`.
+The Ansible collection puts these in each VM.
 
 | Script or file | What it is |
 |---|---|
-| `hades-onboard [HOST]` | The developer's first-login steps, listed in the [developer guide](developer.md#first-login-steps). Needs a terminal: exit 2 without one. HOST is the name in the printed Paseo address, default the box's hostname. Exit 0 and `onboarding complete` when every step passed, else 1. |
+| `hades-onboard [HOST]` | The developer's first-login steps, listed in the [developer guide](developer.md#first-login-steps). Needs a terminal: exit 2 without one. HOST is the name in the printed Paseo address, default the VM's hostname. Exit 0 and `onboarding complete` when every step passed, else 1. |
 | `~/.config/hades/onboarded` | Written by `hades-onboard` on success; while it is missing, interactive shells print `Run hades-onboard to finish setting up your account.` |
 | `~/.config/hades/repos` | The repositories `hades-onboard` clones, one URL per line (owner, 0600). |
-| `~/.config/hades/paseo.env` | `PASEO_PASSWORD=<password>`, generated once per Paseo user (owner, 0600) and kept, also when edited by hand. |
-| `hades-keys [LOGIN]` | Root, hourly through `hades-keys.timer`, and by the user role at apply. For each `login:github` line of `/etc/hades/github-logins` (or LOGIN alone), writes `~/.ssh/authorized_keys` as that user: `/etc/hades/ssh-keys/<login>` followed by `https://github.com/<github>.keys`, or the static keys alone when github is empty. Writes only when the content differs; a failed or empty fetch keeps the file. Prints `<login>: updated`, `unchanged`, `fetch failed, kept`, `no home, skipped` or `write failed, kept`. |
+| `~/.config/hades/paseo.env` | `PASEO_PASSWORD=<password>`, generated once in the VM (owner, 0600) and kept, also when edited by hand. |
 
 ## What `up` writes
 

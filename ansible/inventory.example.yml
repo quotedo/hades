@@ -1,23 +1,23 @@
 ---
-# Copy to inventory.yml in your site repository and replace every placeholder.
+# Copy to inventory.yml in your site repository and replace every placeholder (docs/server.md).
 dev_servers:
   hosts:
     box:
       ansible_host: <IP>
-      ansible_user: <SUDO_USER>  # also root's SSH login in every VM
+      ansible_user: <SUDO_USER>  # its SSH keys are also root's in every VM
       hades_domain: <DOMAIN>
       # hades_version: "0.1.0"  # a published release, tagged v<version>, downloaded with the administrator's gh
       # hades_local_binary_dir: /path/to/dist/linux_amd64  # development: a local linux/amd64 build instead of the release
-      # Cloudflare Access admits every present dev user's email plus these emails or @domains.
-      access_allow: []
-      # cloudflare_team: hades-<DOMAIN with dots replaced by dashes>  # the default; Zero Trust team name when the role creates it
-      dev_services: [rabbitmq, localstack]
+      # Cloudflare Access admits every present developer's email plus these emails or @domains.
+      # access_allow: []
+      # cloudflare_team: hades-<DOMAIN with dots replaced by dashes>  # Zero Trust team name when the role creates it
+      dev_services: [rabbitmq, localstack]  # run by Docker in every VM; the default is []
       # Clone URLs every developer gets; hades-onboard clones them after the GitHub login.
-      dev_repos: []
-      vpn_enabled: false
-      vpn_conf_env: AMNEZIA_WG_CONF_BOX  # the environment variable holding this host's AmneziaWG config
-      vpn_probe: ""  # "<IP>:<PORT>", one intranet TCP endpoint verify must reach
-      # Exact versions; the first of each tool is the box default. Erlang before Elixir.
+      # dev_repos: []
+      # vpn_enabled: false  # the intranet VPN, with the next two
+      # vpn_conf_env: AMNEZIA_WG_CONF_BOX  # the environment variable holding this box's AmneziaWG config
+      # vpn_probe: "<IP>:<PORT>"  # one intranet TCP endpoint verify must reach
+      # Exact versions; the first of each tool is the default. Erlang before Elixir.
       tools:
         node: ["24.22.1"]
         erlang: ["29.1.2", "28.5", "28.3.1"]
@@ -27,20 +27,20 @@ dev_servers:
         kubectl: ["1.33.13"]
         gh: ["2.103.1"]
       # extra_packages: []  # apt packages every VM gets
-      # hex_repos: [{name: acme, url: https://hex.example.com, key_env: HEX_REPO_KEY, fingerprint_env: HEX_REPO_FINGERPRINT}]
-      # Each developer's VM; memory is GiB or a share of the host's memory ("50%").
+      # hex_repos: [{name: shop, url: https://hex.example.test, key_env: HEX_REPO_KEY, fingerprint_env: HEX_REPO_FINGERPRINT}]
+      # Each developer's VM; memory is a size or a share of the box's memory ("50%").
       # vm_memory: 28GiB
-      # vm_cpus: <all host threads>
+      # vm_cpus: <all box threads>
       # vm_disk: 200GiB
       # vm_subnet: 10.88.0.0/16  # <a>.<b>.0.0/16; a VM's address is <a>.<b>.<uid // 256>.<uid % 256>
       dev_users:
-        - name: dev1
-          uid: 2001
+        - name: alice  # ^[a-z][a-z0-9]*$: the VM, the login in it, the start of the web labels
+          uid: 2001  # 1001 to 65534
           github: <GITHUB_LOGIN>  # authorized_keys follows https://github.com/<login>.keys, refreshed hourly
           email: <EMAIL>  # their Cloudflare Access login
-          # ades: [paseo]  # the default; paseo, orca or both
+          # ades: [paseo]  # paseo, orca or both
           # ssh_keys: []  # static public keys, added to the GitHub ones
-          # gpg_key: false  # true: a GPG key for git-secret, generated on the box
+          # gpg_key: false  # true: a GPG key for git-secret, generated in the VM
           # repos: []  # the default: dev_repos
           # memory: 28GiB  # the default: vm_memory; likewise cpus and disk
           # state: present  # absent offboards the developer
