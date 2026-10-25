@@ -1,0 +1,64 @@
+---
+# Host-wide AmneziaWG tunnel `intranet`: the vendor's DKMS kernel module, and the
+# config from the operator's environment variable that vpn_conf_env names.
+- name: Assert this is Ubuntu
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == 'Ubuntu'
+    fail_msg: the vpn role installs AmneziaWG from the vendor PPA, which covers Ubuntu only
+    quiet: true
+
+# ppa:amnezia/ppa, signed by the key whose fingerprint Launchpad publishes for it. The keyserver
+# refuses HEAD, so get_url cannot preview it in check mode; this module fetches with GET.
+- name: Add the AmneziaWG PPA
+  ansible.builtin.deb822_repository:
+    name: amnezia-ppa
+    uris: https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu
+    suites: "{{ ansible_facts.distribution_release }}"
+    components: main
+    signed_by: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x75C9DD72C799870E310542E24166F2C257290828
+  register: vpn_ppa
+
+# The running kernel's headers only: DKMS builds the module for every kernel whose headers are
+# present, and the vendor module can lag a newer kernel (a failed build leaves dpkg half-configured).
+- name: Install AmneziaWG and the running kernel's headers
+  ansible.builtin.apt:
+    name:
+      - amneziawg
+      - amneziawg-tools
+      - linux-headers-{{ ansible_facts.kernel }}
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: "{{ 0 if vpn_ppa is changed else 3600 }}"
+  when: not (ansible_check_mode and vpn_ppa is changed)
+
+- name: Create the AmneziaWG config directory
+  ansible.builtin.file:
+    path: /etc/amnezia/amneziawg
+    state: directory
+    mode: "0700"
+
+# The config holds the host's private key: it travels over the task's stdin, so it never passes
+# through a controller file or a command line.
+- name: Write the tunnel config
+  ansible.builtin.shell: |
+    set -e; umask 077
+    new=$(cat)
+    [ -f /etc/amnezia/amneziawg/intranet.conf ] && [ "$(cat /etc/amnezia/amneziawg/intranet.conf)" = "$new" ] && exit 0
+    printf '%s' "$new" > /etc/amnezia/amneziawg/intranet.conf && echo changed
+  args:
+    stdin: "{{ lookup('ansible.builtin.env', vpn_conf_env) }}"
+  register: vpn_conf_write
+  changed_when: "'changed' in vpn_conf_write.stdout"
+  no_log: true
+
+# A changed config applies at start only. In check mode on a fresh host the unit template is not
+# installed yet.
+- name: Enable and start the tunnel, restarting it after a config change
+  ansible.builtin.systemd_service:
+    name: awg-quick@intranet.service
+    enabled: true
+    state: "{{ 'restarted' if vpn_conf_write is changed else 'started' }}"
+    daemon_reload: true
+  when: not (ansible_check_mode and vpn_ppa is changed)

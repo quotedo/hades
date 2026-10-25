@@ -1,0 +1,2 @@
+pre-start = "hades up --name {{ branch }}"
+pre-remove = "hades down --name {{ branch }}"

@@ -1,0 +1,62 @@
+---
+- name: Read the tunnel unit
+  ansible.builtin.systemd_service:
+    name: awg-quick@intranet.service
+  register: vpn_test_unit
+
+- name: Assert the tunnel unit is active
+  ansible.builtin.assert:
+    that:
+      - vpn_test_unit.status.ActiveState | default('missing') == 'active'
+    fail_msg: "awg-quick@intranet is {{ vpn_test_unit.status.ActiveState | default('missing') }}, expected active"
+    quiet: true
+
+# Every routing table, so a full tunnel's policy-routing table counts too.
+- name: Read the default routes
+  ansible.builtin.shell: ip -4 route show table all default; ip -6 route show table all default
+  register: vpn_test_routes
+  changed_when: false
+
+- name: Assert no default route goes through the tunnel
+  ansible.builtin.assert:
+    that:
+      - vpn_test_routes.stdout is not search(' dev intranet( |$)', multiline=true)
+    fail_msg: "a default route uses the tunnel: run `sudo awg-quick down intranet` now"
+    quiet: true
+
+- name: Read the age of the tunnel's last handshake
+  ansible.builtin.shell: |
+    set -eo pipefail
+    last=$(awg show intranet latest-handshakes | awk 'NR == 1 { print $2 }')
+    echo $(( $(date +%s) - ${last:?no peer} ))
+  args:
+    executable: /bin/bash
+  become: true
+  register: vpn_test_handshake
+  changed_when: false
+
+- name: Assert the last handshake is under three minutes old
+  ansible.builtin.assert:
+    that:
+      - vpn_test_handshake.stdout | int < 180
+    fail_msg: "the last handshake was {{ vpn_test_handshake.stdout }} s ago"
+    quiet: true
+
+# A kernel upgrade without headers leaves the module unbuilt for the running kernel.
+- name: Read the module's DKMS status for the running kernel
+  ansible.builtin.shell: dkms status -m amneziawg -k "$(uname -r)"
+  become: true
+  register: vpn_test_dkms
+  changed_when: false
+
+- name: Assert DKMS built the module for the running kernel
+  ansible.builtin.assert:
+    that:
+      - "vpn_test_dkms.stdout is search(': installed$', multiline=true)"
+    fail_msg: "dkms status: {{ vpn_test_dkms.stdout or 'nothing for this kernel' }}"
+    quiet: true
+
+- name: Reach the intranet probe endpoint
+  ansible.builtin.command: nc -z -w 3 {{ vpn_probe.rsplit(':', 1) | join(' ') }}
+  changed_when: false
+  when: vpn_probe | length > 0

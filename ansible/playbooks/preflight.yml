@@ -1,0 +1,247 @@
+---
+# Input validation. Runs before anything touches a host.
+- name: Preflight
+  hosts: dev_servers
+  gather_facts: false
+  vars: &hades_preflight_vars
+    # user_present (roles/user/defaults): each present user combined onto its defaults.
+    hades_present_users: >-
+      {% set ns = namespace(users=[]) %}{% for u in dev_users | default([])
+      if u.state | default('present') == 'present' %}{% set ns.users = ns.users + [{'state': 'present', 'ades': ['paseo'], 'paseo_port': u.uid + 10000,
+      'orca_port': u.uid + 20000, 'repos': dev_repos | default([])} | combine(u)] %}{% endfor %}{{ ns.users }}
+    hades_ade_ports: >-
+      {{ hades_present_users | selectattr('ades', 'contains', 'paseo') | map(attribute='paseo_port') | list
+         + hades_present_users | selectattr('ades', 'contains', 'orca') | map(attribute='orca_port') | list }}
+  tasks:
+    - name: Assert hades_domain is a non-empty string
+      ansible.builtin.assert:
+        that:
+          - hades_domain is defined
+          - hades_domain is string
+          - hades_domain | length > 0
+        fail_msg: hades_domain must be defined as a non-empty string
+        quiet: true
+
+    - name: Assert dev_users is a list
+      ansible.builtin.assert:
+        that:
+          - dev_users is defined
+          - dev_users is sequence
+          - dev_users is not string
+          - dev_users is not mapping
+        fail_msg: dev_users must be defined as a list
+        quiet: true
+
+    - name: Assert every dev_users entry is well formed
+      ansible.builtin.assert:
+        that:
+          - item.name is defined
+          - item.name is string
+          - item.name is match('^[a-z][a-z0-9_-]{0,31}$')
+          - item.uid is defined
+          - item.uid is integer
+          - item.uid >= 1000
+          - (item.state | default('present')) in ['present', 'absent']
+          - (item.ades | default([])) is sequence
+          - (item.ades | default([])) is not string
+          - (item.ades | default([])) is subset(['paseo', 'orca'])
+          - (item.admin | default(false)) is boolean
+          - (item.ssh_keys | default([])) is sequence
+          - (item.ssh_keys | default([])) is not string
+        fail_msg: >-
+          dev_users entry {{ item.name | default('<unnamed>') }} is invalid: name must match
+          ^[a-z][a-z0-9_-]{0,31}$, uid must be an integer >= 1000, state must be present or
+          absent, ades must be a list drawn from paseo and orca, admin must be true or false,
+          ssh_keys a list
+        quiet: true
+      loop: "{{ dev_users }}"
+      loop_control:
+        label: "{{ item.name | default('<unnamed>') }}"
+
+    # authorized_keys is built from the GitHub login's keys and the static ssh_keys.
+    - name: Assert every present dev user has a GitHub login or static SSH keys
+      ansible.builtin.assert:
+        that:
+          - (item.github is defined and item.github is string and item.github is match('^[A-Za-z0-9-]+$'))
+            or item.ssh_keys | default([]) | length > 0
+        fail_msg: "dev_users entry {{ item.name }} needs github (a GitHub login) or a non-empty ssh_keys"
+        quiet: true
+      loop: "{{ hades_present_users }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Assert alphanumeric projections of present logins are unique
+      ansible.builtin.assert:
+        that:
+          - hades_keys | unique | length == hades_keys | length
+        fail_msg: >-
+          Logins collide after dropping non-alphanumerics:
+          {% for key in hades_keys | unique if hades_keys.count(key) > 1 %}[{{ hades_names | zip(hades_keys)
+             | selectattr('1', 'eq', key) | map(attribute='0') | join(', ') }}] {% endfor %}
+        quiet: true
+      vars:
+        hades_names: "{{ hades_present_users | map(attribute='name') | list }}"
+        hades_keys: "{{ hades_names | map('regex_replace', '[^a-z0-9]', '') | list }}"
+
+    - name: Assert uids of present dev users are unique
+      ansible.builtin.assert:
+        that:
+          - hades_present_users | map(attribute='uid') | unique | length == hades_present_users | length
+        fail_msg: >-
+          Present dev_users share a uid:
+          {% for uid, users in hades_present_users | groupby('uid')
+             if users | length > 1 %}{{ uid }} [{{ users | map(attribute='name') | join(', ') }}] {% endfor %}
+        quiet: true
+
+    # The ports reach the nftables rules, host.toml and the ADE units; the range reaches hades.
+    - name: Assert every port is an integer from 1 to 65535 and the port range is first-last
+      ansible.builtin.assert:
+        that:
+          - (protected | default({})).blocked_ports | default([]) is sequence
+          - (protected | default({})).blocked_ports | default([]) is not string
+          - hades_ports | reject('integer') | list == []
+          - hades_ports | select('lt', 1) | list == []
+          - hades_ports | select('gt', 65535) | list == []
+          - hades_port_range is not defined or hades_port_range is match('^[0-9]+-[0-9]+$')
+        fail_msg: >-
+          dev_pg_port, caddy_port, each listed ADE's paseo_port or orca_port and protected.blocked_ports
+          must be integers from 1 to 65535 ({{ hades_ports }}); hades_port_range a "<first>-<last>" string
+        quiet: true
+      vars:
+        hades_ports: >-
+          {{ ([dev_pg_port] if dev_pg_port is defined else []) + ([caddy_port] if caddy_port is defined else [])
+             + hades_ade_ports + (protected | default({})).blocked_ports | default([]) }}
+
+    # paseo_port defaults to uid + 10000, orca_port to uid + 20000; explicit values may collide.
+    - name: Assert the ADE ports of present dev users are unique
+      ansible.builtin.assert:
+        that:
+          - hades_ade_ports | unique | length == hades_ade_ports | length
+        fail_msg: >-
+          Present dev_users share an ADE port:
+          {% for port in hades_ade_ports | unique if hades_ade_ports.count(port) > 1 %}{{ port }} {% endfor %}
+        quiet: true
+
+    # dev_services selects the compose services; postgres_settings fills the dev cluster's conf.d file.
+    - name: Assert dev_services is a list of known services and postgres_settings a mapping
+      ansible.builtin.assert:
+        that:
+          - dev_services | default([]) is sequence
+          - dev_services | default([]) is not string
+          - dev_services | default([]) | difference(['rabbitmq', 'localstack', 'redis']) == []
+          - postgres_settings | default({}) is mapping
+        fail_msg: dev_services must be a list drawn from rabbitmq, localstack and redis, postgres_settings a mapping
+        quiet: true
+
+    # The user role adds each repository with the key and fingerprint these controller variables hold.
+    - name: Assert every hex_repos entry is complete and its variables are set
+      ansible.builtin.assert:
+        that:
+          - item.name is defined
+          - item.url is defined
+          - item.key_env is defined and lookup('ansible.builtin.env', item.key_env) | length > 0
+          - item.fingerprint_env is defined and lookup('ansible.builtin.env', item.fingerprint_env) | length > 0
+        fail_msg: "hex_repos entry {{ item.name | default('<unnamed>') }} needs name, url, key_env and fingerprint_env, both set in the environment"
+        quiet: true
+      loop: "{{ hex_repos | default([]) }}"
+      loop_control:
+        label: "{{ item.name | default('<unnamed>') }}"
+
+    # The Cloudflare tasks (ingress role) build the Access allow-list from these.
+    - name: Assert every present dev user has an email when Cloudflare is managed
+      ansible.builtin.assert:
+        that:
+          - item.email is defined
+          - item.email is string
+          - item.email is match('^[^@\\s]+@[^@\\s]+$')
+        fail_msg: "dev_users entry {{ item.name }} needs an email (the Cloudflare Access allow-list) while CF_API_TOKEN is set"
+        quiet: true
+      loop: "{{ hades_present_users }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: lookup('ansible.builtin.env', 'CF_API_TOKEN') | length > 0
+
+    # Orca's pairing address must be one clients dial privately, so Orca comes with Tailscale.
+    # Unset, tailscale_enabled defaults to true when a present user lists orca (ingress role).
+    - name: Assert Tailscale is enabled when a present user lists orca
+      ansible.builtin.assert:
+        that:
+          - hades_orca_users == [] or tailscale_enabled | default(true) | bool
+        fail_msg: "orca is listed by: {{ hades_orca_users | join(', ') }} — it pairs over Tailscale: set tailscale_enabled: true"
+        quiet: true
+      vars:
+        hades_orca_users: "{{ hades_present_users | selectattr('ades', 'contains', 'orca') | map(attribute='name') | list }}"
+
+    # Exact versions keep two boxes or two applies on the same release; keys are mise registry
+    # names, under which `mise ls --json` reports them (go, never golang).
+    - name: Assert every tools version is exact
+      ansible.builtin.assert:
+        that:
+          - item.key != 'golang'
+          - item.value is sequence
+          - item.value is not string
+          - item.value | length > 0
+          - item.value | reject('string') | list == []
+          - item.value | reject('match', '^\\d+\\.\\d+(\\.\\d+)*([.-][A-Za-z0-9.-]+)?$') | list == []
+        fail_msg: >-
+          {{ 'tools.golang: use go, the mise registry name' if item.key == 'golang' else
+             'tools.' ~ item.key ~ ': versions must be exact quoted strings, major.minor at least, got '
+             ~ item.value | to_json }}
+        quiet: true
+      loop: "{{ tools | default({}) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Assert tools include node and gh
+      ansible.builtin.assert:
+        that:
+          - tools is not defined or ('node' in tools and 'gh' in tools)
+        fail_msg: tools must include node (the agent CLIs run on it) and gh (hades-onboard needs it)
+        quiet: true
+
+    # The vpn role reads the config from the environment variable vpn_conf_env names. It installs
+    # no resolvconf, so a DNS line would fail the tunnel, and a full tunnel would take the default
+    # route.
+    - name: Assert the VPN config is set, a split tunnel and without DNS
+      ansible.builtin.assert:
+        that:
+          - hades_vpn_conf | length > 0
+          - hades_vpn_conf is not search('(?i)AllowedIPs\\s*=.*(?<![\\w.:])(0\\.0\\.0\\.0/[01]|128\\.0\\.0\\.0/1|::/[01]|8000::/1)(?!\\d)')
+          - hades_vpn_conf is not search('(?im)^\\s*DNS\\s*=')
+        fail_msg: >-
+          vpn_enabled needs vpn_conf_env naming an exported environment variable that holds the
+          AmneziaWG config, with only intranet subnets in AllowedIPs and no DNS line
+        quiet: true
+      vars:
+        hades_vpn_conf: "{{ lookup('ansible.builtin.env', vpn_conf_env) if vpn_conf_env | default('') else '' }}"
+      when: vpn_enabled | default(false) | bool
+
+# On the host, under every tag: a wrong sshd fails in seconds, before anything is installed.
+# The tag lets the preflight fixtures, which have no host, skip it.
+- name: Preflight sshd
+  hosts: dev_servers
+  gather_facts: false
+  become: true
+  tags: [sshd]
+  vars: *hades_preflight_vars
+  tasks:
+    - name: Read sshd's effective settings
+      ansible.builtin.command: sshd -T
+      register: hades_sshd
+      changed_when: false
+      check_mode: false
+
+    # An administrator has a password, which must not open SSH logins. The roles never set these.
+    - name: Assert sshd allows agent forwarding and refuses password logins with an administrator
+      ansible.builtin.assert:
+        that:
+          - "'allowagentforwarding yes' in hades_sshd.stdout_lines"
+          - "('passwordauthentication no' in hades_sshd.stdout_lines and 'kbdinteractiveauthentication no' in hades_sshd.stdout_lines)
+            or hades_present_users | selectattr('admin', 'defined') | selectattr('admin') | list | length == 0"
+        fail_msg: >-
+          sshd must allow agent forwarding and, with an admin: true dev user, refuse password logins:
+          set AllowAgentForwarding yes, PasswordAuthentication no and KbdInteractiveAuthentication no in
+          an sshd drop-in yourself
+          (sshd -T: {{ hades_sshd.stdout_lines
+          | select('match', '^(allowagentforwarding|passwordauthentication|kbdinteractiveauthentication) ') | join(', ') }})
+        quiet: true

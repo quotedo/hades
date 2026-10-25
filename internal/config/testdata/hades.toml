@@ -1,0 +1,15 @@
+project = "shop"
+preset = "phoenix"
+web = true
+setup = ["mix setup"]
+teardown = ["mix some.cleanup"]
+databases = ["shop"]
+
+[env]
+SHOP_ENDPOINT = "{{host}}"
+
+[services.rabbitmq]
+vhost = true
+
+[mcp]
+tidewave = true

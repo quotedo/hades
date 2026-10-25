@@ -1,0 +1,68 @@
+---
+# Agent CLIs and Paseo: npm globals under the store's default Node, installed as root through the
+# npm shim, so a default-Node bump installs them again under the new Node. A spec without
+# @<version> is installed once and never upgraded. path: / keeps a stray .tool-versions from
+# choosing another Node. In check mode on a fresh host there is no npm yet.
+- name: Install the agent CLIs and Paseo
+  community.general.npm:
+    name: "{{ item | regex_replace('(.)@[^/]*$', '\\1') }}"
+    version: "{{ (item | regex_search('.@([^/]*)$', '\\1') or [omit]) | first }}"
+    global: true
+    executable: "{{ mise_shims }}/npm"
+    path: /
+  environment:
+    npm_config_update_notifier: "false"
+    npm_config_fund: "false"
+  loop: "{{ agent_clis.values() | list + ['@getpaseo/cli@' ~ paseo_version] }}"
+  register: host_npm
+  when: not (ansible_check_mode and host_mise_binary is changed)
+
+# Not a handler: the user role starts Paseo through its shim later in the same play.
+- name: Create the shims for the new npm binaries
+  ansible.builtin.command: mise reshim --system
+  changed_when: true
+  when: host_npm is changed # noqa: no-handler
+
+- name: Orca
+  when: host_orca_wanted
+  block:
+    - name: Install the libraries Orca needs
+      ansible.builtin.apt:
+        name: "{{ orca_packages }}"
+        state: present
+
+    - name: Create the Orca directory
+      ansible.builtin.file:
+        path: "{{ orca_root }}"
+        state: directory
+        mode: "0755"
+
+    - name: Download Orca
+      ansible.builtin.get_url:
+        url: https://github.com/stablyai/orca/releases/download/v{{ orca_version }}/orca-linux.AppImage
+        dest: "{{ orca_root }}/orca-{{ orca_version }}.AppImage"
+        mode: "0755"
+
+    # --appimage-extract-and-run unpacks to a temporary directory instead of mounting, so no FUSE.
+    - name: Write the orca-ide wrapper
+      ansible.builtin.copy:
+        content: |
+          #!/bin/sh
+          exec {{ orca_root }}/orca-{{ orca_version }}.AppImage --appimage-extract-and-run "$@"
+        dest: /usr/local/bin/orca-ide
+        mode: "0755"
+
+    - name: Find other Orca versions
+      ansible.builtin.find:
+        paths: "{{ orca_root }}"
+        patterns: orca-*.AppImage
+        excludes: orca-{{ orca_version }}.AppImage
+      register: host_orca_old
+
+    - name: Remove other Orca versions
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ host_orca_old.files }}"
+      loop_control:
+        label: "{{ item.path }}"

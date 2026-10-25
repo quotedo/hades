@@ -1,0 +1,8 @@
+/dist/
+/bin/
+/ansible/inventory.yml
+/ansible/.env
+/ansible/.ansible/
+/.envrc
+/.superpowers/
+/ansible/.cache/

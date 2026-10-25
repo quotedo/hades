@@ -1,0 +1,43 @@
+name: ansible
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ansible:
+    runs-on: ubuntu-latest
+    env:
+      ANSIBLE_CONFIG: ${{ github.workspace }}/ansible/ansible.cfg
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ansible-core ansible-lint
+      - run: ansible-galaxy collection install -r ansible/requirements.yml
+      - run: ansible-playbook --syntax-check -i ansible/inventory.example.yml ansible/playbooks/site.yml
+      - run: ansible-playbook --syntax-check -i ansible/inventory.example.yml ansible/playbooks/verify.yml
+      - run: ansible-lint -c ansible/.ansible-lint ansible/
+      - run: ansible/scripts/check-no-literals.sh ansible/inventory.example.yml
+      # Each invalid fixture must fail preflight with its message; valid.yml must pass without the
+      # sshd play, which reads the host's sshd.
+      - name: Preflight fixtures
+        working-directory: ansible
+        env:
+          HADES_TEST_VPN_CONF: "[Peer]\nAllowedIPs = 0.0.0.0/0, ::/0\n"
+        run: |
+          while IFS='|' read -r fixture message; do
+            if out=$(ansible-playbook -i "tests/inventories/$fixture.yml" playbooks/preflight.yml 2>&1); then
+              echo "$fixture: preflight passed"; exit 1
+            fi
+            tr -s ' \n' ' ' <<<"$out" | grep -F -- "$message" >/dev/null || { echo "$out"; echo "$fixture: no '$message'"; exit 1; }
+          done <<'EOF'
+          missing-domain|hades_domain must be defined
+          colliding-logins|[j-smith, jsmith]
+          duplicate-uids|Present dev_users share a uid: 3001 [alice, bob]
+          orca-without-tailscale|orca is listed by: alice — it pairs over Tailscale
+          tools-prefix|tools.node: versions must be exact
+          vpn-full-tunnel|intranet subnets in AllowedIPs
+          EOF
+          ansible-playbook -i tests/inventories/valid.yml playbooks/preflight.yml --skip-tags sshd

@@ -1,0 +1,51 @@
+---
+# Copy to inventory.yml in your site repository and replace every placeholder.
+dev_servers:
+  hosts:
+    box:
+      ansible_host: <IP>
+      ansible_user: <SUDO_USER>
+      hades_domain: <DOMAIN>
+      hades_label_template: !unsafe '{{project}}-{{name}}'
+      # hades_version: "0.1.0"  # a published release, tagged v<version>, downloaded with the administrator's gh
+      # hades_local_binary_dir: /path/to/dist/linux_amd64  # development: a local linux/amd64 build instead of the release
+      # Cloudflare Access admits every present dev user's email plus these emails or @domains.
+      access_allow: []
+      # cloudflare_team: hades-<DOMAIN with dots replaced by dashes>  # the default; Zero Trust team name when the role creates it
+      dev_services: [rabbitmq, localstack]
+      # tailscale_enabled: false  # the default is true exactly when a present dev user lists orca
+      # Clone URLs every developer gets; hades-onboard clones them after the GitHub login.
+      dev_repos: []
+      vpn_enabled: false
+      vpn_conf_env: AMNEZIA_WG_CONF_BOX  # the environment variable holding this host's AmneziaWG config
+      vpn_probe: ""  # "<IP>:<PORT>", one intranet TCP endpoint verify must reach
+      # Exact versions; the first of each tool is the box default. Erlang before Elixir.
+      tools:
+        node: ["24.22.1"]
+        erlang: ["29.1.2", "28.5", "28.3.1"]
+        elixir: ["1.20.4-otp-29", "1.19.5-otp-28"]
+        python: ["3.14.9", "3.12.10"]
+        go: ["1.26.10"]
+        kubectl: ["1.33.13"]
+        gh: ["2.103.1"]
+      host_extra_packages: []
+      # hex_repos: [{name: acme, url: https://hex.example.com, key_env: HEX_REPO_KEY, fingerprint_env: HEX_REPO_FINGERPRINT}]
+      protected:
+        floor: true
+        capped_users: []
+        capped_units: []
+        blocked_ports: [5432]
+        private_homes: []
+      dev_users:
+        - name: dev1
+          uid: 2001
+          github: <GITHUB_LOGIN>  # authorized_keys follows https://github.com/<login>.keys, refreshed hourly
+          email: <EMAIL>  # their Cloudflare Access login
+          # ades: [paseo]  # the default; paseo, orca or both
+          # paseo_port: 12001  # the default: uid + 10000
+          # orca_port: 22001  # the default: uid + 20000
+          # admin: false  # true: group sudo, password required
+          # ssh_keys: []  # static public keys, added to the GitHub ones
+          # gpg_key: false  # true: a GPG key for git-secret, generated on the box
+          # repos: []  # the default: dev_repos
+          # state: present  # absent offboards the developer

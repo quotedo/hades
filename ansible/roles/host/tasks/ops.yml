@@ -1,0 +1,42 @@
+---
+# Ops: gc, backup and keys timers, hades-status, hades-onboard and the journal cap.
+- name: Install hades-backup, hades-status, hades-keys and hades-onboard
+  ansible.builtin.template:
+    src: "{{ item }}.sh.j2"
+    dest: "{{ hades_bin_dir }}/{{ item }}"
+    mode: "0755"
+  loop: [hades-backup, hades-status, hades-keys, hades-onboard]
+
+- name: Write the gc, backup and keys units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: /etc/systemd/system/{{ item }}
+    mode: "0644"
+  loop:
+    - hades-gc.service
+    - hades-gc.timer
+    - hades-backup.service
+    - hades-backup.timer
+    - hades-keys.service
+    - hades-keys.timer
+  register: host_ops_units
+  notify: daemon-reload
+
+- name: Reload systemd before starting the timers
+  ansible.builtin.meta: flush_handlers
+
+# In check mode a unit file that is about to be written does not exist yet.
+- name: Enable and start the gc, backup and keys timers
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: [hades-gc.timer, hades-backup.timer, hades-keys.timer]
+  when: not (ansible_check_mode and host_ops_units is changed)
+
+- name: Cap the journal size
+  ansible.builtin.template:
+    src: journald-hades.conf.j2
+    dest: /etc/systemd/journald.conf.d/hades.conf
+    mode: "0644"
+  notify: journald restart

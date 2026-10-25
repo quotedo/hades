@@ -1,0 +1,62 @@
+---
+# One absent dev user whose account still exists (loop variable `user`, uid `user_uid`). Once the
+# account is gone, the next run skips this file, so deleting the account comes last: every task
+# before it can be repeated.
+
+# Stops the ADE units running inside it; userdel refuses an account with live processes. Before
+# disabling lingering, which would start stopping it without waiting.
+- name: Stop the user manager
+  ansible.builtin.systemd_service:
+    name: user@{{ user_uid }}.service
+    state: stopped
+
+- name: Disable lingering
+  ansible.builtin.command: loginctl disable-linger {{ user.name }}
+  args:
+    removes: /var/lib/systemd/linger/{{ user.name }}
+
+- name: Kill the user's remaining processes
+  ansible.builtin.command: pkill -KILL -u {{ user.name }}
+  register: user_offboard_pkill
+  changed_when: user_offboard_pkill.rc == 0
+  failed_when: user_offboard_pkill.rc > 1
+
+# After the processes are gone, so none of them registers a worktree meanwhile.
+- name: Release the user's worktrees
+  ansible.builtin.command: hades gc --owner {{ user.name }}
+  changed_when: true
+
+# Every run archives again under its own time stamp, so a partial archive from an interrupted run
+# never stands in for the home. Offboard archives are never pruned: the nightly backup's prune
+# pattern does not match them. umask 077: the archive is 0600, like the nightly ones.
+- name: Archive the home
+  ansible.builtin.shell: >-
+    umask 077; tar -czf {{ (backup_dir ~ '/' ~ user.name ~ '-offboard-' ~ ansible_facts.date_time.iso8601_basic_short ~ '.tar.gz') | quote }}
+    -C {{ ansible_facts.getent_passwd[user.name][4] | quote }} .
+  changed_when: true
+
+# The role created all of them for this user.
+- name: Remove the per-uid resource policy and static keys
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/user-{{ user_uid }}.slice.d
+    - /etc/systemd/system/user@{{ user_uid }}.service.d
+    - "{{ hades_config_dir }}/ssh-keys/{{ user.name }}"
+
+- name: Remove the user from the GitHub login list
+  ansible.builtin.lineinfile:
+    path: "{{ hades_config_dir }}/github-logins"
+    regexp: "^{{ user.name }}:"
+    state: absent
+
+- name: Reload systemd without the resource policy
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Delete the account and its home
+  ansible.builtin.user:
+    name: "{{ user.name }}"
+    state: absent
+    remove: true

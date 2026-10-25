@@ -1,0 +1,223 @@
+---
+# The Cloudflare side of ingress, from the inventory, through the API. Each object
+# is read first and written only when it is missing or differs; nothing is ever deleted.
+- name: Assert the Cloudflare credentials and the Access allow-list
+  ansible.builtin.assert:
+    that:
+      - lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') | length > 0
+      - lookup('ansible.builtin.env', 'CF_API_TOKEN') | length > 0
+      - ingress_access_entries | reject('match', '^[^@\\s]*@[^@\\s]+$') | list == []
+      - access_session is string
+    fail_msg: >-
+      Export CF_ACCOUNT_ID and CF_API_TOKEN (permissions in .env.example) or skip the tunnel with
+      --skip-tags cloudflared. Every present dev user needs an email; access_allow entries are
+      emails or @domain; access_session is a duration such as 720h.
+    quiet: true
+
+# no_log: every request carries the API token in its Authorization header, and the tunnel's
+# create and token responses carry the tunnel token. Failures the operator can fix are asserted
+# in the open; for any other failure the rescue shows Cloudflare's errors, never the request.
+- name: Cloudflare tunnel, DNS record and Access application
+  delegate_to: localhost
+  become: false
+  no_log: true
+  module_defaults:
+    ansible.builtin.uri:
+      headers:
+        Authorization: Bearer {{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}
+      body_format: json
+  vars:
+    ingress_cf_account: "{{ ingress_cloudflare_api }}/accounts/{{ lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') }}"
+    ingress_cf_tunnel: "{{ ingress_cf_tunnels.json.result[0] | default(ingress_cf_tunnel_new.json.result | default({})) }}"
+    ingress_cf_ingress:
+      - hostname: "*.{{ hades_domain }}"
+        service: http://{{ hades_loopback_address }}:{{ caddy_port }}
+      - service: http_status:404
+    ingress_cf_zone_url: "{{ ingress_cloudflare_api }}/zones/{{ ingress_cf_zones.json.result[0].id | default('') }}"
+    ingress_cf_app: >-
+      {{ ingress_cf_apps.json.result | selectattr('domain', 'eq', '*.' ~ hades_domain) | first
+         | default(ingress_cf_app_new.json.result | default({})) }}
+    ingress_cf_policy: "{{ ingress_cf_app.policies | default([]) | first | default({}) }}"
+  block:
+    - name: Read the tunnel
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/cfd_tunnel?is_deleted=false&name=hades-{{ inventory_hostname }}"
+      register: ingress_cf_tunnels
+      check_mode: false
+
+    - name: Create the tunnel
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/cfd_tunnel"
+        method: POST
+        body:
+          name: hades-{{ inventory_hostname }}
+          config_src: cloudflare
+      register: ingress_cf_tunnel_new
+      changed_when: true
+      when: ingress_cf_tunnels.json.result == []
+
+    - name: Read the tunnel's ingress rules
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/cfd_tunnel/{{ ingress_cf_tunnel.id }}/configurations"
+      register: ingress_cf_config
+      check_mode: false
+      when: ingress_cf_tunnel.id is defined
+
+    - name: Route the tunnel to Caddy
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/cfd_tunnel/{{ ingress_cf_tunnel.id }}/configurations"
+        method: PUT
+        body:
+          config:
+            ingress: "{{ ingress_cf_ingress }}"
+      changed_when: true
+      when:
+        - ingress_cf_tunnel.id is defined
+        - ingress_cf_config.json.result.config.ingress | default([]) != ingress_cf_ingress
+
+    - name: Read the zone
+      ansible.builtin.uri:
+        url: "{{ ingress_cloudflare_api }}/zones?name={{ hades_domain }}"
+      register: ingress_cf_zones
+      check_mode: false
+
+    - name: Assert the zone exists
+      ansible.builtin.assert:
+        that: ingress_cf_zones.json.result | length == 1
+        fail_msg: >-
+          the API token sees no Cloudflare zone named hades_domain ({{ hades_domain }}): check the
+          zone name and the token's Zone permissions
+        quiet: true
+      no_log: false
+
+    - name: Read the wildcard DNS record
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_zone_url }}/dns_records?name=*.{{ hades_domain }}"
+      register: ingress_cf_dns
+      check_mode: false
+
+    - name: Assert the wildcard DNS record is missing or a proxied CNAME to the tunnel
+      ansible.builtin.assert:
+        that: >-
+          ingress_cf_dns.json.result == [] or
+          ingress_cf_dns.json.result | map(attribute='type') | list == ['CNAME'] and
+          ingress_cf_dns.json.result[0].content == ingress_cf_tunnel.id | default('') ~ '.cfargotunnel.com' and
+          ingress_cf_dns.json.result[0].proxied
+        fail_msg: >-
+          *.{{ hades_domain }} already has records that are not a proxied CNAME to the tunnel; the
+          role never changes them: fix them in the Cloudflare dashboard
+        quiet: true
+      no_log: false
+
+    - name: Create the wildcard DNS record
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_zone_url }}/dns_records"
+        method: POST
+        body:
+          type: CNAME
+          name: "*.{{ hades_domain }}"
+          content: "{{ ingress_cf_tunnel.id }}.cfargotunnel.com"
+          proxied: true
+      changed_when: true
+      when:
+        - ingress_cf_tunnel.id is defined
+        - ingress_cf_dns.json.result == []
+
+    # cloudflared.yml writes it to the host.
+    - name: Read the tunnel token
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/cfd_tunnel/{{ ingress_cf_tunnel.id }}/token"
+      register: ingress_tunnel_token
+      check_mode: false
+      when: ingress_cf_tunnel.id is defined
+
+    - name: Read the Access application
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/access/apps?domain=*.{{ hades_domain }}"
+      register: ingress_cf_apps
+      check_mode: false
+
+    # The organization caps every application's session, so both carry access_session.
+    - name: Create the Access application or set its session length and login flags
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/access/apps{{ ('/' ~ ingress_cf_app.id) if ingress_cf_app else '' }}"
+        method: "{{ 'PUT' if ingress_cf_app else 'POST' }}"
+        body:
+          name: "{{ ingress_cf_app.name | default('hades dev sites') }}"
+          type: self_hosted
+          domain: "*.{{ hades_domain }}"
+          session_duration: "{{ access_session }}"
+          app_launcher_visible: false
+          auto_redirect_to_identity: true
+      register: ingress_cf_app_new
+      changed_when: true
+      when: >-
+        ingress_cf_app == {} or ingress_cf_app.session_duration != access_session
+        or ingress_cf_app.app_launcher_visible or not ingress_cf_app.auto_redirect_to_identity
+
+    # An account without Zero Trust answers with an error: the organization is then created, which
+    # enables Zero Trust where the account allows it through the API.
+    - name: Read the Access organization
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/access/organizations"
+        status_code: [200, 400, 403, 404]
+      register: ingress_cf_org
+      check_mode: false
+
+    - name: Create the Access organization
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/access/organizations"
+        method: POST
+        body:
+          name: hades
+          auth_domain: "{{ cloudflare_team }}.cloudflareaccess.com"
+          session_duration: "{{ access_session }}"
+        status_code: [200, 201, 400, 403, 404, 409]
+      register: ingress_cf_org_new
+      changed_when: true
+      when: ingress_cf_org.status != 200
+
+    - name: Fail when the Access organization could not be created
+      ansible.builtin.fail:
+        msg: >-
+          Zero Trust could not be created through the API: enable it once in the Cloudflare dashboard,
+          then apply again (Cloudflare: {{ (ingress_cf_org.json.errors | default([]) + ingress_cf_org_new.json.errors
+          | default([])) | map(attribute='message') | join('; ') }})
+      no_log: false
+      when:
+        - ingress_cf_org_new is not skipped
+        - not ingress_cf_org_new.json.success | default(false)
+
+    - name: Set the Access organization's session length
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/access/organizations"
+        method: PUT
+        body:
+          name: "{{ ingress_cf_org.json.result.name }}"
+          auth_domain: "{{ ingress_cf_org.json.result.auth_domain }}"
+          session_duration: "{{ access_session }}"
+      changed_when: true
+      when:
+        - ingress_cf_org.status == 200
+        - ingress_cf_org.json.result.session_duration != access_session
+
+    # Compared as sets: Cloudflare keeps the order it was given, the inventory may reorder.
+    - name: Set the Access allow-list
+      ansible.builtin.uri:
+        url: "{{ ingress_cf_account }}/access/apps/{{ ingress_cf_app.id }}/policies{{ ('/' ~ ingress_cf_policy.id) if ingress_cf_policy else '' }}"
+        method: "{{ 'PUT' if ingress_cf_policy else 'POST' }}"
+        body:
+          name: team
+          decision: allow
+          include: "{{ ingress_access_include }}"
+      changed_when: true
+      when:
+        - ingress_cf_app != {}
+        - ingress_cf_policy == {} or ingress_cf_policy.include | symmetric_difference(ingress_access_include) != []
+  rescue:
+    - name: Fail with Cloudflare's errors
+      ansible.builtin.fail:
+        msg: >-
+          {{ ansible_failed_task.name }}: {{ ansible_failed_result.json.errors | default([]) | to_json
+             if ansible_failed_result.json is defined else ansible_failed_result.msg | default('failed') }}
+      no_log: false

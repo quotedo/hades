@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+[tools]
+{% for tool, versions in tools.items() %}
+"{{ tool }}" = "{{ versions[0] }}"
+{% endfor %}
+
+[settings]
+auto_install = false
+not_found_system_fallback = false

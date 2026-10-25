@@ -1,0 +1,59 @@
+---
+# Cloudflare publishes the one suite `any` for every release.
+- name: Add the cloudflared repository
+  ansible.builtin.deb822_repository:
+    name: cloudflared
+    uris: https://pkg.cloudflare.com/cloudflared
+    suites: any
+    components: main
+    signed_by: https://pkg.cloudflare.com/cloudflare-main.gpg
+  register: ingress_cloudflared_repo
+
+- name: Install cloudflared
+  ansible.builtin.apt:
+    name: cloudflared
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ 0 if ingress_cloudflared_repo is changed else 3600 }}"
+  when: not (ansible_check_mode and ingress_cloudflared_repo is changed)
+
+- name: Create the cloudflared directory
+  ansible.builtin.file:
+    path: /etc/cloudflared
+    state: directory
+    mode: "0700"
+
+# The unit reads it with --token-file, so the token is in no world-readable file and no process
+# list. cloudflare.yml reads it from the API; it travels over the task's stdin, so it never passes
+# through a controller file or a command line. A rotated token is written, and the connector
+# restarted, on the next run. Check mode against a tunnel not created yet has no token.
+- name: Write the tunnel token
+  ansible.builtin.shell: |
+    set -e; umask 077
+    new=$(cat)
+    [ -f /etc/cloudflared/token ] && [ "$(cat /etc/cloudflared/token)" = "$new" ] && exit 0
+    printf '%s' "$new" > /etc/cloudflared/token && echo changed
+  args:
+    stdin: "{{ ingress_tunnel_token.json.result }}"
+  register: ingress_token_write
+  changed_when: "'changed' in ingress_token_write.stdout"
+  no_log: true
+  notify: cloudflared restart
+  when: ingress_tunnel_token.json is defined
+
+- name: Write the cloudflared unit
+  ansible.builtin.template:
+    src: cloudflared.service.j2
+    dest: /etc/systemd/system/cloudflared.service
+    mode: "0644"
+  register: ingress_cloudflared_unit
+  notify: cloudflared restart
+
+# In check mode a unit file that is about to be written does not exist yet.
+- name: Enable and start cloudflared
+  ansible.builtin.systemd_service:
+    name: cloudflared.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not (ansible_check_mode and ingress_cloudflared_unit is changed)

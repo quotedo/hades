@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "chrome-devtools": {
+      "args": [
+        "-y",
+        "chrome-devtools-mcp@latest",
+        "--headless",
+        "--isolated",
+        "--executablePath",
+        "/opt/chrome/chrome"
+      ],
+      "command": "npx"
+    },
+    "other": {
+      "command": "x"
+    },
+    "tidewave": {
+      "type": "http",
+      "url": "http://localhost:4100/tidewave/mcp"
+    }
+  }
+}

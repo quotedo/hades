@@ -1,0 +1,1 @@
+{"mcpServers":[{"name":"tidewave","transport":{"type":"http","url":"http://localhost:4000/tidewave/mcp"}},{"name":"other","transport":{"type":"stdio"}}]}

@@ -1,0 +1,21 @@
+---
+namespace: quotedo
+name: hades
+version: 0.1.0
+readme: README.md
+authors:
+  - quotedo
+description: Provision an Ubuntu/Debian x86_64 host into a multi-user dev server for agentic development environments.
+license:
+  - MIT
+tags:
+  - infrastructure
+  - linux
+repository: https://github.com/quotedo/hades
+dependencies:
+  community.general: ">=13.4.0"
+  community.postgresql: ">=4.2.0"
+build_ignore:
+  - inventory.yml
+  - .env
+  - tests

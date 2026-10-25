@@ -1,0 +1,73 @@
+---
+# Verification playbook. Each check set is selected by a tag.
+- name: Verify the collection
+  hosts: dev_servers
+  gather_facts: false
+  vars:
+    # The account the isolation and Chrome probes run as.
+    verify_unprivileged_user: nobody
+  roles:
+    # Listed only to load each role's defaults for the tests, at role-default precedence, so
+    # inventory values still win. Do not use vars_files instead: play vars_files outrank inventory
+    # host vars. `never` keeps the roles' tasks out of the output; `when: false` keeps a task that
+    # carries its own tag (cloudflared, tailscale, ...) from running under `--tags <that tag>`,
+    # which selects it past `never`.
+    - { role: host, tags: [never], when: false }
+    - { role: postgres, tags: [never], when: false }
+    - { role: services, tags: [never], when: false }
+    - { role: ingress, tags: [never], when: false }
+    - { role: user, tags: [never], when: false }
+  tasks:
+    - name: Host tests
+      ansible.builtin.import_tasks: tasks/host_tests.yml
+      tags: [host]
+
+    - name: Loopback isolation tests
+      ansible.builtin.import_tasks: tasks/isolation_tests.yml
+      tags: [isolation]
+
+    - name: Ops tests
+      ansible.builtin.import_tasks: tasks/ops_tests.yml
+      tags: [ops]
+
+    - name: Postgres tests
+      ansible.builtin.import_tasks: tasks/postgres_tests.yml
+      tags: [postgres]
+
+    # The stack exists only when a service is listed.
+    - name: Shared services tests
+      ansible.builtin.import_tasks: tasks/services_tests.yml
+      tags: [services]
+      when: dev_services | length > 0
+
+    - name: Ingress tests
+      ansible.builtin.import_tasks: tasks/ingress_tests.yml
+      tags: [ingress]
+
+    - name: Dev user tests
+      ansible.builtin.import_tasks: tasks/user_tests.yml
+      tags: [user]
+
+    - name: ADE daemon tests
+      ansible.builtin.import_tasks: tasks/ade_tests.yml
+      tags: [ade]
+
+    - name: Offboarding and GPG key tests
+      ansible.builtin.import_tasks: tasks/offboard_tests.yml
+      tags: [offboard]
+
+    - name: Protected workload tests
+      ansible.builtin.import_tasks: tasks/protected_tests.yml
+      tags: [protected]
+      when: protected is defined
+
+    - name: VPN tests
+      ansible.builtin.import_tasks: tasks/vpn_tests.yml
+      tags: [vpn]
+      when: vpn_enabled
+
+    # Opt-in: it writes into acceptance_user's home, so only a throwaway dev user.
+    - name: Acceptance tests
+      ansible.builtin.import_tasks: tasks/acceptance_tests.yml
+      tags: [acceptance]
+      when: acceptance_user is defined

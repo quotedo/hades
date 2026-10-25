@@ -1,0 +1,64 @@
+---
+# One present dev user (loop variable `user`).
+- name: Account, resource policy and shell environment
+  ansible.builtin.import_tasks: account.yml
+
+- name: GPG key
+  ansible.builtin.import_tasks: gpg.yml
+  when: user.gpg_key | default(false)
+  vars:
+    user_gpg_uid: "{{ user.name }}+{{ inventory_hostname }}@{{ hades_domain }}"
+
+- name: Toolchain and ADE daemons, as the user
+  become: true
+  become_user: "{{ user.name }}"
+  environment:
+    PATH: "{{ mise_shims }}:/usr/local/bin:/usr/bin:/bin"
+    # Otherwise mise points both into the root-owned Elixir install (env.sh.j2).
+    MIX_HOME: "{{ user_home }}/.mix"
+    MIX_ARCHIVES: "{{ user_home }}/.mix/archives"
+    # systemctl --user reaches the user manager, kept running by lingering, through it.
+    XDG_RUNTIME_DIR: /run/user/{{ user.uid }}
+  block:
+    - name: Toolchain
+      ansible.builtin.import_tasks: toolchain.yml
+
+    - name: Paseo
+      ansible.builtin.import_tasks: ade_paseo.yml
+      when: "'paseo' in user.ades"
+
+    - name: Orca
+      ansible.builtin.import_tasks: ade_orca.yml
+      when: "'orca' in user.ades"
+
+    - name: Look for the units of ADEs the user no longer lists
+      ansible.builtin.stat:
+        path: "{{ user_home }}/.config/systemd/user/{{ item }}.service"
+      register: user_dropped_ades
+      loop: "{{ ['paseo', 'orca'] | difference(user.ades) }}"
+
+    - name: Stop and disable them
+      ansible.builtin.systemd_service:
+        name: "{{ item.item }}.service"
+        scope: user
+        state: stopped
+        enabled: false
+      loop: "{{ user_dropped_ades.results | selectattr('stat.exists') }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    - name: Remove their unit files
+      ansible.builtin.file:
+        path: "{{ item.stat.path }}"
+        state: absent
+      register: user_dropped_units
+      loop: "{{ user_dropped_ades.results | selectattr('stat.exists') }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # Not a handler: it must run as this user, inside the loop.
+    - name: Reload the user manager without them
+      ansible.builtin.systemd_service:
+        scope: user
+        daemon_reload: true
+      when: user_dropped_units is changed # noqa: no-handler

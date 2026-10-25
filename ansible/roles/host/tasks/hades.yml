@@ -1,0 +1,67 @@
+---
+- name: Read the installed hades version
+  ansible.builtin.command: "{{ hades_bin_dir }}/hades version"
+  register: host_hades_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install hades from a local build (development)
+  ansible.builtin.copy:
+    src: "{{ hades_local_binary_dir }}/{{ item }}"
+    dest: "{{ hades_bin_dir }}/{{ item }}"
+    mode: "0755"
+  loop: [hades, hades-port]
+  when: hades_local_binary_dir is defined
+
+# The repository may be private, so the archive is fetched on the controller with the operator's
+# own gh login (GH_TOKEN unset so the keyring login is used) and checked against checksums.txt.
+- name: Install hades from the release
+  when:
+    - hades_local_binary_dir is not defined
+    - host_hades_installed.rc != 0 or host_hades_installed.stdout != hades_version
+  vars:
+    host_hades_release_dir: "{{ playbook_dir }}/../.cache/release/{{ hades_version }}"
+  block:
+    - name: Download the release archive and checksums on the controller
+      ansible.builtin.command:
+        argv: [env, -u, GH_TOKEN, gh, release, download, "v{{ hades_version }}", --repo, quotedo/hades,
+               --pattern, "hades_{{ hades_version }}_linux_amd64.tar.gz", --pattern, checksums.txt,
+               --dir, "{{ host_hades_release_dir }}", --clobber]
+      delegate_to: localhost
+      become: false
+      run_once: false
+      changed_when: true
+      check_mode: false
+
+    - name: Verify the archive against checksums.txt
+      ansible.builtin.command: sha256sum --check --ignore-missing checksums.txt
+      args:
+        chdir: "{{ host_hades_release_dir }}"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      check_mode: false
+
+    - name: Unpack hades and hades-port
+      ansible.builtin.unarchive:
+        src: "{{ host_hades_release_dir }}/hades_{{ hades_version }}_linux_amd64.tar.gz"
+        dest: "{{ hades_bin_dir }}"
+        include: [hades, hades-port]
+        owner: root
+        group: root
+        mode: "0755"
+
+# caddy-reload refuses a host config that is not root-owned or is group- or world-writable.
+- name: Write the host config
+  ansible.builtin.template:
+    src: host.toml.j2
+    dest: "{{ hades_config_dir }}/host.toml"
+    mode: "0644"
+
+- name: Allow group hades to run hades caddy-reload as root
+  ansible.builtin.template:
+    src: hades-sudoers.j2
+    dest: /etc/sudoers.d/hades
+    mode: "0440"
+    validate: visudo -cf %s

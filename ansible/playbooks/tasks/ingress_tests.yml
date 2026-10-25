@@ -1,0 +1,197 @@
+---
+- name: Read Caddy's unit
+  ansible.builtin.systemd_service:
+    name: caddy.service
+  register: ingress_test_caddy
+
+- name: Assert Caddy is active in hades.slice
+  ansible.builtin.assert:
+    that:
+      - ingress_test_caddy.status.ActiveState | default('missing') == 'active'
+      - ingress_test_caddy.status.Slice | default('missing') == 'hades.slice'
+    fail_msg: >-
+      caddy.service is {{ ingress_test_caddy.status.ActiveState | default('missing') }} in
+      {{ ingress_test_caddy.status.Slice | default('no slice') }}, expected active in hades.slice
+    quiet: true
+
+- name: Read the listening TCP sockets with their processes
+  ansible.builtin.command: ss -Hltnp
+  become: true
+  register: ingress_test_ss
+  changed_when: false
+
+# Every caddy_port listener is on the loopback address, Caddy listens nowhere else (no 80/443),
+# and nothing holds Caddy's default API port: the API is on the unix socket only.
+- name: Assert Caddy listens on the loopback caddy_port only
+  ansible.builtin.assert:
+    that:
+      - ingress_test_port_lines | length > 0
+      - ingress_test_port_lines | reject('search', ingress_test_bind) | list | length == 0
+      - ingress_test_ss.stdout_lines | select('search', '"caddy"') | reject('search', ingress_test_bind) | list | length == 0
+      - ingress_test_ss.stdout_lines | select('search', ':2019 ') | list | length == 0
+    fail_msg: >-
+      listeners: {{ ingress_test_ss.stdout_lines | select('search', ':(' ~ caddy_port ~ '|2019) |"caddy"')
+                    | join(' | ') or 'none' }}
+    quiet: true
+  vars:
+    ingress_test_bind: " {{ hades_loopback_address | regex_escape }}:{{ caddy_port }} "
+    ingress_test_port_lines: "{{ ingress_test_ss.stdout_lines | select('search', ':' ~ caddy_port ~ ' ') | list }}"
+
+- name: Stat Caddy's API socket
+  ansible.builtin.stat:
+    path: "{{ ingress_caddy_api_socket }}"
+  become: true
+  register: ingress_test_api_socket
+
+- name: Assert only the caddy account can use Caddy's API socket
+  ansible.builtin.assert:
+    that:
+      - ingress_test_api_socket.stat.issock | default(false)
+      - ingress_test_api_socket.stat.pw_name == 'caddy'
+      - ingress_test_api_socket.stat.mode == '0200'
+    fail_msg: >-
+      {{ ingress_caddy_api_socket }} must be a socket owned by caddy with mode 0200, got
+      {{ ingress_test_api_socket.stat.pw_name | default('nothing') }} {{ ingress_test_api_socket.stat.mode | default('') }}
+    quiet: true
+
+- name: Query the catch-all site
+  ansible.builtin.uri:
+    url: http://{{ hades_loopback_address }}:{{ caddy_port }}/
+    headers:
+      Host: nothing.{{ hades_domain }}
+    status_code: 302
+    follow_redirects: none
+  register: ingress_test_catchall
+  become: true
+
+- name: Assert an unknown host name redirects to the apex
+  ansible.builtin.assert:
+    that: ingress_test_catchall.location == 'https://' ~ hades_domain
+    fail_msg: "catch-all Location is {{ ingress_test_catchall.location | default('missing') }}"
+    quiet: true
+
+- name: Probe a gated path through a temporary worktree site
+  become: true
+  block:
+    - name: Write the probe site
+      ansible.builtin.copy:
+        content: "import worktree probe.{{ hades_domain }} 65000\n"
+        dest: "{{ hades_live_dir }}/probe.caddy"
+        mode: "0644"
+
+    - name: Reload Caddy with the probe site
+      ansible.builtin.command:
+        argv: "{{ caddy_reload_command }}"
+      changed_when: false
+
+    - name: Assert a gated path without the Access header is refused
+      ansible.builtin.uri:
+        url: http://{{ hades_loopback_address }}:{{ caddy_port }}/dev/mailbox
+        headers:
+          Host: probe.{{ hades_domain }}
+        status_code: 403
+
+    # Nothing listens on the probe port, so 502 means the gate let it through and Caddy dialled it.
+    - name: Assert a gated path with the Access header is proxied
+      ansible.builtin.uri:
+        url: http://{{ hades_loopback_address }}:{{ caddy_port }}/dev/mailbox
+        headers:
+          Host: probe.{{ hades_domain }}
+          Cf-Access-Jwt-Assertion: probe
+        status_code: 502
+  always:
+    - name: Remove the probe site
+      ansible.builtin.file:
+        path: "{{ hades_live_dir }}/probe.caddy"
+        state: absent
+
+    - name: Reload Caddy without the probe site
+      ansible.builtin.command:
+        argv: "{{ caddy_reload_command }}"
+      changed_when: false
+
+# Skipped without Cloudflare credentials unless the tag is requested: a host with no zone runs no
+# tunnel.
+- name: Check the tunnel connector and Cloudflare Access
+  when: lookup('ansible.builtin.env', 'CF_API_TOKEN') | length > 0 or 'cloudflared' in ansible_run_tags
+  tags: [cloudflared]
+  block:
+    - name: Read cloudflared's unit
+      ansible.builtin.systemd_service:
+        name: cloudflared.service
+      register: ingress_test_cloudflared
+
+    - name: Assert cloudflared is active
+      ansible.builtin.assert:
+        that:
+          - ingress_test_cloudflared.status.ActiveState | default('missing') == 'active'
+        fail_msg: "cloudflared.service is {{ ingress_test_cloudflared.status.ActiveState | default('missing') }}"
+        quiet: true
+
+    # Through the edge: Access must answer before the request reaches the tunnel.
+    - name: Request an unknown label through Cloudflare
+      ansible.builtin.uri:
+        url: https://probe-{{ 999999999 | random }}.{{ hades_domain }}/
+        follow_redirects: none
+        status_code: 302
+      delegate_to: localhost
+      become: false
+      register: ingress_test_edge
+
+    - name: Read the Access organization
+      ansible.builtin.uri:
+        url: "{{ ingress_cloudflare_api }}/accounts/{{ lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') }}/access/organizations"
+        headers:
+          Authorization: Bearer {{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}
+      delegate_to: localhost
+      become: false
+      register: ingress_test_org
+      no_log: true
+
+    - name: Assert Cloudflare Access redirects to the team domain
+      ansible.builtin.assert:
+        that: ingress_test_edge.location.startswith('https://' ~ ingress_test_org.json.result.auth_domain ~ '/')
+        fail_msg: "edge Location is {{ ingress_test_edge.location }}"
+        quiet: true
+
+    - name: Read the Access application
+      ansible.builtin.uri:
+        url: "{{ ingress_cloudflare_api }}/accounts/{{ lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') }}/access/apps?domain=*.{{ hades_domain }}"
+        headers:
+          Authorization: Bearer {{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}
+      delegate_to: localhost
+      become: false
+      register: ingress_test_apps
+      no_log: true
+
+    - name: Assert the Access policy admits exactly the inventory's list
+      ansible.builtin.assert:
+        that:
+          - ingress_test_policies | length == 1
+          - ingress_test_policies[0].include | symmetric_difference(ingress_access_include) == []
+        fail_msg: >-
+          Access policies {{ ingress_test_policies | map(attribute='include') | to_json }},
+          inventory {{ ingress_access_include | to_json }}
+        quiet: true
+      vars:
+        ingress_test_policies: >-
+          {{ ingress_test_apps.json.result | selectattr('domain', 'eq', '*.' ~ hades_domain)
+             | map(attribute='policies') | flatten }}
+
+- name: Check Tailscale is logged in when the operator provides TS_AUTHKEY
+  when:
+    - tailscale_enabled | bool
+    - lookup('ansible.builtin.env', 'TS_AUTHKEY') | length > 0
+  tags: [tailscale]
+  block:
+    - name: Read the Tailscale status
+      ansible.builtin.command: tailscale status --json
+      register: ingress_test_tailscale
+      changed_when: false
+      failed_when: false
+
+    - name: Assert Tailscale is running
+      ansible.builtin.assert:
+        that: (ingress_test_tailscale.stdout | default('{}', true) | from_json).BackendState | default('') == 'Running'
+        fail_msg: "tailscale status: {{ ingress_test_tailscale.stdout | default(ingress_test_tailscale.stderr, true) | truncate(200) }}"
+        quiet: true

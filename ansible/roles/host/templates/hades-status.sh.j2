@@ -1,0 +1,93 @@
+#!/bin/bash
+# {{ ansible_managed }}
+# hades-status: "why did my test die" and "who is filling the disk".
+# Read-only, root only. Every section prints, and reports "unavailable" when it cannot be read.
+set -uo pipefail
+export LC_ALL=C
+[ "$(id -u)" -eq 0 ] || { echo "hades-status: run it as root: sudo hades-status" >&2; exit 1; }
+
+hades={{ (hades_bin_dir ~ '/hades') | quote }}
+group={{ hades_group | quote }}
+pg_host={{ hades_loopback_address | quote }}
+pg_port={{ dev_pg_port | int }}
+pg_user={{ dev_pg_user | quote }}
+pg_password={{ dev_pg_password | quote }}
+
+members=$(getent group "$group" | cut -d: -f4 | tr ',' ' ')
+
+# memory and CPU pressure ("some" avg10 / avg60) of one cgroup
+pressure() {
+  local dir="/sys/fs/cgroup/$2" mem cpu
+  if [ ! -d "$dir" ]; then
+    printf '  %-28s not running\n' "$1"
+    return
+  fi
+  mem=$(awk '/^some/ { print $2 "/" $3 }' "$dir/memory.pressure" 2>/dev/null)
+  cpu=$(awk '/^some/ { print $2 "/" $3 }' "$dir/cpu.pressure" 2>/dev/null)
+  printf '  %-28s memory %-26s cpu %s\n' "$1" "${mem:-unavailable}" "${cpu:-unavailable}"
+}
+
+echo "slices:"
+pressure hades.slice hades.slice
+pressure system.slice system.slice
+pressure user.slice user.slice
+for user in $members; do
+  uid=$(id -u "$user" 2>/dev/null) || continue
+  pressure "$user (user-$uid.slice)" "user.slice/user-$uid.slice"
+done
+echo
+if cgtop=$(systemd-cgtop -b -n1 -m --depth=2 2>/dev/null); then
+  echo "  by memory (systemd-cgtop): control group, tasks, %cpu, memory, input/s, output/s"
+  head -n 16 <<<"$cgtop" | sed 's/^/  /'
+else
+  echo "  systemd-cgtop unavailable"
+fi
+
+echo
+echo "worktrees:"
+"$hades" ls 2>&1 | sed 's/^/  /'
+
+echo
+if n=$(PGPASSWORD="$pg_password" PGCONNECT_TIMEOUT=3 psql -w -X -At -h "$pg_host" -p "$pg_port" \
+  -U "$pg_user" -d postgres \
+  -c "select count(*) from pg_stat_activity where backend_type = 'client backend' and pid <> pg_backend_pid()" 2>&1); then
+  echo "dev postgres connections: $n"
+else
+  echo "dev postgres connections: unavailable ($(head -n 1 <<<"$n"))"
+fi
+keys_started=$(systemctl show hades-keys.service -p ExecMainStartTimestamp --value 2>/dev/null)
+if [ -n "$keys_started" ]; then
+  echo "keys: last run $keys_started, $(systemctl show hades-keys.service -p Result --value)"
+else
+  echo "keys: unavailable"
+fi
+
+{% if vpn_enabled %}
+echo
+if last=$(awg show intranet latest-handshakes 2>/dev/null | awk 'NR == 1 { print $2 }') && [ "${last:-0}" -gt 0 ]; then
+  echo "vpn: last handshake $(( $(date +%s) - last )) s ago"
+else
+  echo "vpn: unavailable"
+fi
+
+{% endif %}
+echo
+echo "oom kills (this boot, last 10):"
+kills=$(journalctl -k -q --no-pager -o short-iso 2>/dev/null | grep -E 'oom-kill:|Killed process' | tail -n 10)
+if [ -n "$kills" ]; then
+  sed 's/^/  /' <<<"$kills"
+else
+  echo "  none"
+fi
+
+echo
+echo "disk:"
+df -h / | sed 's/^/  /'
+echo
+echo "largest homes:"
+for user in $members; do
+  home=$(getent passwd "$user" | cut -d: -f6)
+  [ -n "$home" ] && [ -d "$home" ] && printf '%s\0' "$home"
+done | xargs -0 -r du -sxh 2>/dev/null | sort -rh | head -n 5 | sed 's/^/  /'
+
+exit 0

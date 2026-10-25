@@ -1,0 +1,48 @@
+version: 2
+
+project_name: hades
+
+builds:
+  - id: hades
+    main: ./cmd/hades
+    binary: hades
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [arm64, amd64]
+    ldflags:
+      - -s -w -X github.com/quotedo/hades/internal/version.Version={{.Version}}
+  - id: hades-port
+    main: ./cmd/hades-port
+    binary: hades-port
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [arm64, amd64]
+    ldflags:
+      - -s -w -X github.com/quotedo/hades/internal/version.Version={{.Version}}
+
+archives:
+  - id: hades
+    formats: [tar.gz]
+    name_template: "hades_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^feat'
+      order: 0
+    - title: Fixes
+      regexp: '^fix'
+      order: 1
+    - title: Other
+      order: 999
+
+release:
+  header: |
+    Platforms: darwin/arm64 and linux/amd64 are first class and tested in CI.
+    linux/arm64 and darwin/amd64 are built but untested.

@@ -1,0 +1,7 @@
+---
+profile: production
+exclude_paths:
+  - tests/
+# Shared defaults live in the host role under their own names (hades_*, dev_*, ...).
+skip_list:
+  - var-naming[no-role-prefix]

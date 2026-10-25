@@ -1,0 +1,149 @@
+---
+# Shared defaults for every role. They are role defaults of `host`, which site.yml and verify.yml
+# list in `roles:`, so every role sees them under any tag selection and inventory still wins.
+
+# hades CLI
+hades_version: "0.1.0"
+hades_bin_dir: /usr/local/bin
+# hades_local_binary_dir: a controller directory holding `hades` and `hades-port`; when set,
+# both are copied from there instead of fetching the release (development only).
+
+# Host contract (/etc/hades/host.toml)
+hades_group: hades
+hades_config_dir: /etc/hades
+# A literal for hades to expand, not a Jinja expression.
+hades_label_template: !unsafe "{{project}}-{{name}}" # noqa: jinja[spacing]
+hades_port_range: "4100-4999"
+hades_registry_root: /srv/hades
+dev_services: []
+# Clone URLs every developer gets; a dev_users entry's repos replaces the list.
+dev_repos: []
+
+# Cloudflare Access (ingress role): extra emails or @domain entries the policy admits besides the
+# present dev users' emails, and the session length (Cloudflare's maximum).
+access_allow: []
+access_session: 720h
+# The Zero Trust team name the ingress role creates the Access organization with, when the
+# account has none yet: <cloudflare_team>.cloudflareaccess.com.
+cloudflare_team: "hades-{{ hades_domain | replace('.', '-') }}"
+
+# Intranet VPN (vpn role): vpn_conf_env names the operator's environment variable holding the
+# host's AmneziaWG config; vpn_probe ("<host>:<port>") is one intranet TCP endpoint verify reaches.
+vpn_enabled: false
+vpn_conf_env: ""
+vpn_probe: ""
+
+# Caddy (installed by the ingress role)
+caddy_port: 8090
+caddy_config: /etc/caddy/Caddyfile
+caddy_reload_command: [systemctl, reload, caddy]
+hades_live_dir: /etc/caddy/hades-sites
+
+# Dev Postgres (postgres role)
+dev_pg_port: 5433
+dev_pg_user: postgres
+dev_pg_password: postgres
+
+# Shared dev services (services role)
+rabbitmq_management_port: 15672
+rabbitmq_amqp_port: 5672
+rabbitmq_user: guest
+rabbitmq_password: guest
+rabbitmq_mqtt_port: 1883
+# Outside hades_port_range, which hades hands to worktrees; the SDK endpoint reaches worktrees via the env file.
+localstack_port: 14566
+redis_port: 6379
+
+# Shared tool store: mise installs every `tools` version as root under
+# mise_store; the first version of each tool is the box default. Versions are exact (preflight).
+mise_version: "2026.10.18"
+mise_store: /usr/local/share/mise
+mise_shims: "{{ mise_store }}/shims"
+tools:
+  node: ["24.22.1"]
+  gh: ["2.103.1"]
+kerl_configure_options: "--without-wx --without-javac --without-odbc"
+# apt packages a host adds on top of host_packages; never removed by the role.
+host_extra_packages: []
+
+# Installed as root with npm under the store's default Node (agents.yml). agent_clis maps a
+# command to its npm package; a package without @<version> gets the latest when missing.
+agent_clis:
+  claude: "@anthropic-ai/claude-code"
+  codex: "@openai/codex"
+paseo_version: "0.12.0"
+# One Orca AppImage in orca_root with the /usr/local/bin/orca-ide wrapper, only while a present
+# dev user lists orca. orca_packages are the Electron libraries beyond host_chrome_packages.
+orca_version: "1.4.232"
+orca_root: /opt/orca
+orca_packages: [libnotify4, libsecret-1-0, libxss1, libxtst6, xdg-utils]
+host_orca_wanted: "{{ user_present | selectattr('ades', 'contains', 'orca') | list | length > 0 }}"
+
+# Chrome for Testing; the binary is <chrome_root>/chrome, a link into <chrome_root>/<version>/.
+# chrome_channel names a channel of the Chrome for Testing index (stable, beta, dev, canary).
+chrome_root: /opt/chrome-for-testing
+chrome_channel: stable
+# Runtime libraries and fonts Chrome needs; on Ubuntu 24.04+ the first two are virtual
+# packages provided by their t64 builds.
+host_chrome_packages:
+  - libnss3
+  - libatk-bridge2.0-0
+  - libgtk-3-0
+  - libgbm1
+  - libasound2t64
+  - fonts-liberation
+
+# Ops
+backup_dir: /var/backups/hades
+host_backup_keep: 7
+journald_system_max_use: 2G
+
+# The loopback address Caddy, Paseo, Postgres and the shared services bind; worktree apps listen
+# there too.
+hades_loopback_address: 127.0.0.1
+
+# Resource policy: starting values for a 128 GB box, override per host.
+# The per-user values (dev_user_*, default_limit_nofile) are applied by the user role.
+dev_user_memory_high: 88G
+dev_user_memory_max: 96G
+dev_user_memory_swap_max: 2G
+dev_user_cpu_weight: 900
+dev_user_tasks_max: infinity
+hades_slice_memory_max: 16G
+hades_slice_cpu_weight: 300
+protected_system_memory_low: 10G
+protected_system_cpu_weight: 300
+protected_user_slice_cpu_weight: 700
+capped_cpu_weight: 100
+capped_memory_max: 6G
+# protected.capped_users become their user-<uid>.slice. Reads the passwd facts gathered before use.
+protected_capped: >-
+  {{ protected.capped_users | default([]) | map('extract', ansible_facts.getent_passwd) | map(attribute='1')
+     | map('regex_replace', '^(.+)$', 'user-\1.slice') | list + protected.capped_units | default([]) }}
+orca_terminal_memory_max: 28G
+orca_terminal_swap_max: 0
+vm_swappiness: 10
+inotify_max_user_instances: 4096
+inotify_max_user_watches: 2097152
+default_limit_nofile: 1048576
+cpu_governor: performance
+erl_flags: "+sbwt none +sbwtdcpu none +sbwtdio none"
+
+# Build dependencies for the store's toolchains, plus tools the roles use.
+host_packages:
+  - autoconf
+  - m4
+  - libssl-dev
+  - libncurses-dev
+  - libxml2-utils
+  - xsltproc
+  - inotify-tools
+  - build-essential
+  - git
+  - curl
+  - unzip
+  - jq
+  - direnv
+  - git-secret
+  - gnupg
+  - netcat-openbsd

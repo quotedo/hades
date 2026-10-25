@@ -1,0 +1,55 @@
+---
+- name: Add the Caddy repository
+  ansible.builtin.deb822_repository:
+    name: caddy
+    uris: https://dl.cloudsmith.io/public/caddy/stable/deb/debian
+    suites: any-version
+    components: main
+    signed_by: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+  register: ingress_caddy_repo
+
+- name: Create Caddy's unit drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/caddy.service.d
+    state: directory
+    mode: "0755"
+
+- name: Put Caddy into hades.slice with its API socket
+  ansible.builtin.template:
+    src: caddy-slice.conf.j2
+    dest: /etc/systemd/system/caddy.service.d/hades.conf
+    mode: "0644"
+  notify: caddy restart
+
+# The package's own Caddyfile serves :80 and its postinst starts Caddy, so ours goes first: dpkg
+# keeps an existing conffile. Every later change goes through the validated task below.
+- name: Write the Caddyfile before the package is installed
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_config }}"
+    mode: "0644"
+    force: false
+
+# In check mode the repository is not there yet when it is about to be added.
+- name: Install Caddy
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ 0 if ingress_caddy_repo is changed else 3600 }}"
+  when: not (ansible_check_mode and ingress_caddy_repo is changed)
+
+- name: Write the Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_config }}"
+    mode: "0644"
+    validate: caddy validate --adapter caddyfile --config %s
+  notify: caddy restart
+
+- name: Enable and start Caddy
+  ansible.builtin.systemd_service:
+    name: caddy.service
+    enabled: true
+    state: started
+  when: not (ansible_check_mode and ingress_caddy_repo is changed)

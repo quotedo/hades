@@ -1,0 +1,63 @@
+---
+# Shared tool store: mise installs every `tools` version as root under
+# mise_store, and the store holds exactly that list. /etc/mise/config.toml, which every user
+# reads, sets the defaults and turns off auto-install and the fall-through to other binaries.
+- name: Install mise
+  ansible.builtin.get_url:
+    url: https://github.com/jdx/mise/releases/download/v{{ mise_version }}/mise-v{{ mise_version }}-linux-x64
+    dest: /usr/local/bin/mise
+    mode: "0755"
+    checksum: sha256:https://github.com/jdx/mise/releases/download/v{{ mise_version }}/SHASUMS256.txt
+  register: host_mise_binary
+
+- name: Create the store and the mise config directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: ["{{ mise_store }}", /etc/mise]
+
+- name: Write the system mise config
+  ansible.builtin.template:
+    src: mise-config.toml.j2
+    dest: /etc/mise/config.toml
+    mode: "0644"
+
+# State comes from `mise ls --json`, never from directories: a failed install leaves no record,
+# so the next run tries it again (host_tools_listed and host_tools_installed: main.yml).
+- name: Read the tool installs
+  ansible.builtin.command: mise ls --json
+  register: host_tools_ls
+  changed_when: false
+  check_mode: false
+  when: not (ansible_check_mode and host_mise_binary is changed)
+
+# Every listed version in one command, in inventory order: installed ones are skipped, and an
+# Elixir build finds the Erlang listed before it.
+- name: Install the listed tool versions
+  ansible.builtin.command:
+    argv: "{{ ['mise', 'install', '--system'] + host_tools_listed }}"
+  environment:
+    KERL_CONFIGURE_OPTIONS: "{{ kerl_configure_options }}"
+    MISE_YES: "1"
+  register: host_tools_install
+  changed_when: true
+  when: host_tools_listed | difference(host_tools_installed) | length > 0
+
+- name: Remove unlisted tool versions
+  ansible.builtin.command:
+    argv: "{{ ['mise', 'uninstall'] + host_tools_installed | difference(host_tools_listed) }}"
+  changed_when: true
+  when: host_tools_installed | difference(host_tools_listed) | length > 0
+
+- name: Stat the shims directory
+  ansible.builtin.stat:
+    path: "{{ mise_shims }}"
+  register: host_tools_shims
+
+# install --system creates no shims; uninstall removes its own. A missing directory means a run
+# stopped between the install and this step.
+- name: Create the shims
+  ansible.builtin.command: mise reshim --system
+  changed_when: true
+  when: host_tools_install is changed or not host_tools_shims.stat.exists

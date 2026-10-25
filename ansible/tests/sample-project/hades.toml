@@ -1,0 +1,3 @@
+# The acceptance test host has no Elixir toolchain, so setup creates the dev database with
+# createdb from the variables hades exports instead of running `mix setup`.
+setup = ['PGPASSWORD="$DB_PASSWORD" createdb -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" "sample_dev$DB_SUFFIX"']

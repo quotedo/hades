@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+env:
+  CGO_ENABLED: "0"
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      HADES_TEST_PG: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make ci
+      # The ownership checks only matter across uids, and only root can
+      # create a second owner's files (they chown to 65534, nobody). Last,
+      # because root writes into the runner's Go build cache.
+      - name: root-only ownership tests
+        run: sudo -E env "PATH=$PATH" go test -count=1 -v -run 'TestGCRefusesPortLinkOfAnotherOwner|TestReloadRefusesSiteWhoseManifestHasAnotherOwner|TestRootRewriteKeepsManifestOwner' ./internal/lifecycle/ ./internal/caddy/ ./internal/registry/
+
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make ci

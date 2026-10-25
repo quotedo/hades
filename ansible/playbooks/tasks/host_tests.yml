@@ -1,0 +1,186 @@
+---
+- name: Group hades exists
+  ansible.builtin.getent:
+    database: group
+    key: "{{ hades_group }}"
+
+- name: Stat the registry directories
+  ansible.builtin.stat:
+    path: "{{ hades_registry_root }}/{{ item }}"
+  loop: [ports, sites, manifests]
+  register: host_test_registry
+
+- name: Assert the registry directories are root:hades 3775
+  ansible.builtin.assert:
+    that:
+      - item.stat.isdir
+      - item.stat.mode == '3775'
+      - item.stat.pw_name == 'root'
+      - item.stat.gr_name == hades_group
+    fail_msg: "{{ item.item }}: expected a root:{{ hades_group }} directory with mode 3775"
+    quiet: true
+  loop: "{{ host_test_registry.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Stat the Caddy live directory
+  ansible.builtin.stat:
+    path: "{{ hades_live_dir }}"
+  register: host_test_live_dir
+
+- name: Assert the Caddy live directory is root 0755
+  ansible.builtin.assert:
+    that:
+      - host_test_live_dir.stat.isdir
+      - host_test_live_dir.stat.mode == '0755'
+      - host_test_live_dir.stat.pw_name == 'root'
+    fail_msg: "{{ hades_live_dir }} must be a root-owned directory with mode 0755"
+    quiet: true
+
+- name: Read the installed hades version
+  ansible.builtin.command: "{{ hades_bin_dir }}/hades version"
+  register: host_test_version
+  changed_when: false
+
+- name: Stat hades-port
+  ansible.builtin.stat:
+    path: "{{ hades_bin_dir }}/hades-port"
+  register: host_test_hades_port
+
+- name: Assert hades is the pinned version and hades-port is installed
+  ansible.builtin.assert:
+    that:
+      - host_test_version.stdout == hades_version
+      - host_test_hades_port.stat.exists
+      - host_test_hades_port.stat.mode == '0755'
+      - host_test_hades_port.stat.pw_name == 'root'
+    fail_msg: "hades reports {{ host_test_version.stdout }}, expected {{ hades_version }}; hades-port must be root 0755"
+    quiet: true
+
+- name: Read the kernel settings
+  ansible.builtin.command: sysctl -n vm.swappiness fs.inotify.max_user_instances fs.inotify.max_user_watches
+  register: host_test_sysctl
+  changed_when: false
+
+- name: Assert the kernel settings
+  ansible.builtin.assert:
+    that:
+      - host_test_sysctl.stdout_lines[0] | int == vm_swappiness | int
+      - host_test_sysctl.stdout_lines[1] | int == inotify_max_user_instances | int
+      - host_test_sysctl.stdout_lines[2] | int == inotify_max_user_watches | int
+    fail_msg: "sysctl reports {{ host_test_sysctl.stdout_lines | join(', ') }}"
+    quiet: true
+
+- name: Read the hades.slice properties
+  ansible.builtin.systemd_service:
+    name: hades.slice
+  register: host_test_slice
+
+- name: Assert the hades.slice memory limit
+  ansible.builtin.assert:
+    that:
+      - host_test_slice.status.MemoryMax == host_test_expected
+    fail_msg: "hades.slice MemoryMax is {{ host_test_slice.status.MemoryMax }}, expected {{ host_test_expected }}"
+    quiet: true
+  vars:
+    host_test_expected: >-
+      {{ 'infinity' if hades_slice_memory_max == 'infinity' else (hades_slice_memory_max | human_to_bytes | string) }}
+
+# `mise which` names the binary behind a shim (the shims themselves link to mise).
+- name: Read the global CLI versions
+  ansible.builtin.shell: set -e; mise which {{ item }}; {{ mise_shims }}/{{ item }} --version
+  loop: [claude, codex, paseo]
+  register: host_test_clis
+  changed_when: false
+  failed_when: false
+
+- name: Assert the agent CLIs and Paseo are installed in the store
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - item.stdout_lines[0].startswith(mise_store ~ '/installs/node/' ~ tools.node[0] ~ '/bin/')
+      - item.item != 'paseo' or paseo_version in item.stdout
+    fail_msg: "{{ item.item }} must run from the default Node in the store ({{ paseo_version }} for paseo): {{ item.stdout }} {{ item.stderr }}"
+    quiet: true
+  loop: "{{ host_test_clis.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Stat Orca and its wrapper
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop: ["{{ orca_root }}/orca-{{ orca_version }}.AppImage", /usr/local/bin/orca-ide]
+  register: host_test_orca
+  when: host_orca_wanted
+
+- name: Assert Orca is the pinned version and its wrapper is executable
+  ansible.builtin.assert:
+    that:
+      - host_test_orca.results | map(attribute='stat.mode', default='') | unique == ['0755']
+    fail_msg: "{{ orca_root }}/orca-{{ orca_version }}.AppImage and /usr/local/bin/orca-ide must exist with mode 0755"
+    quiet: true
+  when: host_orca_wanted
+
+- name: Read the hades-keys timer
+  ansible.builtin.systemd_service:
+    name: hades-keys.timer
+  register: host_test_keys_timer
+
+- name: Assert the hades-keys timer is enabled and active
+  ansible.builtin.assert:
+    that:
+      - host_test_keys_timer.status.UnitFileState | default('') == 'enabled'
+      - host_test_keys_timer.status.ActiveState | default('') == 'active'
+    fail_msg: "hades-keys.timer must be enabled and active"
+    quiet: true
+
+# Review focus: a fetch that fails says so and writes nothing; hades-keys fetches before it
+# looks at any home. A login with an empty github field is not fetched at all.
+- name: Probe hades-keys with a GitHub login that does not exist and an empty one
+  become: true
+  block:
+    - name: Create the probe login list
+      ansible.builtin.tempfile:
+        state: file
+      register: host_test_keys_list
+
+    - name: Write the probe login list
+      ansible.builtin.copy:
+        content: "nouser:this-login-does-not-exist-404\nnostatic:\n"
+        dest: "{{ host_test_keys_list.path }}"
+        mode: "0600"
+
+    - name: Run hades-keys against the probe list
+      ansible.builtin.command: "{{ hades_bin_dir }}/hades-keys"
+      environment:
+        HADES_KEYS_FILE: "{{ host_test_keys_list.path }}"
+      register: host_test_keys_run
+      changed_when: false
+
+    - name: Assert the failed fetch kept authorized_keys
+      ansible.builtin.assert:
+        that: "host_test_keys_run.stdout_lines == ['nouser: fetch failed, kept', 'nostatic: no home, skipped']"
+        fail_msg: "hades-keys printed {{ host_test_keys_run.stdout_lines }}"
+        quiet: true
+  always:
+    - name: Remove the probe login list
+      ansible.builtin.file:
+        path: "{{ host_test_keys_list.path }}"
+        state: absent
+
+# The laptop runs it over ssh -t; without a terminal its logins would hang. timeout kills the
+# whole process group, so a script without the check fails the probe instead of hanging verify.
+- name: Run hades-onboard without a terminal as the probe account
+  ansible.builtin.shell: timeout 20 runuser -u {{ verify_unprivileged_user }} -- {{ hades_bin_dir }}/hades-onboard </dev/null
+  become: true
+  register: host_test_onboard
+  changed_when: false
+  failed_when: false
+
+- name: Assert hades-onboard refuses to run without a terminal
+  ansible.builtin.assert:
+    that:
+      - host_test_onboard.rc == 2
+      - "host_test_onboard.stderr == 'hades-onboard needs a terminal: ssh -t <alias> hades-onboard <alias>'"
+    fail_msg: "hades-onboard </dev/null: rc {{ host_test_onboard.rc }}, {{ host_test_onboard.stderr }}"
+    quiet: true
