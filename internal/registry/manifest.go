@@ -114,21 +114,14 @@ var errNotRegular = errors.New("not a regular file")
 // readManifest reads the regular file at path without following a symlink
 // and records the file's owner. A missing file is fs.ErrNotExist.
 func readManifest(path string) (*Manifest, error) {
-	fi, err := os.Lstat(path)
-	if err != nil {
-		return nil, err
-	}
-	if !fi.Mode().IsRegular() {
-		return nil, fmt.Errorf("manifest %s: %w", path, errNotRegular)
-	}
-	// O_NOFOLLOW refuses a symlink swapped in since the Lstat; O_NONBLOCK
-	// keeps a FIFO swapped in from blocking the open.
+	// O_NOFOLLOW refuses a symlink; O_NONBLOCK keeps a FIFO from blocking
+	// the open.
 	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	fi, err = f.Stat()
+	fi, err := f.Stat()
 	if err != nil {
 		return nil, err
 	}

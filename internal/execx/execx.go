@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 )
 
 // Cmd describes one command invocation.
@@ -75,7 +74,7 @@ func (r *Real) Run(ctx context.Context, c Cmd) (Result, error) {
 	}
 	env, path := r.withPath(env)
 
-	bin, err := lookPath(c.Argv[0], path, c.Dir)
+	bin, err := lookPath(c.Argv[0], path)
 	if err != nil {
 		return Result{}, err
 	}
@@ -112,10 +111,7 @@ func (r *Real) withPath(env []string) ([]string, string) {
 	if idx < 0 {
 		path = os.Getenv("PATH")
 	}
-	path, changed := prependPath(r.Prepend, path)
-	if !changed {
-		return env, path
-	}
+	path = prependPath(r.Prepend, path)
 	out := append([]string(nil), env...)
 	if idx >= 0 {
 		out[idx] = "PATH=" + path
@@ -125,34 +121,26 @@ func (r *Real) withPath(env []string) ([]string, string) {
 	return out, path
 }
 
-// prependPath puts the prepend directories that exist on disk in front of
-// path, reporting whether any were added.
-func prependPath(prepend []string, path string) (string, bool) {
+// prependPath puts the prepend directories that exist on disk in front of path.
+func prependPath(prepend []string, path string) string {
 	var dirs []string
 	for _, d := range prepend {
 		if fi, err := os.Stat(d); err == nil && fi.IsDir() {
 			dirs = append(dirs, d)
 		}
 	}
-	if len(dirs) == 0 {
-		return path, false
-	}
-	return strings.Join(append(dirs, path), string(os.PathListSeparator)), true
+	return strings.Join(append(dirs, path), string(os.PathListSeparator))
 }
 
 // LookPath resolves name the way Real runs it: the existing prepend
 // directories first, then pathEnv.
 func LookPath(name string, prepend []string, pathEnv string) (string, error) {
-	path, _ := prependPath(prepend, pathEnv)
-	return lookPath(name, path, "")
+	return lookPath(name, prependPath(prepend, pathEnv))
 }
 
 // lookPath resolves name against the given PATH value (not the process PATH).
-func lookPath(name, path, dir string) (string, error) {
+func lookPath(name, path string) (string, error) {
 	if strings.ContainsRune(name, filepath.Separator) {
-		if !filepath.IsAbs(name) && dir != "" {
-			name = filepath.Join(dir, name)
-		}
 		return name, nil
 	}
 	for _, d := range filepath.SplitList(path) {
@@ -169,21 +157,17 @@ func lookPath(name, path, dir string) (string, error) {
 
 // Fake records every call and answers through Handle.
 type Fake struct {
-	mu     sync.Mutex
 	Calls  []Cmd
 	Handle func(Cmd) (Result, error) // default: exit 0, no output
 }
 
 // Run implements Runner.
 func (f *Fake) Run(_ context.Context, c Cmd) (Result, error) {
-	f.mu.Lock()
 	f.Calls = append(f.Calls, c)
-	h := f.Handle
-	f.mu.Unlock()
-	if h == nil {
+	if f.Handle == nil {
 		return Result{}, nil
 	}
-	return h(c)
+	return f.Handle(c)
 }
 
 // DryRun prints every command instead of running it.

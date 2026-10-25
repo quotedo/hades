@@ -17,7 +17,7 @@ type KV struct{ Key, Value string }
 
 const envWorktreeHeader = "# written by hades; do not edit"
 
-// WriteEnvWorktree atomically writes kv to path with mode 0600.
+// WriteEnvWorktree writes kv to path with mode 0600.
 func WriteEnvWorktree(path string, kv []KV) error {
 	var b strings.Builder
 	b.WriteString(envWorktreeHeader + "\n")
@@ -28,32 +28,10 @@ func WriteEnvWorktree(path string, kv []KV) error {
 		}
 		b.WriteString(e.Key + "=" + v + "\n")
 	}
-
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".env.worktree-*")
-	if err != nil {
+	if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
 		return err
 	}
-	tmpName := tmp.Name()
-	cleanup := func(cause error) error {
-		tmp.Close()
-		os.Remove(tmpName)
-		return cause
-	}
-	if err := tmp.Chmod(0o600); err != nil {
-		return cleanup(err)
-	}
-	if _, err := tmp.WriteString(b.String()); err != nil {
-		return cleanup(err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	if err := os.Rename(tmpName, path); err != nil {
-		os.Remove(tmpName)
-		return err
-	}
-	return nil
+	return os.Chmod(path, 0o600) // WriteFile leaves an existing file's mode alone
 }
 
 // ReadEnvWorktree parses a file written by WriteEnvWorktree, in file order.
