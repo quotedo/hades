@@ -1,21 +1,11 @@
 ---
-- name: Download Tailscale's signing key
-  ansible.builtin.get_url:
-    url: https://pkgs.tailscale.com/stable/{{ ansible_facts.distribution | lower }}/{{ ansible_facts.distribution_release }}.noarmor.gpg
-    dest: /etc/apt/keyrings/tailscale.gpg
-    mode: "0644"
-
 - name: Add the Tailscale repository
-  ansible.builtin.copy:
-    content: |
-      # Managed by Ansible (hades ingress role)
-      Types: deb
-      URIs: https://pkgs.tailscale.com/stable/{{ ansible_facts.distribution | lower }}
-      Suites: {{ ansible_facts.distribution_release }}
-      Components: main
-      Signed-By: /etc/apt/keyrings/tailscale.gpg
-    dest: /etc/apt/sources.list.d/tailscale.sources
-    mode: "0644"
+  ansible.builtin.deb822_repository:
+    name: tailscale
+    uris: https://pkgs.tailscale.com/stable/{{ ansible_facts.distribution | lower }}
+    suites: "{{ ansible_facts.distribution_release }}"
+    components: main
+    signed_by: https://pkgs.tailscale.com/stable/{{ ansible_facts.distribution | lower }}/{{ ansible_facts.distribution_release }}.noarmor.gpg
   register: ingress_tailscale_repo
 
 - name: Install Tailscale

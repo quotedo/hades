@@ -10,26 +10,14 @@
   register: postgres_pgdg_sources
 
 - name: Add the PGDG repository
+  ansible.builtin.deb822_repository:
+    name: pgdg
+    uris: https://apt.postgresql.org/pub/repos/apt
+    suites: "{{ ansible_facts.distribution_release }}-pgdg"
+    components: main
+    signed_by: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+  register: postgres_pgdg
   when: postgres_pgdg_sources.matched == 0
-  block:
-    - name: Download the PGDG signing key
-      ansible.builtin.get_url:
-        url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
-        dest: /etc/apt/keyrings/pgdg.asc
-        mode: "0644"
-
-    - name: Write the PGDG source
-      ansible.builtin.copy:
-        content: |
-          # Managed by Ansible (hades postgres role)
-          Types: deb
-          URIs: https://apt.postgresql.org/pub/repos/apt
-          Suites: {{ ansible_facts.distribution_release }}-pgdg
-          Components: main
-          Signed-By: /etc/apt/keyrings/pgdg.asc
-        dest: /etc/apt/sources.list.d/pgdg.sources
-        mode: "0644"
-      register: postgres_pgdg
 
 # postgresql-common creates and starts a default <major>/main cluster on install. Seeded only
 # before postgresql-common exists, so a host that already has Postgres keeps its own settings.
