@@ -21,7 +21,8 @@
 
 # sshd adds up every AllowUsers line it reads: where another file restricts logins with one, the
 # drop-in admits the jump account too. Only the last grep's status counts. The jump account may
-# open local TCP forwards only (permitopen limits them); no remote or Unix-socket forwards.
+# open local TCP forwards only (permitopen limits them): no remote or Unix-socket forwards, no
+# terminal, no X11 or agent forwarding. sshd checks the drop-in on its own before it is written.
 - name: Look for an AllowUsers line outside the hades drop-in # noqa: risky-shell-pipe
   ansible.builtin.shell: >-
     grep -lis '^[[:space:]]*AllowUsers' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf
@@ -41,8 +42,12 @@
       Match User hades
           AllowTcpForwarding local
           AllowStreamLocalForwarding no
+          PermitTTY no
+          X11Forwarding no
+          AllowAgentForwarding no
     dest: /etc/ssh/sshd_config.d/hades.conf
     mode: "0644"
+    validate: sshd -t -f %s
   notify: sshd reload
 
 - name: Install hades-keys
