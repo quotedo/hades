@@ -57,10 +57,11 @@
 
 # hades-keys (host role) is the one writer of authorized_keys, here and hourly from its timer:
 # the static keys, then the GitHub keys (none for an empty login). A failed fetch keeps the file
-# and fails the assert after it.
+# and fails the assert after it. The file always ends in a newline: copy refuses empty content,
+# and a blank line is nothing to sshd.
 - name: Write the static SSH keys
   ansible.builtin.copy:
-    content: "{% for key in user.ssh_keys | default([]) %}{{ key }}\n{% endfor %}"
+    content: "{{ user.ssh_keys | default([]) | join('\n') }}\n"
     dest: "{{ hades_config_dir }}/ssh-keys/{{ user.name }}"
     mode: "0644"
 
