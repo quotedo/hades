@@ -36,7 +36,7 @@
 
 - name: Install Docker CE and Tailscale
   ansible.builtin.apt:
-    name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin, tailscale]
+    name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin, docker-buildx-plugin, tailscale]
     state: present
     update_cache: true
     cache_valid_time: "{{ 0 if vm_repos is changed else 3600 }}"
