@@ -3,7 +3,7 @@
 - name: Preflight
   hosts: dev_servers
   gather_facts: false
-  vars:
+  vars: &hades_preflight_vars
     # user_present (roles/user/defaults): each present user combined onto its defaults.
     hades_present_users: >-
       {% set ns = namespace(users=[]) %}{% for u in dev_users | default([])
@@ -192,6 +192,13 @@
       loop_control:
         label: "{{ item.key }}"
 
+    - name: Assert tools include node and gh
+      ansible.builtin.assert:
+        that:
+          - tools is not defined or ('node' in tools and 'gh' in tools)
+        fail_msg: tools must include node (the agent CLIs run on it) and gh (hades-onboard needs it)
+        quiet: true
+
     # The vpn role reads the config from the environment variable vpn_conf_env names. It installs
     # no resolvconf, so a DNS line would fail the tunnel, and a full tunnel would take the default
     # route.
@@ -208,3 +215,33 @@
       vars:
         hades_vpn_conf: "{{ lookup('ansible.builtin.env', vpn_conf_env) if vpn_conf_env | default('') else '' }}"
       when: vpn_enabled | default(false) | bool
+
+# On the host, under every tag: a wrong sshd fails in seconds, before anything is installed.
+# The tag lets the preflight fixtures, which have no host, skip it.
+- name: Preflight sshd
+  hosts: dev_servers
+  gather_facts: false
+  become: true
+  tags: [sshd]
+  vars: *hades_preflight_vars
+  tasks:
+    - name: Read sshd's effective settings
+      ansible.builtin.command: sshd -T
+      register: hades_sshd
+      changed_when: false
+      check_mode: false
+
+    # An administrator has a password, which must not open SSH logins. The roles never set these.
+    - name: Assert sshd allows agent forwarding and refuses password logins with an administrator
+      ansible.builtin.assert:
+        that:
+          - "'allowagentforwarding yes' in hades_sshd.stdout_lines"
+          - "('passwordauthentication no' in hades_sshd.stdout_lines and 'kbdinteractiveauthentication no' in hades_sshd.stdout_lines)
+            or hades_present_users | selectattr('admin', 'defined') | selectattr('admin') | list | length == 0"
+        fail_msg: >-
+          sshd must allow agent forwarding and, with an admin: true dev user, refuse password logins:
+          set AllowAgentForwarding yes, PasswordAuthentication no and KbdInteractiveAuthentication no in
+          an sshd drop-in yourself
+          (sshd -T: {{ hades_sshd.stdout_lines
+          | select('match', '^(allowagentforwarding|passwordauthentication|kbdinteractiveauthentication) ') | join(', ') }})
+        quiet: true

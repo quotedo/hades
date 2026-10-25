@@ -20,7 +20,8 @@ jobs:
       - run: ansible-playbook --syntax-check -i ansible/inventory.example.yml ansible/playbooks/verify.yml
       - run: ansible-lint -c ansible/.ansible-lint ansible/
       - run: ansible/scripts/check-no-literals.sh ansible/inventory.example.yml
-      # Each invalid fixture must fail preflight with its message; valid.yml must pass.
+      # Each invalid fixture must fail preflight with its message; valid.yml must pass without the
+      # sshd play, which reads the host's sshd.
       - name: Preflight fixtures
         working-directory: ansible
         env:
@@ -39,4 +40,4 @@ jobs:
           tools-prefix|tools.node: versions must be exact
           vpn-full-tunnel|intranet subnets in AllowedIPs
           EOF
-          ansible-playbook -i tests/inventories/valid.yml playbooks/preflight.yml
+          ansible-playbook -i tests/inventories/valid.yml playbooks/preflight.yml --skip-tags sshd

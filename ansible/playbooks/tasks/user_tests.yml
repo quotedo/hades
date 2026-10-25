@@ -247,3 +247,39 @@
     user_test_keys: "{{ (user_test_authorized.results[i].content | default('') | b64decode).splitlines() }}"
     user_test_login_lines: "{{ (user_test_logins.content | default('') | b64decode).splitlines() }}"
     user_test_reminder: Run hades-onboard to finish setting up your account.
+
+# Where a file of the operator's restricts logins with AllowUsers, the drop-in must admit every
+# present dev user; elsewhere it must be gone.
+- name: Look for an AllowUsers line outside the hades drop-in # noqa: risky-shell-pipe
+  ansible.builtin.shell: >-
+    grep -lis '^[[:space:]]*AllowUsers' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf
+    | grep -v /hades-allowusers.conf
+  become: true
+  register: user_test_allowusers
+  changed_when: false
+  failed_when: user_test_allowusers.rc > 1
+
+- name: Read sshd's effective settings
+  ansible.builtin.command: sshd -T
+  become: true
+  register: user_test_sshd
+  changed_when: false
+
+- name: Stat the hades AllowUsers drop-in
+  ansible.builtin.stat:
+    path: /etc/ssh/sshd_config.d/hades-allowusers.conf
+  register: user_test_allowusers_dropin
+
+- name: Assert sshd admits every present dev user, or the drop-in is gone
+  ansible.builtin.assert:
+    that:
+      - user_test_allowusers.rc == 1 or user_present | map(attribute='name') | reject('in', user_test_allowed) | list == []
+      - user_test_allowusers.rc == 0 or not user_test_allowusers_dropin.stat.exists
+    fail_msg: >-
+      {{ 'AllowUsers in ' ~ user_test_allowusers.stdout_lines | join(', ') ~ ', but sshd does not admit '
+         ~ user_present | map(attribute='name') | reject('in', user_test_allowed) | join(', ')
+         if user_test_allowusers.rc == 0 else
+         'no AllowUsers outside the drop-in, but /etc/ssh/sshd_config.d/hades-allowusers.conf exists' }}
+    quiet: true
+  vars:
+    user_test_allowed: "{{ user_test_sshd.stdout_lines | select('match', '^allowusers ') | map('split') | map('last') | list }}"

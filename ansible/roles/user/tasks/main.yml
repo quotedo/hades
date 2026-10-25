@@ -34,26 +34,6 @@
   vars:
     user_uid: "{{ ansible_facts.getent_passwd[user.name][1] }}"
 
-- name: Read sshd's effective settings
-  ansible.builtin.command: sshd -T
-  register: user_sshd
-  changed_when: false
-  check_mode: false
-
-# An administrator has a password, which must not open SSH logins. The role never edits /etc/ssh.
-- name: Assert sshd allows agent forwarding and refuses password logins with an administrator
-  ansible.builtin.assert:
-    that:
-      - "'allowagentforwarding yes' in user_sshd.stdout_lines"
-      - "('passwordauthentication no' in user_sshd.stdout_lines and 'kbdinteractiveauthentication no' in user_sshd.stdout_lines)
-        or user_present | selectattr('admin', 'defined') | selectattr('admin') | list | length == 0"
-    fail_msg: >-
-      sshd must allow agent forwarding and, with an admin: true dev user, refuse password logins:
-      set AllowAgentForwarding yes, PasswordAuthentication no and KbdInteractiveAuthentication no in
-      an sshd drop-in yourself
-      (sshd -T: {{ user_sshd.stdout_lines | select('match', '^(allowagentforwarding|passwordauthentication|kbdinteractiveauthentication) ') | join(', ') }})
-    quiet: true
-
 # In check mode a new account does not exist yet, so nothing can run as it.
 - name: Set up each present dev user
   ansible.builtin.include_tasks: present.yml
@@ -64,3 +44,32 @@
     label: "{{ user.name }}"
   vars:
     user_home: "{{ user_home_base }}/{{ user.name }}"
+
+# sshd adds up every AllowUsers line it reads. Where the operator restricts logins with one in a
+# file of their own, the drop-in adds the present dev users; elsewhere it is removed.
+# Only the last grep's status counts: whether a file other than the drop-in is left.
+- name: Look for an AllowUsers line outside the hades drop-in # noqa: risky-shell-pipe
+  ansible.builtin.shell: >-
+    grep -lis '^[[:space:]]*AllowUsers' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf
+    | grep -v /hades-allowusers.conf
+  register: user_allowusers
+  changed_when: false
+  failed_when: user_allowusers.rc > 1
+  check_mode: false
+
+- name: Write the sshd AllowUsers drop-in
+  ansible.builtin.copy:
+    content: |
+      # Ansible managed
+      AllowUsers {{ user_present | map(attribute='name') | join(' ') }}
+    dest: /etc/ssh/sshd_config.d/hades-allowusers.conf
+    mode: "0644"
+  when: user_allowusers.rc == 0 and user_present | length > 0
+  notify: sshd reload
+
+- name: Remove the sshd AllowUsers drop-in
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d/hades-allowusers.conf
+    state: absent
+  when: not (user_allowusers.rc == 0 and user_present | length > 0)
+  notify: sshd reload

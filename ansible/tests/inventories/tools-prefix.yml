@@ -8,3 +8,4 @@ dev_servers:
         - { name: alice, github: alice, uid: 2001, ades: [paseo], paseo_port: 7001, email: alice@example.test }
       tools:
         node: ["24"]
+        gh: ["2.103.1"]
