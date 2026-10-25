@@ -19,16 +19,14 @@
     signed_by: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x75C9DD72C799870E310542E24166F2C257290828
   register: vpn_ppa
 
-# DKMS builds the module for every kernel whose headers are installed. The flavour's headers
-# metapackage (linux-headers-generic, ...) pulls each new kernel's headers, so the module is built
-# before the reboot into it.
+# The running kernel's headers only: DKMS builds the module for every kernel whose headers are
+# present, and the vendor module can lag a newer kernel (a failed build leaves dpkg half-configured).
 - name: Install AmneziaWG and the running kernel's headers
   ansible.builtin.apt:
     name:
       - amneziawg
       - amneziawg-tools
       - linux-headers-{{ ansible_facts.kernel }}
-      - linux-headers-{{ ansible_facts.kernel | regex_replace('^.*-', '') }}
     state: present
     install_recommends: false
     update_cache: true
