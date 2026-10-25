@@ -25,7 +25,6 @@ if [ -f "$dir/repos" ]; then
 fi
 
 if {{ hades_bin_dir }}/hades doctor; then
-  rm -f "$dir/welcome"
   mkdir -p "$dir" && touch "$dir/onboarded"
   echo "onboarding complete"
 else

@@ -55,22 +55,6 @@
     - { src: env.sh.j2, dest: .config/hades/env.sh }
     - { src: repos.j2, dest: .config/hades/repos, mode: "0600" }
 
-# Until hades-onboard writes the marker; env.sh shows it in interactive shells.
-- name: Look for the welcome and the onboarded marker
-  ansible.builtin.stat:
-    path: "{{ user_home }}/.config/hades/{{ item }}"
-  register: user_onboarding
-  loop: [welcome, onboarded]
-
-- name: Write the welcome
-  ansible.builtin.template:
-    src: welcome.sh.j2
-    dest: "{{ user_home }}/.config/hades/welcome"
-    owner: "{{ user.name }}"
-    group: "{{ user.name }}"
-    mode: "0600"
-  when: user_onboarding.results | selectattr('stat.exists') | list == []
-
 # hades-keys (host role) is the one writer of authorized_keys, here and hourly from its timer:
 # the static keys, then the GitHub keys (none for an empty login). A failed fetch keeps the file
 # and fails this task.

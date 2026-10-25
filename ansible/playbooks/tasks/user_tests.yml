@@ -144,7 +144,7 @@
     user_test_groups: >-
       {{ ansible_facts.getent_group | dict2items | selectattr('value.2', 'search', '(^|,)' ~ item.name ~ '(,|$)') | map(attribute='key') | list }}
 
-# Keys, first-login welcome and administrator password. Each loop runs over every present user,
+# Keys, onboarding reminder and administrator password. Each loop runs over every present user,
 # skipping where it does not apply, so the results line up with user_present.
 - name: Fetch each GitHub user's public keys from the controller
   ansible.builtin.uri:
@@ -175,15 +175,6 @@
   register: user_test_logins
   failed_when: false
 
-- name: Stat each dev user's welcome
-  ansible.builtin.stat:
-    path: "{{ user_home_base }}/{{ item.name }}/.config/hades/welcome"
-  become: true
-  register: user_test_welcome
-  loop: "{{ user_present }}"
-  loop_control:
-    label: "{{ item.name }}"
-
 - name: Stat each dev user's onboarded marker
   ansible.builtin.stat:
     path: "{{ user_home_base }}/{{ item.name }}/.config/hades/onboarded"
@@ -193,11 +184,10 @@
   loop_control:
     label: "{{ item.name }}"
 
-# What `ssh box true` runs: bash reads ~/.bashrc for a command over SSH.
-- name: Run a command through each dev user's ~/.bashrc, non-interactive
+# The onboarding reminder prints in interactive shells only.
+- name: Start a non-interactive login shell as each dev user
   ansible.builtin.command:
-    argv: [runuser, -u, "{{ item.name }}", --, bash, -c, '. "$HOME/.bashrc"; true']
-    expand_argument_vars: false
+    argv: [runuser, -u, "{{ item.name }}", --, bash, -lc, ""]
   become: true
   register: user_test_shell
   changed_when: false
@@ -207,7 +197,8 @@
     label: "{{ item.name }}"
 
 - name: Start an interactive login shell as each dev user
-  ansible.builtin.command: runuser -u {{ item.name }} -- bash -lic true
+  ansible.builtin.command:
+    argv: [runuser, -u, "{{ item.name }}", --, bash, -lic, ""]
   become: true
   register: user_test_interactive
   changed_when: false
@@ -226,29 +217,25 @@
   loop_control:
     label: "{{ item.name }}"
 
-- name: Assert each dev user's keys, login list, welcome and administrator password
+- name: Assert each dev user's keys, login list, onboarding reminder and administrator password
   ansible.builtin.assert:
     that:
       - item.github is not defined or user_test_github_keys | length > 0
       - item.github is not defined or user_test_github_keys | reject('in', user_test_keys) | list == []
       - item.ssh_keys | default([]) | reject('in', user_test_keys) | list == []
       - user_test_login_lines | select('match', item.name ~ ':') | list == [item.name ~ ':' ~ item.github | default('')]
-      - user_test_welcome.results[i].stat.exists != user_test_onboarded.results[i].stat.exists
-      - not user_test_welcome.results[i].stat.exists
-        or (user_test_welcome.results[i].stat.mode == '0600' and user_test_welcome.results[i].stat.pw_name == item.name)
       - user_test_shell.results[i].rc == 0
       - user_test_shell.results[i].stdout == ''
-      - (user_test_interactive.results[i].stdout is search('^Welcome to ', multiline=True)) == user_test_welcome.results[i].stat.exists
+      - (user_test_reminder in user_test_interactive.results[i].stdout_lines) != user_test_onboarded.results[i].stat.exists
       - not item.admin | default(false) or user_test_admin_status.results[i].stdout.split()[1] == 'P'
     fail_msg: |-
       {{ item.name }}: {{ user_test_github_keys | reject('in', user_test_keys) | list | length }} of
       {{ user_test_github_keys | length }} GitHub keys and {{ item.ssh_keys | default([]) | reject('in', user_test_keys) | list | length }}
       static keys missing from authorized_keys;
       login list: {{ user_test_login_lines | select('match', item.name ~ ':') | join(', ') or 'no line' }};
-      welcome {{ user_test_welcome.results[i].stat.mode | default('absent') }}, onboarded
-      {{ 'present' if user_test_onboarded.results[i].stat.exists else 'absent' }};
+      onboarded {{ 'present' if user_test_onboarded.results[i].stat.exists else 'absent' }};
       non-interactive output: {{ user_test_shell.results[i].stdout_lines | join(' | ') or 'none' }};
-      interactive output: {{ user_test_interactive.results[i].stdout_lines | first | default('none') }};
+      interactive output: {{ user_test_interactive.results[i].stdout_lines | join(' | ') or 'none' }};
       admin password status {{ (user_test_admin_status.results[i].stdout | default('')).split()[1:2] | join or 'n/a' }}
     quiet: true
   loop: "{{ user_present }}"
@@ -259,3 +246,4 @@
     user_test_github_keys: "{{ (user_test_github.results[i].content | default('')).splitlines() | select | list }}"
     user_test_keys: "{{ (user_test_authorized.results[i].content | default('') | b64decode).splitlines() }}"
     user_test_login_lines: "{{ (user_test_logins.content | default('') | b64decode).splitlines() }}"
+    user_test_reminder: Run hades-onboard to finish setting up your account.

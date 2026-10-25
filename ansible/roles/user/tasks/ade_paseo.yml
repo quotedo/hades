@@ -1,7 +1,7 @@
 ---
 # One present dev user listing paseo, run as the user (loop variable `user`).
 # Generated on the host once and kept, also when edited by hand; it never touches the
-# controller's disk. The welcome shows it.
+# controller's disk. hades-onboard shows it.
 - name: Generate the Paseo password, once
   ansible.builtin.shell: |
     umask 077
