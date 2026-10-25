@@ -268,6 +268,16 @@ func TestJoinUnknownGitHubLogin(t *testing.T) {
 	}
 }
 
+func TestJoinOtherGhAccount(t *testing.T) {
+	// gh is logged in, but as another account than --github names: no upload.
+	home := homeWithKeys(t, "id_ed25519")
+	r := runJoin(t, home, joinCase{gh: "other", sshErr: refused}, "shop.example.test", "--github", "alice-gh")
+	want := "github: gh is logged in as other, not alice-gh; your key was not added. Add the key below at https://github.com/settings/keys.\n"
+	if r.code != 2 || !strings.Contains(r.errOut, want) || strings.Contains(r.errOut, notLoggedIn) || calledPrefix(r.f, "gh", "ssh-key") {
+		t.Fatalf("%d %q %v", r.code, r.errOut, r.f.Calls)
+	}
+}
+
 func TestJoinUnreachable(t *testing.T) {
 	home := homeWithKeys(t, "id_ed25519")
 	r := runJoin(t, home, joinCase{sshErr: "ssh: Could not resolve hostname shop: nodename nor servname provided\n"}, "shop.example.test")
