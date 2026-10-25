@@ -16,6 +16,7 @@ import (
 	"github.com/quotedo/hades/internal/execx"
 	"github.com/quotedo/hades/internal/lifecycle"
 	"github.com/quotedo/hades/internal/preset"
+	"github.com/quotedo/hades/internal/registry"
 	"github.com/quotedo/hades/internal/version"
 	"github.com/quotedo/hades/internal/wtctx"
 )
@@ -30,11 +31,10 @@ type check struct {
 }
 
 func pass(name, detail string) check { return check{Name: name, OK: true, Detail: detail} }
-func fail(name string, err error) check {
-	return check{Name: name, Detail: err.Error()}
-}
-func failf(name, format string, a ...any) check {
-	return check{Name: name, Detail: fmt.Sprintf(format, a...)}
+
+// fail is a failed check whose detail ends with the fix.
+func fail(name string, err error, fix string) check {
+	return check{Name: name, Detail: err.Error() + ": " + fix}
 }
 
 // warnIf is a warn-only check: ok when problem is empty.
@@ -83,7 +83,7 @@ func runChecks(bg context.Context, ctx *Context) []check {
 	d, err := newDeps(ctx)
 	if err != nil {
 		// Nothing else can run without the host config.
-		return []check{fail("host-config", err)}
+		return []check{fail("host-config", err, "fix the host config, or ask the administrator on a server")}
 	}
 	checks := []check{pass("host-config", "loaded in "+modeName(d.Mode)+" mode")}
 
@@ -92,13 +92,13 @@ func runChecks(bg context.Context, ctx *Context) []check {
 	switch {
 	case d.Mode != config.Server:
 	case !regCheck.OK:
-		checks = append(checks, failf("registry-perms", "not checked: registry directories are missing"))
+		checks = append(checks, fail("registry-perms", errors.New("not checked: registry directories are missing"), applyHost))
 	default:
 		checks = append(checks, checkRegistryPerms(d))
 	}
 	if d.Mode == config.Server {
 		if err := caddy.SudoReload(bg, d.Run, d.Bin, true); err != nil {
-			checks = append(checks, fail("caddy-reload", err))
+			checks = append(checks, fail("caddy-reload", err, applyHost))
 		} else {
 			checks = append(checks, pass("caddy-reload", "sudo -n "+d.Bin+" caddy-reload --check succeeded"))
 		}
@@ -107,18 +107,19 @@ func runChecks(bg context.Context, ctx *Context) []check {
 	pgCtx, cancel := context.WithTimeout(bg, probeTimeout)
 	defer cancel()
 	if dbs, err := pgProbe(pgCtx, d.PG); err != nil {
-		checks = append(checks, fail("postgres", err))
+		addr := fmt.Sprintf("%s:%d", d.Host.Postgres.Host, d.Host.Postgres.Port)
+		checks = append(checks, fail("postgres", err, byMode(d, "start Postgres on "+addr, "ask the administrator about Postgres on "+addr)))
 	} else {
 		checks = append(checks, pass("postgres", fmt.Sprintf("reachable, %d databases", len(dbs))))
 	}
 
 	if r := d.Host.RabbitMQ; r != nil {
-		checks = append(checks, checkRabbit(bg, r))
+		checks = append(checks, checkRabbit(bg, r, byMode(d, "start RabbitMQ at "+r.ManagementURL, "ask the administrator about RabbitMQ at "+r.ManagementURL)))
 	}
 
 	lookup := toolLookup(d, ctx.Getenv("PATH"))
 	if p, err := lookup("git"); err != nil {
-		checks = append(checks, fail("git", err))
+		checks = append(checks, fail("git", err, "install git"))
 	} else {
 		checks = append(checks, pass("git", p))
 	}
@@ -130,7 +131,7 @@ func runChecks(bg context.Context, ctx *Context) []check {
 	case wtErr == nil:
 		checks = append(checks, checkTools(wt.Worktree, lookup))
 	default:
-		checks = append(checks, fail("tools", wtErr))
+		checks = append(checks, fail("tools", wtErr, "run hades doctor inside the worktree"))
 	}
 
 	_, derr := lookup("direnv")
@@ -152,7 +153,18 @@ func runChecks(bg context.Context, ctx *Context) []check {
 	return checks
 }
 
-const skipNoRepo = "skipped: not inside a git worktree"
+const (
+	skipNoRepo = "skipped: not inside a git worktree"
+	applyHost  = "ask the administrator to apply --tags host"
+)
+
+// byMode picks the fix for this host's mode.
+func byMode(d lifecycle.Deps, laptop, server string) string {
+	if d.Mode == config.Server {
+		return server
+	}
+	return laptop
+}
 
 // repoWorktree resolves the worktree the repo checks look at: the one the
 // flags or the ADE environment name, else the current one when the working
@@ -190,8 +202,13 @@ func modeName(m config.Mode) string {
 }
 
 func checkRegistry(d lifecycle.Deps) check {
-	if err := d.Reg.Exists(); err != nil {
-		return fail("registry", err)
+	err := d.Reg.Exists()
+	switch {
+	case err == nil:
+	case d.Mode == config.Laptop && errors.Is(err, registry.ErrRegistryMissing):
+		return pass("registry", "created at first up")
+	default:
+		return fail("registry", err, byMode(d, "fix or remove it", applyHost))
 	}
 	return pass("registry", strings.Join(d.Reg.Dirs(), ", "))
 }
@@ -203,31 +220,31 @@ func checkRegistryPerms(d lifecycle.Deps) check {
 	const name = "registry-perms"
 	problems, err := d.Reg.PermProblems()
 	if err != nil {
-		return fail(name, err)
+		return fail(name, err, applyHost)
 	}
 	if len(problems) > 0 {
-		return failf(name, "%s", strings.Join(problems, "; "))
+		return fail(name, errors.New(strings.Join(problems, "; ")), applyHost)
 	}
 	return pass(name, "setgid, sticky, group-writable, not world-writable, this process in the group")
 }
 
-func checkRabbit(bg context.Context, r *config.RabbitMQ) check {
+func checkRabbit(bg context.Context, r *config.RabbitMQ, fix string) check {
 	const name = "rabbitmq"
 	ctx, cancel := context.WithTimeout(bg, probeTimeout)
 	defer cancel()
 	url := strings.TrimRight(r.ManagementURL, "/") + "/api/overview"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return fail(name, err)
+		return fail(name, err, fix)
 	}
 	req.SetBasicAuth(r.User, r.Password)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return fail(name, err)
+		return fail(name, err, fix)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return failf(name, "GET %s: %s", url, resp.Status)
+		return fail(name, fmt.Errorf("GET %s: %s", url, resp.Status), fix)
 	}
 	return pass(name, "management API reachable at "+r.ManagementURL)
 }
@@ -244,7 +261,7 @@ func checkTools(wtDir string, lookup func(string) (string, error)) check {
 	const name = "tools"
 	p, err := preset.Detect(wtDir)
 	if err != nil {
-		return fail(name, err)
+		return fail(name, err, "fix the file it names")
 	}
 	var tools []string
 	switch p.Kind {
@@ -261,7 +278,7 @@ func checkTools(wtDir string, lookup func(string) (string, error)) check {
 	for _, t := range tools {
 		path, err := lookup(t)
 		if err != nil {
-			return failf(name, "%s preset needs %s: %v", p.Kind, t, err)
+			return fail(name, fmt.Errorf("%s preset needs %s: %w", p.Kind, t, err), "install "+t)
 		}
 		found = append(found, path)
 	}
@@ -297,7 +314,7 @@ func checkADEHooks(wtDir string) check {
 	}
 	switch {
 	case len(found) == 0:
-		return pass(name, "no paseo.json or orca.yaml")
+		return warnIf(name, "no paseo.json or orca.yaml: run hades init and commit", "")
 	case len(missing) > 0:
 		return warnIf(name, strings.Join(missing, ", ")+" does not mention `hades up`", "")
 	}
@@ -310,14 +327,14 @@ func checkManifests(d lifecycle.Deps) check {
 	const name = "manifests"
 	all, problems, err := allManifests(d)
 	if err != nil {
-		return fail(name, err)
+		return fail(name, err, byMode(d, "fix or remove it", applyHost))
 	}
 	if len(problems) > 0 {
 		lines := make([]string, len(problems))
 		for i, p := range problems {
 			lines[i] = p.String()
 		}
-		return failf(name, "%s", strings.Join(lines, "; "))
+		return fail(name, errors.New(strings.Join(lines, "; ")), "remove them, or ask the administrator on a server")
 	}
 	return pass(name, fmt.Sprintf("%d manifests readable", len(all)))
 }

@@ -211,8 +211,18 @@ func TestDoctorFailsOnMissingRegistryDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, errs := runMain(getenv, "doctor")
-	if code != 1 || !strings.Contains(out+errs, missing) || !strings.Contains(out+errs, "FAIL registry") {
+	if code != 1 || !strings.Contains(out, "FAIL registry: registry directory missing: "+missing+": ask the administrator to apply --tags host\n") {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+	}
+}
+
+func TestDoctorLaptopRegistryCreatedAtFirstUp(t *testing.T) {
+	stubProbe(t)
+	_, _, getenv := laptopUpFixture(t, "phoenix")
+	t.Chdir(t.TempDir())
+	_, checks, _ := doctorChecks(t, getenv)
+	if c := checks["registry"]; !c.OK || c.Detail != "created at first up" || !checks["manifests"].OK {
+		t.Fatalf("checks = %+v", checks)
 	}
 }
 
@@ -247,7 +257,7 @@ func TestDoctorRegistryPermsFailWithoutSetgid(t *testing.T) {
 	if c := checks["caddy-reload"]; !c.OK {
 		t.Fatalf("caddy-reload = %+v", c)
 	}
-	if c := checks["postgres"]; c.OK || c.Warn {
+	if c := checks["postgres"]; c.OK || c.Warn || !strings.Contains(c.Detail, ": ask the administrator about Postgres on ") {
 		t.Fatalf("postgres = %+v", c)
 	}
 	if !checks["direnv"].Warn && checks["direnv"].OK == false {
@@ -470,10 +480,18 @@ func TestDoctorWarnOnlyFailuresKeepExitZero(t *testing.T) {
 	}
 }
 
+func TestDoctorWarnsWithoutADEConfig(t *testing.T) {
+	getenv, _, wt, _ := phoenixDoctorFixture(t, true)
+	code, out, errs := runMain(getenv, "--root", filepath.Dir(wt), "--worktree", wt, "--name", "feature/x", "doctor")
+	if code != 0 || !strings.Contains(out, "WARN ade-hooks: no paseo.json or orca.yaml: run hades init and commit\n") {
+		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
+	}
+}
+
 func TestDoctorToolsFailWhenMixMissing(t *testing.T) {
 	getenv, _, wt, _ := phoenixDoctorFixture(t, false)
 	code, out, errs := runMain(getenv, "--root", filepath.Dir(wt), "--worktree", wt, "--name", "feature/x", "doctor")
-	if code != 1 || !strings.Contains(out, "FAIL tools: phoenix preset needs mix") {
+	if code != 1 || !strings.Contains(out, "FAIL tools: phoenix preset needs mix") || !strings.Contains(out, ": install mix\n") {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
 	}
 }
