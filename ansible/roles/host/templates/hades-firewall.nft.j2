@@ -1,0 +1,31 @@
+#!/usr/sbin/nft -f
+# {{ ansible_managed }}
+# The VMs' bridge rules. This file manages table inet hades and nothing else;
+# hades-nftables.service applies it at boot and on reload. Do not include it from
+# /etc/nftables.conf. The first two lines make the reload atomic and idempotent.
+table inet hades {}
+delete table inet hades
+
+table inet hades {
+	# From the bridge the host takes DHCP, DNS and replies on connections it opened (Caddy,
+	# SSH jumps, the administrator); the rest is dropped.
+	chain input {
+		type filter hook input priority filter; policy accept;
+		iifname "{{ vm_bridge }}" ct state established,related accept
+		iifname "{{ vm_bridge }}" udp dport 67 accept
+		iifname "{{ vm_bridge }}" meta l4proto { tcp, udp } th dport 53 accept
+		iifname "{{ vm_bridge }}" counter drop
+	}
+
+	# Port isolation keeps VMs apart on the bridge; this keeps a VM from routing to another
+	# through the host, to the host's Docker networks (docker0, br-*), and to host ports that
+	# Docker publishes (DNAT before input, so they arrive here). A drop here is final whatever
+	# other tables accept.
+	chain forward {
+		type filter hook forward priority filter; policy accept;
+		iifname "{{ vm_bridge }}" oifname "{{ vm_bridge }}" counter drop
+		iifname "{{ vm_bridge }}" oifname "docker0" counter drop
+		iifname "{{ vm_bridge }}" oifname "br-*" counter drop
+		iifname "{{ vm_bridge }}" ct status dnat counter drop
+	}
+}

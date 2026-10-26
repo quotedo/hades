@@ -7,7 +7,6 @@ Wants=network-online.target
 [Service]
 # apt updates the package, so no self-update.
 ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token-file /etc/cloudflared/token
-Slice=hades.slice
 Restart=on-failure
 RestartSec=5
 

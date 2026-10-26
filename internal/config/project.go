@@ -42,14 +42,24 @@ func LoadProject(worktree, root string) (*Project, error) {
 		if err != nil {
 			return nil, err
 		}
-		if un := md.Undecoded(); len(un) > 0 {
-			keys := make([]string, len(un))
-			for i, k := range un {
-				keys[i] = k.String()
-			}
-			return nil, fmt.Errorf("%s: unknown keys: %s", path, strings.Join(keys, ", "))
+		if err := unknownKeys(path, md); err != nil {
+			return nil, err
 		}
 		return &p, nil
 	}
 	return &Project{}, nil
+}
+
+// unknownKeys fails naming the keys of the file at path that md did not
+// decode.
+func unknownKeys(path string, md toml.MetaData) error {
+	un := md.Undecoded()
+	if len(un) == 0 {
+		return nil
+	}
+	keys := make([]string, len(un))
+	for i, k := range un {
+		keys[i] = k.String()
+	}
+	return fmt.Errorf("%s: unknown keys: %s", path, strings.Join(keys, ", "))
 }

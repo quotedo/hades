@@ -1,0 +1,59 @@
+---
+# Every package of the VM, never removed: the archive's, then Docker's, Tailscale's and Caddy's
+# from their own repositories. Their packages start Docker, Postgres, tailscaled and Caddy; the
+# developer logs Tailscale in during hades-onboard. The postgresql modules need psycopg2.
+- name: Install the packages from the Ubuntu archive
+  ansible.builtin.apt:
+    name: >-
+      {{ dev_packages + chrome_packages + (orca_packages if 'orca' in dev.ades else [])
+         + ['apparmor', 'postgresql', 'postgresql-postgis', 'python3-psycopg2'] + extra_packages }}
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    install_recommends: false
+
+- name: Add Docker's, Tailscale's and Caddy's repositories
+  ansible.builtin.deb822_repository:
+    name: "{{ item.name }}"
+    uris: "{{ item.uris }}"
+    suites: "{{ item.suite | default(ansible_facts.distribution_release) }}"
+    components: "{{ item.components }}"
+    signed_by: "{{ item.key }}"
+  loop:
+    - name: docker
+      uris: https://download.docker.com/linux/{{ vm_distro }}
+      components: stable
+      key: https://download.docker.com/linux/{{ vm_distro }}/gpg
+    - name: tailscale
+      uris: https://pkgs.tailscale.com/stable/{{ vm_distro }}
+      components: main
+      key: https://pkgs.tailscale.com/stable/{{ vm_distro }}/{{ ansible_facts.distribution_release }}.noarmor.gpg
+    - "{{ caddy_repo }}"
+  loop_control:
+    label: "{{ item.name }}"
+  vars:
+    vm_distro: "{{ ansible_facts.distribution | lower }}"
+  register: vm_repos
+
+# Caddy's own Caddyfile serves :80 and its postinst starts Caddy, so ours goes first: dpkg keeps an
+# existing conffile. caddy.yml validates every later change.
+- name: Create Caddy's config directory
+  ansible.builtin.file:
+    path: "{{ caddy_config | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Write the Caddyfile before the package is installed
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_config }}"
+    mode: "0644"
+    force: false
+
+- name: Install Docker CE, Tailscale and Caddy
+  ansible.builtin.apt:
+    name: [docker-ce, docker-ce-cli, containerd.io, docker-compose-plugin, docker-buildx-plugin, tailscale, caddy]
+    state: present
+    update_cache: true
+    cache_valid_time: "{{ 0 if vm_repos is changed else 3600 }}"
+    install_recommends: false

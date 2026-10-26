@@ -67,17 +67,16 @@ var commands = map[string]Command{
 		fmt.Fprintln(ctx.Stdout, version.Version)
 		return 0
 	},
-	"caddy-reload": caddyReload,
-	"up":           up,
-	"down":         down,
-	"gc":           gc,
-	"ls":           ls,
-	"status":       status,
-	"doctor":       doctor,
-	"env":          envCmd,
-	"port":         port,
-	"init":         initCmd,
-	"join":         join,
+	"up":     up,
+	"down":   down,
+	"gc":     gc,
+	"ls":     ls,
+	"status": status,
+	"doctor": doctor,
+	"env":    envCmd,
+	"port":   port,
+	"init":   initCmd,
+	"join":   join,
 }
 
 // Main parses global flags (before and after the command word), dispatches

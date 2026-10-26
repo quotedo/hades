@@ -1,0 +1,91 @@
+---
+# The developer's account: sudo without a password, and docker (the group comes with Docker CE).
+- name: Create the account
+  ansible.builtin.user:
+    name: "{{ dev.name }}"
+    uid: "{{ dev.uid }}"
+    groups: [sudo, docker]
+    append: true
+    shell: /bin/bash
+    home: "{{ vm_home }}"
+
+# hades-keys on the box writes the developer's authorized_keys here and their jump keys there. A
+# failed GitHub fetch keeps both files' keys and passes; no line for the developer, no account or a
+# failed write fails.
+- name: Write the developer's SSH keys
+  ansible.builtin.command: /usr/local/sbin/hades-keys {{ dev.name }}
+  delegate_to: "{{ hades_box }}"
+  become: true
+  register: vm_keys
+  changed_when: "'updated' in vm_keys.stdout"
+  failed_when: >-
+    vm_keys.stdout is not search('^' ~ dev.name ~ ': ', multiline=True)
+    or vm_keys.stdout is search('^' ~ dev.name ~ ': (no account|write failed)', multiline=True)
+
+- name: Let the developer use sudo without a password
+  ansible.builtin.copy:
+    content: "{{ dev.name }} ALL=(ALL:ALL) NOPASSWD: ALL\n"
+    dest: /etc/sudoers.d/hades
+    mode: "0440"
+    validate: visudo -cf %s
+
+- name: Create the config directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default(dev.name) }}"
+    group: "{{ item.owner | default(dev.name) }}"
+    mode: "{{ item.mode | default('0755') }}"
+  loop:
+    - { path: "{{ vm_home }}/.config" }
+    - { path: "{{ vm_home }}/.config/hades", mode: "0700" }
+    - { path: "{{ vm_home }}/.config/systemd" }
+    - { path: "{{ vm_home }}/.config/systemd/user" }
+    - { path: "{{ hades_config_dir }}", owner: root }
+    - { path: /etc/systemd/system/user@.service.d, owner: root }
+    - { path: /etc/systemd/system/caddy.service.d, owner: root }
+    - { path: /etc/systemd/user.conf.d, owner: root }
+
+# The open-file limit reaches the user manager and, through its default, its units (the ADEs).
+- name: Write the user manager limits
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "0644"
+  loop:
+    - { src: user-service-dropin.conf.j2, dest: /etc/systemd/system/user@.service.d/hades.conf }
+    - { src: system-user-manager.conf.j2, dest: /etc/systemd/user.conf.d/hades.conf }
+  register: vm_limits
+
+- name: Write the shell environment and repository list
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "{{ vm_home }}/.config/hades/{{ item }}"
+    owner: "{{ dev.name }}"
+    group: "{{ dev.name }}"
+    mode: "0600"
+  loop: [env.sh, repos]
+
+- name: Source the shell environment from ~/.bashrc
+  ansible.builtin.lineinfile:
+    path: "{{ vm_home }}/.bashrc"
+    line: '. "$HOME/.config/hades/env.sh"'
+    insertbefore: BOF
+    create: true
+    owner: "{{ dev.name }}"
+    group: "{{ dev.name }}"
+    mode: "0644"
+
+# Last, so the user manager reads the limits above, after a reload for changed ones.
+# Type=notify: this returns once the user manager and its bus are up, so `systemctl --user` works.
+- name: Start the user manager
+  ansible.builtin.systemd_service:
+    name: user@{{ dev.uid }}.service
+    state: started
+    daemon_reload: "{{ vm_limits is changed }}"
+
+# Keeps the user manager running without a session.
+- name: Enable lingering
+  ansible.builtin.command: loginctl enable-linger {{ dev.name }}
+  args:
+    creates: /var/lib/systemd/linger/{{ dev.name }}

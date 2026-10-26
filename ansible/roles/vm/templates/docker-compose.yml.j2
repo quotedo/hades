@@ -1,0 +1,44 @@
+# {{ ansible_managed }}
+# Host ports are published on {{ hades_loopback_address }} only; the container-side ports are the images' own.
+name: hades
+x-logging: &logging
+  driver: json-file
+  options: { max-size: 50m, max-file: "3" }
+services:
+{% if 'rabbitmq' in dev_services %}
+  rabbitmq:
+    image: {{ rabbitmq_image }}
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      RABBITMQ_DEFAULT_USER: {{ rabbitmq_user | to_json }}
+      RABBITMQ_DEFAULT_PASS: {{ rabbitmq_password | to_json }}
+    ports:
+      - "{{ hades_loopback_address }}:{{ rabbitmq_amqp_port }}:5672"
+      - "{{ hades_loopback_address }}:{{ rabbitmq_management_port }}:15672"
+      - "{{ hades_loopback_address }}:{{ rabbitmq_mqtt_port }}:1883"
+    volumes:
+      - ./rabbitmq-enabled-plugins:/etc/rabbitmq/enabled_plugins:ro
+{% endif %}
+{% if 'localstack' in dev_services %}
+  localstack:
+    image: {{ localstack_image }}
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      SERVICES: s3
+      # Read by the ready hook; here rather than in the script so a changed list recreates the container.
+      HADES_BUCKETS: "{{ localstack_buckets | join(' ') }}"
+    ports:
+      - "{{ hades_loopback_address }}:{{ localstack_port }}:4566"
+    volumes:
+      - ./localstack-init.sh:/etc/localstack/init/ready.d/hades-buckets.sh:ro
+{% endif %}
+{% if 'redis' in dev_services %}
+  redis:
+    image: {{ redis_image }}
+    restart: unless-stopped
+    logging: *logging
+    ports:
+      - "{{ hades_loopback_address }}:{{ redis_port }}:6379"
+{% endif %}

@@ -1,0 +1,20 @@
+# {{ ansible_managed }}
+# The host's Caddy sends {{ dev.name }}-* names here over plain HTTP. `hades up` and `hades down`
+# write one site file per worktree and reload Caddy through its default admin API.
+{
+	auto_https off
+}
+
+# `import worktree <host> <port>`
+(worktree) {
+	http://{args[0]}:{{ caddy_port }} {
+		reverse_proxy {{ hades_loopback_address }}:{args[1]}
+	}
+}
+
+import {{ vm_home }}/.local/state/hades/sites/*.caddy
+
+# Unknown names say nothing about this machine: a redirect to the apex.
+http://:{{ caddy_port }} {
+	redir https://{{ hades_domain }} 302
+}

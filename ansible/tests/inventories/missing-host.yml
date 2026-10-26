@@ -1,0 +1,8 @@
+---
+dev_servers:
+  hosts:
+    box:
+      ansible_connection: local
+      hades_domain: valid.example.test
+      dev_users:
+        - { name: alice, github: alice, uid: 2001, email: alice@example.test }

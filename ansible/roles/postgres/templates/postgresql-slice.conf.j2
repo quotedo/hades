@@ -1,6 +1,0 @@
-# {{ ansible_managed }}
-[Service]
-Slice=hades.slice
-# The cluster owner cannot write /run/postgresql, so no external PID file appears there and the
-# template's PIDFile= would leave the start pending forever (TimeoutStartSec=infinity).
-PIDFile=/var/lib/postgresql/{{ dev_pg_major }}/{{ dev_pg_cluster }}/postmaster.pid

@@ -1,0 +1,32 @@
+---
+# The compose project hades: dev_services on the loopback address, under Docker CE (packages.yml).
+- name: Create the services directory
+  ansible.builtin.file:
+    path: "{{ services_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Write the compose project and its unit
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - { src: docker-compose.yml.j2, dest: "{{ services_dir }}/docker-compose.yml", mode: "0644" }
+    - { src: rabbitmq-enabled-plugins.j2, dest: "{{ services_dir }}/rabbitmq-enabled-plugins", mode: "0644" }
+    - { src: localstack-init.sh.j2, dest: "{{ services_dir }}/localstack-init.sh", mode: "0755" }
+    - { src: hades-services.service.j2, dest: /etc/systemd/system/hades-services.service, mode: "0644" }
+  loop_control:
+    label: "{{ item.dest }}"
+  register: vm_services_files
+  notify: services recreate
+
+# A changed file is applied by the handler. In check mode a unit file that is about to be written
+# does not exist yet.
+- name: Enable and start the dev services
+  ansible.builtin.systemd_service:
+    name: hades-services.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: not (ansible_check_mode and vm_services_files is changed)

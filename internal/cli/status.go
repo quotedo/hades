@@ -9,8 +9,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/quotedo/hades/internal/caddy"
-	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/lifecycle"
 	"github.com/quotedo/hades/internal/pg"
 )
@@ -22,13 +20,11 @@ const probeTimeout = 3 * time.Second
 var pgProbe = func(ctx context.Context, db pg.Databases) ([]string, error) { return db.List(ctx) }
 
 type statusReport struct {
-	Mode       string      `json:"mode"`
 	HostConfig string      `json:"host_config"`
 	Domain     string      `json:"domain"`
 	Ports      statusPorts `json:"ports"`
 	Worktrees  int         `json:"worktrees"`
 	Postgres   statusPG    `json:"postgres"`
-	CaddyCheck string      `json:"caddy_check"`
 }
 
 type statusPorts struct {
@@ -42,7 +38,7 @@ type statusPG struct {
 	Databases int  `json:"databases"`
 }
 
-// status summarises the host: mode, ports, worktrees, Postgres and Caddy.
+// status summarises the host: host config, ports, worktrees and Postgres.
 func status(ctx *Context, args []string) int {
 	if code, ok := parseArgs(ctx, flag.NewFlagSet("status", flag.ContinueOnError), "usage: hades status [--json]", args); !ok {
 		return code
@@ -51,7 +47,7 @@ func status(ctx *Context, args []string) int {
 	if err != nil {
 		return ctx.fail("status", err)
 	}
-	r, err := buildStatus(context.Background(), ctx, d)
+	r, err := buildStatus(context.Background(), d)
 	if err != nil {
 		return ctx.fail("status", err)
 	}
@@ -61,19 +57,15 @@ func status(ctx *Context, args []string) int {
 		}
 		return 0
 	}
-	fmt.Fprintf(ctx.Stdout, "mode: %s\nhost_config: %s\ndomain: %s\n", r.Mode, r.HostConfig, r.Domain)
+	fmt.Fprintf(ctx.Stdout, "host_config: %s\ndomain: %s\n", r.HostConfig, r.Domain)
 	fmt.Fprintf(ctx.Stdout, "ports.range: %s\nports.used: %d\nports.free: %d\n", r.Ports.Range, r.Ports.Used, r.Ports.Free)
-	fmt.Fprintf(ctx.Stdout, "worktrees: %d\npostgres.reachable: %t\npostgres.databases: %d\ncaddy_check: %s\n",
-		r.Worktrees, r.Postgres.Reachable, r.Postgres.Databases, r.CaddyCheck)
+	fmt.Fprintf(ctx.Stdout, "worktrees: %d\npostgres.reachable: %t\npostgres.databases: %d\n",
+		r.Worktrees, r.Postgres.Reachable, r.Postgres.Databases)
 	return 0
 }
 
-func buildStatus(bg context.Context, ctx *Context, d lifecycle.Deps) (statusReport, error) {
-	r := statusReport{Mode: "laptop", HostConfig: "laptop", Domain: d.Host.Domain, CaddyCheck: "n/a"}
-	if d.Mode == config.Server {
-		r.Mode = "server"
-		r.HostConfig = config.HostPath(ctx.Getenv)
-	}
+func buildStatus(bg context.Context, d lifecycle.Deps) (statusReport, error) {
+	r := statusReport{HostConfig: d.Host.Path, Domain: d.Host.Domain}
 	used, err := usedPorts(d)
 	if err != nil {
 		return r, err
@@ -92,21 +84,14 @@ func buildStatus(bg context.Context, ctx *Context, d lifecycle.Deps) (statusRepo
 	if dbs, err := pgProbe(pgCtx, d.PG); err == nil {
 		r.Postgres = statusPG{Reachable: true, Databases: len(dbs)}
 	}
-
-	if d.Mode == config.Server {
-		r.CaddyCheck = "ok"
-		if err := caddy.SudoReload(bg, d.Run, d.Bin, true); err != nil {
-			r.CaddyCheck = "error: " + err.Error()
-		}
-	}
 	return r, nil
 }
 
-// usedPorts counts the port claims (symlinks) in the ports directory. On a
-// laptop a registry that was never created has none.
+// usedPorts counts the port claims (symlinks) in the ports directory. A
+// registry that was never created has none.
 func usedPorts(d lifecycle.Deps) (int, error) {
 	entries, err := os.ReadDir(d.Reg.PortsDir)
-	if errors.Is(err, fs.ErrNotExist) && d.Mode == config.Laptop {
+	if errors.Is(err, fs.ErrNotExist) {
 		return 0, nil
 	}
 	if err != nil {

@@ -1,0 +1,62 @@
+---
+# The VMs reach the host for DHCP and DNS only, and never each other through the host. The rules
+# live in their own table, inet hades, applied by hades-nftables.service. Nothing here enables
+# nftables.service or edits /etc/nftables.conf: a stock /etc/nftables.conf starts with
+# `flush ruleset` and would wipe ufw's, Docker's, Incus' and other tools' rules at boot.
+- name: Create /etc/nftables.d
+  ansible.builtin.file:
+    path: /etc/nftables.d
+    state: directory
+    mode: "0755"
+
+- name: Write the bridge rules
+  ansible.builtin.template:
+    src: hades-firewall.nft.j2
+    dest: /etc/nftables.d/hades.nft
+    mode: "0644"
+    validate: nft -c -f %s
+  notify: hades-nftables reload
+
+# Never restarted: its ExecStop deletes the table, which would leave the bridge without rules.
+- name: Write the rules unit
+  ansible.builtin.template:
+    src: hades-nftables.service.j2
+    dest: /etc/systemd/system/hades-nftables.service
+    mode: "0644"
+  notify: [daemon-reload, hades-nftables reload]
+
+# Reloads systemd and applies the rules atomically (the reload handler starts an inactive unit).
+- name: Apply the bridge rules
+  ansible.builtin.meta: flush_handlers
+
+# In check mode a unit file that is about to be written does not exist yet.
+- name: Enable and start the rules unit
+  ansible.builtin.systemd_service:
+    name: hades-nftables.service
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+# An active ufw drops the VMs' DHCP, DNS and routed traffic unless the bridge is let through.
+- name: Read ufw's status
+  ansible.builtin.command: ufw status
+  register: host_ufw
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Let DHCP and DNS from the VMs and their routed traffic through ufw
+  community.general.ufw:
+    rule: allow
+    interface: "{{ vm_bridge }}"
+    direction: "{{ item.direction }}"
+    route: "{{ item.route | default(omit) }}"
+    to_port: "{{ item.port | default(omit) }}"
+    proto: "{{ item.proto | default(omit) }}"
+  loop:
+    - { direction: in, port: "67", proto: udp }
+    - { direction: in, port: "53", proto: udp }
+    - { direction: in, port: "53", proto: tcp }
+    - { direction: in, route: true }
+    - { direction: out, route: true }
+  when: "host_ufw.stdout is search('^Status: active', multiline=true)"

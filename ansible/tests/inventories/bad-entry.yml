@@ -1,0 +1,13 @@
+---
+dev_servers:
+  hosts:
+    box:
+      ansible_connection: local
+      hades_domain: valid.example.test
+      dev_users:
+        - { name: j-smith, github: jsmith, uid: 2001, email: j-smith@example.test }
+        - { name: bob, github: bob, uid: 65535, email: bob@example.test }
+        - { name: carol, github: carol, uid: 1000, email: carol@example.test }
+        - { name: dave, github: dave, uid: 2004, memory: 28G, email: dave@example.test }
+        - { name: erin, github: erin, uid: 2005, disk: 50%, email: erin@example.test }
+        - { name: frank, github: frank, uid: 2006, cpus: 0-3, email: frank@example.test }

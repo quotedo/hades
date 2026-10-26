@@ -1,11 +1,11 @@
 ---
 namespace: quotedo
 name: hades
-version: 0.1.0
+version: 0.2.0
 readme: README.md
 authors:
   - quotedo
-description: Provision an Ubuntu/Debian x86_64 host into a multi-user dev server for agentic development environments.
+description: Provision an Ubuntu x86_64 box into one Incus VM per developer for agentic development environments.
 license:
   - MIT
 tags:

@@ -1,22 +1,5 @@
 domain = "example.test"
-label_template = "{{project}}-{{name}}"
-port_range = "4100-4999"
-ports_dir = "/srv/hades/ports"
-sites_dir = "/srv/hades/sites"
-manifests_dir = "/srv/hades/manifests"
-tool_paths = []
-chrome_path = ""
-
-[caddy]
-config = "/etc/caddy/Caddyfile"
-live_dir = "/etc/caddy/hades-sites"
-reload = ["systemctl", "reload", "caddy"]
-
-[postgres]
-host = "127.0.0.1"
-port = 5433
-user = "postgres"
-password = "postgres"
+chrome_path = "/opt/chrome-for-testing/chrome"
 
 [rabbitmq]
 management_url = "http://127.0.0.1:15672"

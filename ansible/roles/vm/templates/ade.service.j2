@@ -1,0 +1,29 @@
+# {{ ansible_managed }}
+[Unit]
+Description={{ ade | capitalize }} for {{ dev.name }}
+
+[Service]
+# User units do not read env.sh, so the login environment is repeated here.
+Environment=PATH={{ hades_bin_dir }}:{{ mise_shims }}:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment="ERL_FLAGS={{ erl_flags }}" CHROME_PATH={{ chrome_root }}/chrome MIX_HOME=%h/.mix MIX_ARCHIVES=%h/.mix/archives DISABLE_AUTOUPDATER=1
+{# The version comments make a host-level bump rewrite the unit; the apply reports its restart as pending. #}
+{% if ade == 'paseo' %}
+# paseo {{ paseo_version }} under node {{ tools.node[0] }}
+Environment=PASEO_LISTEN=0.0.0.0:6767 PASEO_RELAY_ENABLED=false
+EnvironmentFile=%h/.config/hades/paseo.env
+ExecStart={{ mise_shims }}/paseo daemon run
+{% else %}
+# orca-ide runs orca {{ orca_version }}. It pairs on the VM's tailnet address, so it fails to
+# start, and tries again, until hades-onboard has logged Tailscale in.
+Environment=ORCA_TERMINAL_MEMORY_MAX={{ orca_terminal_memory_max }} ORCA_TERMINAL_MEMORY_SWAP_MAX={{ orca_terminal_swap_max }}
+# Orca unpacks about 700 MB at every start: into the home's cache, not the tmpfs /tmp; every stop removes it.
+Environment=TMPDIR=%h/.cache
+ExecStartPre=/bin/mkdir -p %h/.cache
+ExecStopPost=/bin/sh -c 'rm -rf %h/.cache/appimage_extracted_*'
+ExecStart=/bin/sh -c 'ip=$$(tailscale ip -4) && exec {{ hades_bin_dir }}/orca-ide serve --port {{ orca_port }} --pairing-address "$$ip"'
+RestartSec=30
+{% endif %}
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

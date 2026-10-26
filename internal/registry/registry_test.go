@@ -73,11 +73,11 @@ func TestManifestRoundTripAndLookupByWorktree(t *testing.T) {
 	if err := r.WriteManifest(m); err != nil {
 		t.Fatal(err)
 	}
-	got, err := r.ByWorktree(wt, os.Getuid())
+	got, err := r.ByWorktree(wt)
 	if err != nil || got.Label != "shop-x" || got.DBBases[0] != "shop_dev" || !got.CreatedAt.Equal(m.CreatedAt) {
 		t.Fatalf("%+v %v", got, err)
 	}
-	if _, err := r.ByWorktree(t.TempDir(), os.Getuid()); !errors.Is(err, ErrNoManifest) {
+	if _, err := r.ByWorktree(t.TempDir()); !errors.Is(err, ErrNoManifest) {
 		t.Fatal(err)
 	}
 	all, _, _ := r.All()
@@ -89,16 +89,6 @@ func TestManifestRoundTripAndLookupByWorktree(t *testing.T) {
 	}
 	if _, err := r.ByLabel("shop-x"); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal(err)
-	}
-}
-
-func TestServerModeNeverCreatesDirs(t *testing.T) {
-	r := &Registry{PortsDir: t.TempDir() + "/nope", ManifestsDir: t.TempDir(), SitesDir: t.TempDir()}
-	if err := r.Check(); !errors.Is(err, ErrRegistryMissing) || !strings.Contains(err.Error(), "/nope") {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(r.PortsDir); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("Check created the directory: %v", err)
 	}
 }
 
@@ -147,7 +137,7 @@ func TestAllSkipsAndReportsBadEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 1 || all[0].Label != "good-1" || all[0].OwnerUID() != os.Getuid() || all[0].Path() != filepath.Join(dir, "good-1.toml") {
+	if len(all) != 1 || all[0].Label != "good-1" {
 		t.Fatalf("%+v", all)
 	}
 	reasons := map[string]string{}
@@ -176,7 +166,7 @@ func TestAllSkipsAndReportsBadEntries(t *testing.T) {
 	}
 
 	// The broken entries do not hide the good one from lookups.
-	if m, err := r.ByWorktree("/w/good", os.Getuid()); err != nil || m.Label != "good-1" {
+	if m, err := r.ByWorktree("/w/good"); err != nil || m.Label != "good-1" {
 		t.Fatalf("%+v %v", m, err)
 	}
 	if _, err := r.ByLabel("link"); err == nil {
@@ -220,26 +210,6 @@ func TestLabelGuardEverywhere(t *testing.T) {
 	}
 }
 
-func TestByWorktreeOnlySeesTheCallersManifests(t *testing.T) {
-	r := newReg(t)
-	wt := t.TempDir()
-	if err := r.WriteManifest(&Manifest{Label: "demo-x", Worktree: wt}); err != nil {
-		t.Fatal(err)
-	}
-	// Another uid naming the same path does not see this user's manifest, and
-	// so a manifest planted by another user is invisible to this one.
-	if _, err := r.ByWorktree(wt, os.Getuid()+1); !errors.Is(err, ErrNoManifest) {
-		t.Fatal(err)
-	}
-	if m, err := r.ByWorktree(wt, os.Getuid()); err != nil || m.Label != "demo-x" {
-		t.Fatalf("%+v %v", m, err)
-	}
-	// Root sees every owner.
-	if m, err := r.ByWorktree(wt, 0); err != nil || m.Label != "demo-x" {
-		t.Fatalf("%+v %v", m, err)
-	}
-}
-
 func TestManifestTOMLKeysAreSnakeCase(t *testing.T) {
 	r := newReg(t)
 	m := &Manifest{HadesVersion: "v", User: "u", UID: 1, Project: "p", Name: "n", Label: "p-n", Host: "h", Port: 4100, Worktree: "/w", Root: "/r", Preset: "go", DBSuffix: "_u_n", DBBases: []string{"b"}, Vhost: "p-n", ADE: "shell"}
@@ -260,100 +230,5 @@ func TestManifestTOMLKeysAreSnakeCase(t *testing.T) {
 	want := []string{"ade", "created_at", "db_bases", "db_suffix", "hades_version", "host", "label", "name", "port", "preset", "project", "root", "uid", "user", "vhost", "worktree"}
 	if strings.Join(keys, ",") != strings.Join(want, ",") {
 		t.Fatalf("keys %v\n%s", keys, data)
-	}
-}
-
-// chmodRegistry sets mode on every registry directory, skipping the test
-// where the filesystem does not keep the setgid bit (failing under CI).
-func chmodRegistry(t *testing.T, r *Registry, mode os.FileMode) {
-	t.Helper()
-	skip := t.Skipf
-	if os.Getenv("CI") != "" {
-		skip = t.Fatalf
-	}
-	for _, d := range r.Dirs() {
-		if err := os.Chmod(d, mode); err != nil {
-			skip("cannot chmod %s here: %v", d, err)
-		}
-		if fi, err := os.Stat(d); err != nil || fi.Mode()&(os.ModeSetgid|os.ModeSticky) != mode&(os.ModeSetgid|os.ModeSticky) {
-			skip("filesystem does not keep the setgid and sticky bits")
-		}
-	}
-}
-
-// ownSharedDirs makes this test's own uid the one shared registry
-// directories must be owned by, since a test cannot create root-owned ones.
-func ownSharedDirs(t *testing.T) {
-	t.Helper()
-	prev := SharedDirOwner
-	SharedDirOwner = os.Geteuid()
-	t.Cleanup(func() { SharedDirOwner = prev })
-}
-
-func TestSharedCheckRequiresModeAndGroup(t *testing.T) {
-	r := newReg(t)
-	r.Shared = true
-	chmodRegistry(t, r, 0o775|os.ModeSetgid|os.ModeSticky)
-	// A developer-owned 3775 directory is refused: its owner could remove
-	// anyone's entries.
-	if os.Geteuid() != 0 {
-		if err := r.Check(); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%s: owned by uid %d, not root", r.PortsDir, os.Geteuid())) {
-			t.Fatalf("developer-owned: %v", err)
-		}
-	}
-	ownSharedDirs(t)
-	if err := r.Check(); err != nil {
-		if strings.Contains(err.Error(), "not a member") && os.Getenv("CI") == "" {
-			t.Skipf("test user is not in the temp dir's group: %v", err)
-		}
-		t.Fatalf("3775: %v", err)
-	}
-	for _, c := range []struct {
-		mode os.FileMode
-		want string
-	}{
-		{0o775 | os.ModeSetgid, "missing the sticky bit"},             // 2775
-		{0o777 | os.ModeSetgid | os.ModeSticky, "world-writable"},     // 3777
-		{0o775 | os.ModeSticky, "missing the setgid bit"},             // 1775
-		{0o755 | os.ModeSetgid | os.ModeSticky, "not group-writable"}, // 3755
-	} {
-		chmodRegistry(t, r, c.mode)
-		err := r.Check()
-		if err == nil || !strings.Contains(err.Error(), "wrong mode or group") || !strings.Contains(err.Error(), r.PortsDir+": "+c.want) {
-			t.Errorf("%o: %v", c.mode, err)
-		}
-	}
-	// A registry that is not shared (laptop mode) is checked for existence only.
-	r.Shared = false
-	if err := r.Check(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// Root rewriting another user's manifest (gc keeping a manifest after a
-// failed step) keeps the file's owner. Only root can chown, so this runs as
-// root only; CI runs it under sudo on Linux.
-func TestRootRewriteKeepsManifestOwner(t *testing.T) {
-	if os.Geteuid() != 0 {
-		t.Skip("needs root to chown the manifest to another uid; CI runs it under sudo on Linux")
-	}
-	const nobody = 65534
-	r := newReg(t)
-	if err := r.WriteManifest(&Manifest{Label: "demo-x", Port: 4100}); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chown(filepath.Join(r.ManifestsDir, "demo-x.toml"), nobody, -1); err != nil {
-		t.Fatal(err)
-	}
-	m, err := r.ByLabel("demo-x")
-	if err != nil || m.OwnerUID() != nobody {
-		t.Fatalf("%+v %v", m, err)
-	}
-	m.Port = 0
-	if err := r.WriteManifest(m); err != nil {
-		t.Fatal(err)
-	}
-	if m, err := r.ByLabel("demo-x"); err != nil || m.OwnerUID() != nobody {
-		t.Fatalf("%+v %v", m, err)
 	}
 }

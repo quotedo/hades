@@ -1,11 +1,9 @@
 ---
-# A restart, not a reload: the drop-in's slice and API socket apply at start only. In check mode
-# the unit may not exist yet.
+# A restart: without an admin API Caddy cannot reload. In check mode the unit may not exist yet.
 - name: Restart Caddy
   ansible.builtin.systemd_service:
     name: caddy.service
     state: restarted
-    daemon_reload: true
   when: not ansible_check_mode
   listen: caddy restart
 

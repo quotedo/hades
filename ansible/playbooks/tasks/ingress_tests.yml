@@ -4,14 +4,10 @@
     name: caddy.service
   register: ingress_test_caddy
 
-- name: Assert Caddy is active in hades.slice
+- name: Assert Caddy is active
   ansible.builtin.assert:
-    that:
-      - ingress_test_caddy.status.ActiveState | default('missing') == 'active'
-      - ingress_test_caddy.status.Slice | default('missing') == 'hades.slice'
-    fail_msg: >-
-      caddy.service is {{ ingress_test_caddy.status.ActiveState | default('missing') }} in
-      {{ ingress_test_caddy.status.Slice | default('no slice') }}, expected active in hades.slice
+    that: ingress_test_caddy.status.ActiveState | default('missing') == 'active'
+    fail_msg: "caddy.service is {{ ingress_test_caddy.status.ActiveState | default('missing') }}, expected active"
     quiet: true
 
 - name: Read the listening TCP sockets with their processes
@@ -21,7 +17,7 @@
   changed_when: false
 
 # Every caddy_port listener is on the loopback address, Caddy listens nowhere else (no 80/443),
-# and nothing holds Caddy's default API port: the API is on the unix socket only.
+# and nothing holds Caddy's default API port: there is no API.
 - name: Assert Caddy listens on the loopback caddy_port only
   ansible.builtin.assert:
     that:
@@ -37,78 +33,48 @@
     ingress_test_bind: " {{ hades_loopback_address | regex_escape }}:{{ caddy_port }} "
     ingress_test_port_lines: "{{ ingress_test_ss.stdout_lines | select('search', ':' ~ caddy_port ~ ' ') | list }}"
 
-- name: Stat Caddy's API socket
-  ansible.builtin.stat:
-    path: "{{ ingress_caddy_api_socket }}"
-  become: true
-  register: ingress_test_api_socket
-
-- name: Assert only the caddy account can use Caddy's API socket
-  ansible.builtin.assert:
-    that:
-      - ingress_test_api_socket.stat.issock | default(false)
-      - ingress_test_api_socket.stat.pw_name == 'caddy'
-      - ingress_test_api_socket.stat.mode == '0200'
-    fail_msg: >-
-      {{ ingress_caddy_api_socket }} must be a socket owned by caddy with mode 0200, got
-      {{ ingress_test_api_socket.stat.pw_name | default('nothing') }} {{ ingress_test_api_socket.stat.mode | default('') }}
-    quiet: true
-
-- name: Query the catch-all site
+# Through the host's Caddy: unknown names redirect to the apex. A developer's names reach their
+# VM's Caddy, whose own redirect comes back with the Via header the host's proxy adds.
+- name: Request unknown names through Caddy
   ansible.builtin.uri:
     url: http://{{ hades_loopback_address }}:{{ caddy_port }}/
     headers:
-      Host: nothing.{{ hades_domain }}
+      Host: "{{ item }}.{{ hades_domain }}"
     status_code: 302
     follow_redirects: none
-  register: ingress_test_catchall
-  become: true
+  register: ingress_test_unknown
+  loop: "{{ ['nothing'] + dev_present | map(attribute='name') | product(['-nothing']) | map('join') | list }}"
 
-- name: Assert an unknown host name redirects to the apex
+- name: Assert unknown names redirect to the apex, a developer's through their VM
   ansible.builtin.assert:
-    that: ingress_test_catchall.location == 'https://' ~ hades_domain
-    fail_msg: "catch-all Location is {{ ingress_test_catchall.location | default('missing') }}"
+    that:
+      - ingress_test_unknown.results | map(attribute='location') | unique == ['https://' ~ hades_domain]
+      - ingress_test_unknown.results | map(attribute='via', default='') | list == [''] + ['1.1 Caddy'] * (dev_present | length)
+    fail_msg: >-
+      Location, Via: {{ ingress_test_unknown.results | map(attribute='location')
+                        | zip(ingress_test_unknown.results | map(attribute='via', default='')) }}
     quiet: true
 
-- name: Probe a gated path through a temporary worktree site
-  become: true
-  block:
-    - name: Write the probe site
-      ansible.builtin.copy:
-        content: "import worktree probe.{{ hades_domain }} 65000\n"
-        dest: "{{ hades_live_dir }}/probe.caddy"
-        mode: "0644"
+# A developer's dev paths: refused without the Access token and with the token and another email;
+# with the token and their own email they reach the VM.
+- name: Request each developer's dev path without the token, with another email and with theirs
+  ansible.builtin.uri:
+    url: http://{{ hades_loopback_address }}:{{ caddy_port }}/dev/x
+    headers: >-
+      {{ {'Host': item.0.name ~ '-nothing.' ~ hades_domain} | combine({} if item.1 == 'none' else
+         {'Cf-Access-Jwt-Assertion': 'probe', 'Cf-Access-Authenticated-User-Email': ('' if item.1 == 'own' else 'x') ~ item.0.email}) }}
+    status_code: "{{ 302 if item.1 == 'own' else 403 }}"
+    follow_redirects: none
+  register: ingress_test_gate
+  loop: "{{ dev_present | selectattr('email', 'defined') | product(['none', 'other', 'own']) | list }}"
+  loop_control:
+    label: "{{ item.0.name }} {{ item.1 }}"
 
-    - name: Reload Caddy with the probe site
-      ansible.builtin.command:
-        argv: "{{ caddy_reload_command }}"
-      changed_when: false
-
-    - name: Assert a gated path without the Access header is refused
-      ansible.builtin.uri:
-        url: http://{{ hades_loopback_address }}:{{ caddy_port }}/dev/mailbox
-        headers:
-          Host: probe.{{ hades_domain }}
-        status_code: 403
-
-    # Nothing listens on the probe port, so 502 means the gate let it through and Caddy dialled it.
-    - name: Assert a gated path with the Access header is proxied
-      ansible.builtin.uri:
-        url: http://{{ hades_loopback_address }}:{{ caddy_port }}/dev/mailbox
-        headers:
-          Host: probe.{{ hades_domain }}
-          Cf-Access-Jwt-Assertion: probe
-        status_code: 502
-  always:
-    - name: Remove the probe site
-      ansible.builtin.file:
-        path: "{{ hades_live_dir }}/probe.caddy"
-        state: absent
-
-    - name: Reload Caddy without the probe site
-      ansible.builtin.command:
-        argv: "{{ caddy_reload_command }}"
-      changed_when: false
+- name: Assert a developer's own email reaches their VM
+  ansible.builtin.assert:
+    that: ingress_test_gate.results | selectattr('item.1', 'eq', 'own') | map(attribute='via', default='') | reject('eq', '1.1 Caddy') | list == []
+    fail_msg: "{{ ingress_test_gate.results | selectattr('item.1', 'eq', 'own') | map(attribute='via', default='no Via') | list }}"
+    quiet: true
 
 # Skipped without Cloudflare credentials unless the tag is requested: a host with no zone runs no
 # tunnel.
@@ -164,6 +130,24 @@
       register: ingress_test_apps
       no_log: true
 
+    - name: Read the Access identity providers
+      ansible.builtin.uri:
+        url: "{{ ingress_cloudflare_api }}/accounts/{{ lookup('ansible.builtin.env', 'CF_ACCOUNT_ID') }}/access/identity_providers"
+        headers:
+          Authorization: Bearer {{ lookup('ansible.builtin.env', 'CF_API_TOKEN') }}
+      delegate_to: localhost
+      become: false
+      register: ingress_test_idps
+      no_log: true
+
+    - name: Assert the login page offers the One-time PIN
+      ansible.builtin.assert:
+        that:
+          - ingress_test_idps.json.result | selectattr('type', 'eq', 'onetimepin') | list | length == 1
+          - not (ingress_test_apps.json.result | selectattr('domain', 'eq', '*.' ~ hades_domain) | first).auto_redirect_to_identity
+        fail_msg: "identity providers: {{ ingress_test_idps.json.result | map(attribute='type') | list }}; the application must not redirect"
+        quiet: true
+
     - name: Assert the Access policy admits exactly the inventory's list
       ansible.builtin.assert:
         that:
@@ -177,21 +161,3 @@
         ingress_test_policies: >-
           {{ ingress_test_apps.json.result | selectattr('domain', 'eq', '*.' ~ hades_domain)
              | map(attribute='policies') | flatten }}
-
-- name: Check Tailscale is logged in when the operator provides TS_AUTHKEY
-  when:
-    - tailscale_enabled | bool
-    - lookup('ansible.builtin.env', 'TS_AUTHKEY') | length > 0
-  tags: [tailscale]
-  block:
-    - name: Read the Tailscale status
-      ansible.builtin.command: tailscale status --json
-      register: ingress_test_tailscale
-      changed_when: false
-      failed_when: false
-
-    - name: Assert Tailscale is running
-      ansible.builtin.assert:
-        that: (ingress_test_tailscale.stdout | default('{}', true) | from_json).BackendState | default('') == 'Running'
-        fail_msg: "tailscale status: {{ ingress_test_tailscale.stdout | default(ingress_test_tailscale.stderr, true) | truncate(200) }}"
-        quiet: true

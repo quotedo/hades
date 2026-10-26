@@ -13,71 +13,52 @@ import (
 	"testing"
 	"time"
 
+	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/pg"
 	"github.com/quotedo/hades/internal/registry"
 	"github.com/quotedo/hades/internal/testutil"
 )
 
-// serverFixture writes a server host config under a temp dir and returns the
-// registry, a getenv pointing at it (HADES_BIN at a stub that accepts
-// `caddy-reload --check`) and the state directory. Caddy's live directory is
-// <state>/live. Postgres points at a closed port, so the postgres check fails
-// fast. extra is appended to the host config.
-func serverFixture(t *testing.T, extra string) (*registry.Registry, func(string) string, string) {
+// domainFixture writes a host config with domain example.test, plus extra,
+// and returns the registry under HOME (created), a getenv pointing at both,
+// and HOME. <HOME>/bin leads PATH, for stub tools; its systemctl says
+// caddy.service is active. Postgres points at a closed port, so the postgres
+// check fails fast.
+func domainFixture(t *testing.T, extra string) (*registry.Registry, func(string) string, string) {
 	t.Helper()
-	state := t.TempDir()
-	bin := filepath.Join(state, "bin")
+	home := t.TempDir()
+	bin := filepath.Join(home, "bin")
 	if err := os.Mkdir(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	testutil.StubTool(t, bin, "hades-stub", "#!/bin/bash\nexit 0\n")
-	// sudo -n <bin> <args>: drop -n and run the rest.
-	testutil.StubTool(t, bin, "sudo", "#!/bin/bash\nshift\nexec \"$@\"\n")
+	testutil.StubTool(t, bin, "systemctl", "#!/bin/bash\n[ \"$*\" = \"is-active caddy.service\" ] || exit 9\necho active\n")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	for _, d := range []string{"ports", "sites", "manifests", "live"} {
-		if err := os.Mkdir(filepath.Join(state, d), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	hostFile := filepath.Join(state, "host.toml")
-	content := `domain = "example.test"
-port_range = "4100-4119"
-ports_dir = "` + filepath.Join(state, "ports") + `"
-sites_dir = "` + filepath.Join(state, "sites") + `"
-manifests_dir = "` + filepath.Join(state, "manifests") + `"
-[caddy]
-config = "/etc/caddy/Caddyfile"
-live_dir = "` + filepath.Join(state, "live") + `"
-reload = ["systemctl", "reload", "caddy"]
-[postgres]
-host = "127.0.0.1"
-port = 1
-user = "postgres"
-password = "postgres"
-` + extra
-	if err := os.WriteFile(hostFile, []byte(content), 0o644); err != nil {
+	hostFile := filepath.Join(home, "host.toml")
+	if err := os.WriteFile(hostFile, []byte("domain = \"example.test\"\n"+extra), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	getenv := func(k string) string {
 		switch k {
 		case "HADES_HOST_CONFIG":
 			return hostFile
-		case "HADES_BIN":
-			return filepath.Join(bin, "hades-stub")
+		case "HADES_DB_PORT":
+			return "1"
 		case "PATH":
 			return os.Getenv("PATH")
 		case "HOME":
-			return state
+			return home
 		}
 		return ""
 	}
-	reg := &registry.Registry{
-		PortsDir:     filepath.Join(state, "ports"),
-		SitesDir:     filepath.Join(state, "sites"),
-		ManifestsDir: filepath.Join(state, "manifests"),
+	host, err := config.Load(getenv, home)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return reg, getenv, state
+	reg := registry.New(host)
+	if err := reg.EnsureDirs(0o700); err != nil {
+		t.Fatal(err)
+	}
+	return reg, getenv, home
 }
 
 func runMain(getenv func(string) string, args ...string) (code int, stdout, stderr string) {
@@ -86,10 +67,9 @@ func runMain(getenv func(string) string, args ...string) (code int, stdout, stde
 	return code, out.String(), errb.String()
 }
 
-func TestLsJSONAndMine(t *testing.T) {
+func TestLsJSONAndTable(t *testing.T) {
 	_, _, getenv := laptopUpFixture(t, "phoenix")
 	reg := laptopRegistry(t, getenv)
-	me := currentUserName(t)
 
 	// An empty registry lists as [], not null.
 	code, out, errs := runMain(getenv, "ls", "--json")
@@ -98,8 +78,8 @@ func TestLsJSONAndMine(t *testing.T) {
 	}
 
 	for _, m := range []*registry.Manifest{
-		{User: me, Label: "demo-a", Port: 4100, Host: "demo-a.example.test", Worktree: "/w/a", CreatedAt: time.Now().Add(-3 * time.Hour)},
-		{User: "other", Label: "demo-b", Port: 4101, Host: "demo-b.example.test", Worktree: "/w/b", CreatedAt: time.Now().Add(-49 * time.Hour)},
+		{Label: "demo-a", Port: 4100, Host: "demo-a.example.test", Worktree: "/w/a", CreatedAt: time.Now().Add(-3 * time.Hour)},
+		{Label: "demo-b", Port: 4101, Host: "demo-b.example.test", Worktree: "/w/b", CreatedAt: time.Now().Add(-49 * time.Hour)},
 	} {
 		if err := reg.WriteManifest(m); err != nil {
 			t.Fatal(err)
@@ -111,22 +91,17 @@ func TestLsJSONAndMine(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &all); err != nil || code != 0 || len(all) != 2 || all[0].Label != "demo-a" {
 		t.Fatalf("all: code=%d err=%v out=%q stderr=%q", code, err, out, errs)
 	}
-	code, out, _ = runMain(getenv, "ls", "--mine", "--json")
-	var mine []registry.Manifest
-	if err := json.Unmarshal([]byte(out), &mine); err != nil || code != 0 || len(mine) != 1 || mine[0].User != me {
-		t.Fatalf("mine: code=%d err=%v out=%q", code, err, out)
-	}
 
 	code, out, _ = runMain(getenv, "ls")
 	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if code != 0 || len(lines) != 3 || strings.Fields(lines[0])[0] != "LABEL" ||
+	if code != 0 || len(lines) != 3 || strings.Join(strings.Fields(lines[0]), " ") != "LABEL PORT HOST WORKTREE AGE" ||
 		!strings.HasSuffix(lines[1], "3h") || !strings.HasSuffix(lines[2], "2d") {
 		t.Fatalf("table: code=%d out=%q", code, out)
 	}
 }
 
 func TestPortFromPaseoEnv(t *testing.T) {
-	reg, getenv, state := serverFixture(t, "")
+	reg, getenv, state := domainFixture(t, "")
 	wt := filepath.Join(state, "wt")
 	if err := os.Mkdir(wt, 0o755); err != nil {
 		t.Fatal(err)
@@ -204,18 +179,6 @@ func TestEnvShellOutput(t *testing.T) {
 	}
 }
 
-func TestDoctorFailsOnMissingRegistryDir(t *testing.T) {
-	_, getenv, state := serverFixture(t, "")
-	missing := filepath.Join(state, "manifests")
-	if err := os.Remove(missing); err != nil {
-		t.Fatal(err)
-	}
-	code, out, errs := runMain(getenv, "doctor")
-	if code != 1 || !strings.Contains(out, "FAIL registry: registry directory missing: "+missing+": ask the administrator to apply --tags host\n") {
-		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
-	}
-}
-
 func TestDoctorLaptopRegistryCreatedAtFirstUp(t *testing.T) {
 	stubProbe(t)
 	_, _, getenv := laptopUpFixture(t, "phoenix")
@@ -223,6 +186,57 @@ func TestDoctorLaptopRegistryCreatedAtFirstUp(t *testing.T) {
 	_, checks, _ := doctorChecks(t, getenv)
 	if c := checks["registry"]; !c.OK || c.Detail != "created at first up" || !checks["manifests"].OK {
 		t.Fatalf("checks = %+v", checks)
+	}
+}
+
+// doctor names the host config it loaded.
+func TestDoctorReportsHostConfig(t *testing.T) {
+	stubProbe(t)
+	_, _, getenv := laptopUpFixture(t, "phoenix")
+	t.Chdir(t.TempDir())
+	_, checks, _ := doctorChecks(t, getenv)
+	if c := checks["host-config"]; !c.OK || c.Detail != "no host config: laptop defaults" {
+		t.Fatalf("host-config = %+v", c)
+	}
+	hostFile := filepath.Join(t.TempDir(), "host.toml")
+	if err := os.WriteFile(hostFile, []byte("domain = \"example.test\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, checks, _ = doctorChecks(t, withEnv(getenv, map[string]string{"HADES_HOST_CONFIG": hostFile}))
+	if c := checks["host-config"]; !c.OK || c.Detail != "loaded "+hostFile+" (domain example.test)" {
+		t.Fatalf("host-config = %+v", c)
+	}
+	// Without a domain there are no sites to serve: no caddy check.
+	if err := os.WriteFile(hostFile, []byte("chrome_path = \"/opt/chrome-for-testing/chrome\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, checks, _ = doctorChecks(t, withEnv(getenv, map[string]string{"HADES_HOST_CONFIG": hostFile}))
+	if c, ok := checks["caddy"]; checks["host-config"].Detail != "loaded "+hostFile+" (domain none)" || ok {
+		t.Fatalf("host-config = %+v, caddy = %+v", checks["host-config"], c)
+	}
+}
+
+// With a domain, doctor checks the Caddy service that serves the sites.
+func TestDoctorCaddy(t *testing.T) {
+	stubProbe(t)
+	_, getenv, home := domainFixture(t, "")
+	t.Chdir(t.TempDir())
+	_, checks, _ := doctorChecks(t, getenv)
+	if c := checks["caddy"]; !c.OK || c.Detail != "caddy.service active" {
+		t.Fatalf("caddy = %+v", c)
+	}
+	testutil.StubTool(t, filepath.Join(home, "bin"), "systemctl", "#!/bin/bash\necho inactive\nexit 3\n")
+	_, checks, _ = doctorChecks(t, getenv)
+	if c := checks["caddy"]; c.OK || c.Warn || c.Detail != "caddy.service is inactive: sudo systemctl restart caddy" {
+		t.Fatalf("caddy = %+v", c)
+	}
+}
+
+func TestDoctorPostgresFailureNamesTheAddress(t *testing.T) {
+	_, getenv, _ := domainFixture(t, "")
+	code, checks, _ := doctorChecks(t, getenv)
+	if c := checks["postgres"]; code != 1 || c.OK || c.Warn || !strings.HasSuffix(c.Detail, ": start Postgres on 127.0.0.1:1") {
+		t.Fatalf("code=%d postgres=%+v", code, c)
 	}
 }
 
@@ -242,67 +256,6 @@ func doctorChecks(t *testing.T, getenv func(string) string) (int, map[string]che
 	return code, byName, order
 }
 
-func TestDoctorRegistryPermsFailWithoutSetgid(t *testing.T) {
-	_, getenv, _ := serverFixture(t, "")
-	code, checks, order := doctorChecks(t, getenv)
-	if code != 1 {
-		t.Fatalf("code=%d", code)
-	}
-	if c := checks["registry-perms"]; c.OK || c.Warn || !strings.Contains(c.Detail, "setgid") {
-		t.Fatalf("registry-perms = %+v", c)
-	}
-	if !checks["registry"].OK || !checks["host-config"].OK {
-		t.Fatalf("checks = %+v", checks)
-	}
-	if c := checks["caddy-reload"]; !c.OK {
-		t.Fatalf("caddy-reload = %+v", c)
-	}
-	if c := checks["postgres"]; c.OK || c.Warn || !strings.Contains(c.Detail, ": ask the administrator about Postgres on ") {
-		t.Fatalf("postgres = %+v", c)
-	}
-	if !checks["direnv"].Warn && checks["direnv"].OK == false {
-		t.Fatalf("direnv must be warn-only: %+v", checks["direnv"])
-	}
-	if order[0] != "host-config" || order[1] != "registry" || order[2] != "registry-perms" || order[3] != "caddy-reload" {
-		t.Fatalf("order = %v", order)
-	}
-}
-
-func TestDoctorRegistryPermsPassWithSetgidAndSticky(t *testing.T) {
-	_, getenv, state := serverFixture(t, "")
-	sharedRegistry(t, state)
-	_, checks, _ := doctorChecks(t, getenv)
-	if c := checks["registry-perms"]; !c.OK {
-		t.Fatalf("registry-perms = %+v", c)
-	}
-}
-
-// doctor reports the sticky and world-write properties as well.
-func TestDoctorRegistryPermsReportStickyAndWorldWrite(t *testing.T) {
-	_, getenv, state := serverFixture(t, "")
-	sharedRegistry(t, state)
-	if err := os.Chmod(filepath.Join(state, "ports"), 0o775|os.ModeSetgid); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(filepath.Join(state, "sites"), 0o777|os.ModeSetgid|os.ModeSticky); err != nil {
-		t.Fatal(err)
-	}
-	_, checks, _ := doctorChecks(t, getenv)
-	c := checks["registry-perms"]
-	if c.OK || c.Warn || !strings.Contains(c.Detail, filepath.Join(state, "ports")+": missing the sticky bit") || !strings.Contains(c.Detail, filepath.Join(state, "sites")+": world-writable") {
-		t.Fatalf("registry-perms = %+v", c)
-	}
-	// With root as the required owner again, the developer-owned
-	// directories are reported too.
-	if os.Geteuid() != 0 {
-		registry.SharedDirOwner = 0
-		_, checks, _ = doctorChecks(t, getenv)
-		if c := checks["registry-perms"]; c.OK || !strings.Contains(c.Detail, filepath.Join(state, "manifests")+": owned by uid "+strconv.Itoa(os.Geteuid())+", not root") {
-			t.Fatalf("registry-perms = %+v", c)
-		}
-	}
-}
-
 func TestDoctorRabbitMQ(t *testing.T) {
 	var gotUser, gotPath string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -310,7 +263,7 @@ func TestDoctorRabbitMQ(t *testing.T) {
 		gotPath = r.URL.Path
 	}))
 	defer srv.Close()
-	_, getenv, _ := serverFixture(t, "[rabbitmq]\nmanagement_url = \""+srv.URL+"\"\namqp_url = \"amqp://x\"\nuser = \"guest\"\npassword = \"guest\"\n")
+	_, getenv, _ := domainFixture(t, "[rabbitmq]\nmanagement_url = \""+srv.URL+"\"\namqp_url = \"amqp://x\"\nuser = \"guest\"\npassword = \"guest\"\n")
 	_, checks, _ := doctorChecks(t, getenv)
 	if c := checks["rabbitmq"]; !c.OK || gotUser != "guest" || gotPath != "/api/overview" {
 		t.Fatalf("rabbitmq = %+v user=%q path=%q", c, gotUser, gotPath)
@@ -323,7 +276,7 @@ func TestDoctorRabbitMQ(t *testing.T) {
 }
 
 func TestDoctorVersionsWarn(t *testing.T) {
-	reg, getenv, _ := serverFixture(t, "")
+	reg, getenv, _ := domainFixture(t, "")
 	if err := reg.WriteManifest(&registry.Manifest{User: "u", Label: "demo-old", HadesVersion: "0.0.1-ancient", Worktree: "/w/old"}); err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +287,7 @@ func TestDoctorVersionsWarn(t *testing.T) {
 }
 
 func TestStatusJSONShape(t *testing.T) {
-	reg, getenv, state := serverFixture(t, "")
+	reg, getenv, state := domainFixture(t, "")
 	wt := filepath.Join(state, "wt")
 	if err := os.Mkdir(wt, 0o755); err != nil {
 		t.Fatal(err)
@@ -350,7 +303,6 @@ func TestStatusJSONShape(t *testing.T) {
 		t.Fatalf("code=%d err=%q", code, errs)
 	}
 	var s struct {
-		Mode       string `json:"mode"`
 		HostConfig string `json:"host_config"`
 		Domain     string `json:"domain"`
 		Ports      struct {
@@ -363,19 +315,18 @@ func TestStatusJSONShape(t *testing.T) {
 			Reachable bool `json:"reachable"`
 			Databases int  `json:"databases"`
 		} `json:"postgres"`
-		CaddyCheck string `json:"caddy_check"`
 	}
 	if err := json.Unmarshal([]byte(out), &s); err != nil {
 		t.Fatalf("%v: %q", err, out)
 	}
-	if s.Mode != "server" || s.HostConfig != getenv("HADES_HOST_CONFIG") || s.Domain != "example.test" ||
-		s.Ports.Range != "4100-4119" || s.Ports.Used != 1 || s.Ports.Free != 19 || s.Worktrees != 1 ||
-		s.Postgres.Reachable || s.CaddyCheck != "ok" {
+	if s.HostConfig != getenv("HADES_HOST_CONFIG") || s.Domain != "example.test" ||
+		s.Ports.Range != "4100-4999" || s.Ports.Used != 1 || s.Ports.Free != 899 || s.Worktrees != 1 ||
+		s.Postgres.Reachable {
 		t.Fatalf("status = %+v", s)
 	}
 
 	code, out, _ = runMain(getenv, "status")
-	if code != 0 || !strings.Contains(out, "mode: server\n") || !strings.Contains(out, "ports.used: "+strconv.Itoa(1)+"\n") {
+	if code != 0 || !strings.Contains(out, "host_config: "+getenv("HADES_HOST_CONFIG")+"\n") || !strings.Contains(out, "ports.used: "+strconv.Itoa(1)+"\n") {
 		t.Fatalf("text: code=%d out=%q", code, out)
 	}
 }
@@ -383,7 +334,7 @@ func TestStatusJSONShape(t *testing.T) {
 func TestStatusOnLaptop(t *testing.T) {
 	_, _, getenv := laptopUpFixture(t, "phoenix")
 	code, out, errs := runMain(getenv, "status", "--json")
-	if code != 0 || !strings.Contains(out, `"mode": "laptop"`) || !strings.Contains(out, `"host_config": "laptop"`) || !strings.Contains(out, `"caddy_check": "n/a"`) {
+	if code != 0 || !strings.Contains(out, `"host_config": ""`) || !strings.Contains(out, `"domain": ""`) {
 		t.Fatalf("code=%d out=%q err=%q", code, out, errs)
 	}
 }
@@ -406,45 +357,14 @@ func withEnv(getenv func(string) string, kv map[string]string) func(string) stri
 	}
 }
 
-// sharedRegistry gives the registry directories under state the modes a
-// server registry needs (setgid, sticky, group write, mode 3775, owned by
-// the required owner, which this helper points at the test's uid), or skips
-// the test where the filesystem or group membership does not allow it.
-func sharedRegistry(t *testing.T, state string) {
-	t.Helper()
-	// A test cannot create root-owned directories, so the test's own uid
-	// stands in for root as the required owner.
-	prev := registry.SharedDirOwner
-	registry.SharedDirOwner = os.Geteuid()
-	t.Cleanup(func() { registry.SharedDirOwner = prev })
-	// CI must run these tests, so an unusable environment fails there.
-	skip := t.Skipf
-	if os.Getenv("CI") != "" {
-		skip = t.Fatalf
-	}
-	for _, d := range []string{"ports", "sites", "manifests"} {
-		p := filepath.Join(state, d)
-		if err := os.Chmod(p, 0o775|os.ModeSetgid|os.ModeSticky); err != nil {
-			skip("cannot set setgid and sticky here: %v", err)
-		}
-		if fi, err := os.Stat(p); err != nil || fi.Mode()&os.ModeSetgid == 0 || fi.Mode()&os.ModeSticky == 0 {
-			skip("filesystem does not keep the setgid and sticky bits")
-		}
-	}
-	reg := &registry.Registry{PortsDir: filepath.Join(state, "ports"), SitesDir: filepath.Join(state, "sites"), ManifestsDir: filepath.Join(state, "manifests"), Shared: true}
-	if err := reg.Check(); err != nil {
-		skip("a shared registry cannot pass here: %v", err)
-	}
-}
-
-// phoenixDoctorFixture is a server host whose current worktree is a phoenix
-// project. PATH holds only the stub dir (with git, and mix when withMix, in
+// phoenixDoctorFixture is a host with a domain whose current worktree is a
+// phoenix project. PATH holds only the stub dir (with git, and mix when withMix, in
 // <home>/.asdf/shims), so direnv is absent.
 func phoenixDoctorFixture(t *testing.T, withMix bool) (getenv func(string) string, reg *registry.Registry, wt, shims string) {
 	t.Helper()
 	stubProbe(t)
 	var state string
-	reg, getenv, state = serverFixture(t, "")
+	reg, getenv, state = domainFixture(t, "")
 	_, wt, _ = laptopUpFixture(t, "phoenix")
 	bin := filepath.Join(state, "bin")
 	testutil.StubTool(t, bin, "git", "#!/bin/bash\nexit 0\n")
@@ -456,7 +376,6 @@ func phoenixDoctorFixture(t *testing.T, withMix bool) (getenv func(string) strin
 		testutil.StubTool(t, shims, "mix", "#!/bin/bash\nexit 0\n")
 	}
 	getenv = withEnv(getenv, map[string]string{"PATH": bin})
-	sharedRegistry(t, state)
 	return getenv, reg, wt, shims
 }
 
@@ -498,7 +417,7 @@ func TestDoctorToolsFailWhenMixMissing(t *testing.T) {
 
 func TestDoctorGitMissingFails(t *testing.T) {
 	stubProbe(t)
-	_, getenv, _ := serverFixture(t, "")
+	_, getenv, _ := domainFixture(t, "")
 	getenv = withEnv(getenv, map[string]string{"PATH": t.TempDir()})
 	code, checks, _ := doctorChecks(t, getenv)
 	if code != 1 || checks["git"].OK || checks["git"].Warn {
@@ -508,7 +427,7 @@ func TestDoctorGitMissingFails(t *testing.T) {
 
 func TestDoctorOutsideRepoSkipsRepoChecks(t *testing.T) {
 	stubProbe(t)
-	_, getenv, _ := serverFixture(t, "")
+	_, getenv, _ := domainFixture(t, "")
 	t.Chdir(t.TempDir())
 	_, checks, order := doctorChecks(t, getenv)
 	for _, n := range []string{"tools", "ade-hooks"} {
@@ -520,7 +439,7 @@ func TestDoctorOutsideRepoSkipsRepoChecks(t *testing.T) {
 
 func TestDoctorResolveErrorInsideRepoIsGeneric(t *testing.T) {
 	stubProbe(t)
-	_, getenv, state := serverFixture(t, "")
+	_, getenv, state := domainFixture(t, "")
 	// git says it is inside a worktree but cannot resolve it.
 	testutil.StubTool(t, filepath.Join(state, "bin"), "git",
 		"#!/bin/bash\ncase \"$*\" in *--is-inside-work-tree*) echo true; exit 0;; esac\necho boom >&2\nexit 1\n")

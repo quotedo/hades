@@ -1,0 +1,32 @@
+---
+# Incus from the Ubuntu archive, without recommends (desktop media), naming the ones VMs need:
+# ovmf (firmware), qemu-utils (image conversion), QEMU's spice module (Incus' console) and
+# dnsmasq-base (the bridge's DHCP and DNS).
+- name: Install Incus
+  ansible.builtin.apt:
+    name: [incus, ovmf, qemu-utils, qemu-system-modules-spice, dnsmasq-base]
+    state: present
+    install_recommends: false
+  register: host_incus_package
+
+# The pool and the bridge are created once and never changed by a later run.
+- name: Read the storage pool and the bridge
+  ansible.builtin.command: incus {{ item }}
+  loop: [storage show default, "network show {{ vm_bridge }}"]
+  register: host_incus_show
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: not (ansible_check_mode and host_incus_package is changed)
+
+- name: Create the storage pool on the root filesystem
+  ansible.builtin.command: incus storage create default dir
+  changed_when: true
+  when: host_incus_show.results[0].rc | default(0) != 0
+
+- name: Create the bridge with NAT and without IPv6
+  ansible.builtin.command:
+    argv: [incus, network, create, "{{ vm_bridge }}", "ipv4.address={{ vm_subnet | regex_replace('0/16$', '1/16') }}",
+           ipv4.nat=true, ipv6.address=none]
+  changed_when: true
+  when: host_incus_show.results[1].rc | default(0) != 0

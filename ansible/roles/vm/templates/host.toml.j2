@@ -1,0 +1,12 @@
+# {{ ansible_managed }}
+# The hades CLI's host config; Postgres is the CLI's own default (127.0.0.1:5432, postgres).
+domain = {{ hades_domain | to_json }}
+chrome_path = {{ (chrome_root ~ '/chrome') | to_json }}
+{% if 'rabbitmq' in dev_services %}
+
+[rabbitmq]
+management_url = {{ ('http://' ~ hades_loopback_address ~ ':' ~ rabbitmq_management_port) | to_json }}
+amqp_url = {{ ('amqp://' ~ rabbitmq_user ~ ':' ~ rabbitmq_password ~ '@' ~ hades_loopback_address ~ ':' ~ rabbitmq_amqp_port) | to_json }}
+user = {{ rabbitmq_user | to_json }}
+password = {{ rabbitmq_password | to_json }}
+{% endif %}

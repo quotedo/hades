@@ -1,5 +1,5 @@
-// Package registry is the shared on-disk state of a hades host: atomic port
-// claims (symlinks) and one TOML manifest per worktree.
+// Package registry is hades' on-disk state: atomic port claims (symlinks) and
+// one TOML manifest per worktree.
 package registry
 
 import (
@@ -7,11 +7,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/user"
 	"path/filepath"
 	"strconv"
-	"strings"
-	"syscall"
 
 	"github.com/quotedo/hades/internal/config"
 )
@@ -31,9 +28,6 @@ var (
 type Registry struct {
 	PortsDir, SitesDir, ManifestsDir string
 	Range                            config.PortRange
-	// Shared marks a server registry, provisioned for a group of developers:
-	// Check then also verifies the directory modes and group (PermProblems).
-	Shared bool
 }
 
 // New builds a Registry from the host configuration.
@@ -51,7 +45,7 @@ func (r *Registry) Dirs() []string {
 	return []string{r.PortsDir, r.SitesDir, r.ManifestsDir}
 }
 
-// EnsureDirs creates the registry directories with the given mode (laptop mode).
+// EnsureDirs creates the registry directories with the given mode.
 func (r *Registry) EnsureDirs(mode os.FileMode) error {
 	for _, d := range r.Dirs() {
 		if err := os.MkdirAll(d, mode); err != nil {
@@ -59,84 +53,6 @@ func (r *Registry) EnsureDirs(mode os.FileMode) error {
 		}
 	}
 	return nil
-}
-
-// Check verifies that the registry directories exist and, for a shared
-// registry, have every property PermProblems checks. It never creates or
-// changes anything.
-func (r *Registry) Check() error {
-	if err := r.Exists(); err != nil {
-		return err
-	}
-	if !r.Shared {
-		return nil
-	}
-	problems, err := r.PermProblems()
-	if err != nil {
-		return err
-	}
-	if len(problems) > 0 {
-		return fmt.Errorf("registry directory has the wrong mode or group: %s", strings.Join(problems, "; "))
-	}
-	return nil
-}
-
-// SharedDirOwner is the uid that must own every shared registry directory:
-// root, because the owner of a sticky directory can remove or rename anyone's
-// entries in it. Tests that cannot chown point it at their own uid.
-var SharedDirOwner = 0
-
-// PermProblems lists, for each registry directory, every property of a
-// shared registry it lacks: owned by root (SharedDirOwner), the setgid bit
-// (new entries get the directory's group), the sticky bit (nobody removes or
-// renames another user's entries), group write, no world write, and this
-// process being in the directory's group. Root is exempt from the group
-// membership check.
-func (r *Registry) PermProblems() ([]string, error) {
-	groups, err := os.Getgroups()
-	if err != nil {
-		return nil, fmt.Errorf("groups of this process: %w", err)
-	}
-	member := map[int]bool{os.Getegid(): true}
-	for _, g := range groups {
-		member[g] = true
-	}
-	var problems []string
-	for _, dir := range r.Dirs() {
-		fi, err := os.Stat(dir)
-		if err != nil {
-			return nil, err
-		}
-		mode := fi.Mode()
-		if mode&os.ModeSetgid == 0 {
-			problems = append(problems, dir+": missing the setgid bit")
-		}
-		if mode&os.ModeSticky == 0 {
-			problems = append(problems, dir+": missing the sticky bit")
-		}
-		if mode&0o020 == 0 {
-			problems = append(problems, dir+": not group-writable")
-		}
-		if mode&0o002 != 0 {
-			problems = append(problems, dir+": world-writable")
-		}
-		st, ok := fi.Sys().(*syscall.Stat_t)
-		if !ok {
-			problems = append(problems, dir+": cannot read its owner and group")
-			continue
-		}
-		if uid := int(st.Uid); uid != SharedDirOwner {
-			problems = append(problems, fmt.Sprintf("%s: owned by uid %d, not root (the owner of a sticky directory can remove anyone's entries)", dir, uid))
-		}
-		if gid := int(st.Gid); os.Geteuid() != 0 && !member[gid] {
-			group := strconv.Itoa(gid)
-			if g, err := user.LookupGroupId(group); err == nil {
-				group = g.Name
-			}
-			problems = append(problems, fmt.Sprintf("%s: this process is not a member of group %s", dir, group))
-		}
-	}
-	return problems, nil
 }
 
 // Exists verifies that the registry directories exist. It never creates
@@ -173,17 +89,6 @@ func (r *Registry) ClaimPort(worktree string) (int, error) {
 		}
 	}
 	return 0, ErrNoFreePort
-}
-
-// PortLinkOwner returns the uid owning the claim link for port (the link
-// itself, not its target).
-func (r *Registry) PortLinkOwner(port int) (int, error) {
-	path := r.portPath(port)
-	fi, err := os.Lstat(path)
-	if err != nil {
-		return 0, err
-	}
-	return ownerOf(fi, path)
 }
 
 // PortOwner returns the worktree that claimed port.

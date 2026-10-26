@@ -36,8 +36,7 @@ type Outcome struct {
 	URL      string // empty for a preset without a web port
 }
 
-// ErrLabelTaken reports a label whose manifest belongs to another user or
-// another worktree.
+// ErrLabelTaken reports a label whose manifest records another worktree.
 type ErrLabelTaken struct {
 	Label, User, Worktree string
 }
@@ -105,13 +104,16 @@ func Up(ctx context.Context, d Deps, c wtctx.Context, opt UpOptions) (*Outcome, 
 		fmt.Fprintln(d.Log, "up: nothing to do (no preset matched)")
 		return &Outcome{}, nil
 	}
-	if err := u.prepareRegistry(); err != nil {
+	if err := d.Reg.EnsureDirs(0o700); err != nil {
 		return nil, err
 	}
 	if err := u.identify(); err != nil {
 		return nil, err
 	}
 	u.plan()
+	if err := u.checkDatabases(); err != nil {
+		return nil, err
+	}
 	if u.existing != nil && u.existing.Port != 0 {
 		if err := u.checkPortOwned(u.existing.Port); err != nil {
 			return nil, err
@@ -179,26 +181,14 @@ func (u *upRun) detect() error {
 	return nil
 }
 
-// prepareRegistry checks the provisioned registry on a server and creates the
-// per-user one on a laptop.
-func (u *upRun) prepareRegistry() error {
-	if u.d.Mode == config.Server {
-		return u.d.Reg.Check()
-	}
-	return u.d.Reg.EnsureDirs(0o700)
-}
-
 // identify is step 1b: find an earlier manifest of this worktree (identity is
 // the path, so its label wins over the current name), or derive the label and
-// make sure nobody else holds it.
+// make sure no other worktree holds it.
 func (u *upRun) identify() error {
 	d, c := u.d, u.c
-	m, err := d.Reg.ByWorktree(c.Worktree, d.User.UID)
+	m, err := d.Reg.ByWorktree(c.Worktree)
 	switch {
 	case err == nil:
-		if err := u.checkOwned(m); err != nil {
-			return err
-		}
 		u.existing = m
 	case !errors.Is(err, registry.ErrNoManifest):
 		return err
@@ -222,7 +212,7 @@ func (u *upRun) identify() error {
 	m, err = d.Reg.ByLabel(label)
 	switch {
 	case err == nil:
-		if err := u.checkOwned(m); err != nil {
+		if err := u.checkSameWorktree(m); err != nil {
 			return err
 		}
 		u.existing = m
@@ -280,7 +270,7 @@ func (u *upRun) plan() {
 		Worktree:     c.Worktree,
 		Root:         c.Root,
 		Preset:       string(u.preset.Kind),
-		DBSuffix:     naming.Suffix(d.User.Name, naming.Sanitize(c.Name)),
+		DBSuffix:     naming.Suffix(u.project, naming.Sanitize(c.Name)),
 		DBBases:      bases,
 		Vhost:        u.vhost,
 		ADE:          c.ADE,
@@ -309,11 +299,30 @@ func union(a, b []string) []string {
 	return out
 }
 
-// checkOwned fails unless m's file is owned by this user and m records this
-// worktree. Ownership is the file's uid, not the UID recorded inside.
-func (u *upRun) checkOwned(m *registry.Manifest) error {
-	if m.OwnerUID() != u.d.User.UID || !sameDir(m.Worktree, u.c.Worktree) {
+// checkSameWorktree fails unless m records this worktree.
+func (u *upRun) checkSameWorktree(m *registry.Manifest) error {
+	if !sameDir(m.Worktree, u.c.Worktree) {
 		return &ErrLabelTaken{Label: m.Label, User: m.User, Worktree: m.Worktree}
+	}
+	return nil
+}
+
+// checkDatabases fails when another worktree's manifest records one of this
+// run's databases (the same base and suffix): down there would drop it. A
+// distinct label does not rule that out: a domain change adds or drops the
+// label's "<user>-" but not the suffix's, and a manifest keeps the suffix
+// it recorded.
+func (u *upRun) checkDatabases() error {
+	all, _, err := u.d.Reg.All()
+	if err != nil {
+		return err
+	}
+	for _, m := range all {
+		for _, b := range u.m.DBBases {
+			if m.Label != u.label && m.DBSuffix == u.m.DBSuffix && slices.Contains(m.DBBases, b) {
+				return fmt.Errorf("database %s%s is %s's (%s); give this worktree another name: hades --name NAME up", b, m.DBSuffix, m.Label, m.Worktree)
+			}
+		}
 	}
 	return nil
 }
@@ -354,7 +363,7 @@ func (u *upRun) setAddress(port int) {
 	switch {
 	case !u.preset.Web:
 		u.m.Host = ""
-	case u.d.Mode == config.Server:
+	case u.d.Host.Domain != "":
 		u.m.Host = u.m.Label + "." + u.d.Host.Domain
 	default:
 		u.m.Host = "localhost"
@@ -366,7 +375,7 @@ func (u *upRun) url() string {
 	switch {
 	case !u.preset.Web:
 		return ""
-	case u.d.Mode == config.Server:
+	case u.d.Host.Domain != "":
 		return "https://" + u.m.Host
 	}
 	return "http://localhost:" + strconv.Itoa(u.m.Port)
@@ -537,10 +546,10 @@ func (u *upRun) ensureVhost() (*undo, error) {
 	return un, nil
 }
 
-// publishSite is step 8: server mode and a web preset only. Only a site file
-// this run created is removed on rollback.
+// publishSite is step 8: with a domain and a web preset only. Only a site
+// file this run created is removed on rollback.
 func (u *upRun) publishSite() (*undo, error) {
-	if u.d.Mode != config.Server || !u.preset.Web {
+	if u.d.Host.Domain == "" || !u.preset.Web {
 		return nil, nil
 	}
 	sites, label := u.d.Reg.SitesDir, u.m.Label
@@ -550,7 +559,7 @@ func (u *upRun) publishSite() (*undo, error) {
 	}
 	if u.opt.DryRun {
 		u.would("write site %s", path)
-		return nil, caddy.SudoReload(u.ctx, u.d.Run, u.d.Bin, false)
+		return nil, caddy.Reload(u.ctx, u.d.Run)
 	}
 	_, statErr := os.Lstat(path)
 	if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
@@ -561,18 +570,18 @@ func (u *upRun) publishSite() (*undo, error) {
 	}
 	var un *undo
 	if statErr != nil {
-		run, bin, ctx := u.d.Run, u.d.Bin, context.WithoutCancel(u.ctx)
+		run, ctx := u.d.Run, context.WithoutCancel(u.ctx)
 		un = &undo{
 			action: "remove site " + label + " and reload caddy",
 			fn: func() error {
 				if err := caddy.RemoveSite(sites, label); err != nil {
 					return err
 				}
-				return caddy.SudoReload(ctx, run, bin, false)
+				return caddy.Reload(ctx, run)
 			},
 		}
 	}
-	return un, caddy.SudoReload(u.ctx, u.d.Run, u.d.Bin, false)
+	return un, caddy.Reload(u.ctx, u.d.Run)
 }
 
 // rewireMCP is step 9.

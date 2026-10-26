@@ -53,14 +53,14 @@ type Real struct {
 }
 
 // ToolPrepend returns the directories where version-managed tools live, in
-// lookup order, followed by extra.
-func ToolPrepend(home string, extra []string) []string {
-	return append([]string{
+// lookup order.
+func ToolPrepend(home string) []string {
+	return []string{
 		filepath.Join(home, ".asdf", "shims"),
 		filepath.Join(home, ".local", "share", "mise", "shims"),
-		"/usr/local/share/mise/shims", // the server's shared tool store
+		"/usr/local/share/mise/shims", // mise's system-wide tool store
 		filepath.Join(home, ".local", "bin"),
-	}, extra...)
+	}
 }
 
 // Run implements Runner.

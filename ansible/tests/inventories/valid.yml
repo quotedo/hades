@@ -3,7 +3,10 @@ dev_servers:
   hosts:
     box:
       ansible_connection: local
+      ansible_host: 127.0.0.1
+      ansible_user: admin
       hades_domain: valid.example.test
+      vm_memory: 1GiB  # with the 8 GiB preflight keeps for the host, it passes on 9 GiB or more
       dev_users:
-        - { name: alice, github: alice, uid: 2001, ades: [paseo], paseo_port: 7001, email: alice@example.test }
+        - { name: alice, github: alice, uid: 2001, email: alice@example.test }
         - { name: bob, uid: 2002, state: absent, email: bob@example.test }

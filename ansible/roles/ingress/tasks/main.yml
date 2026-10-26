@@ -10,8 +10,3 @@
 
 - name: Caddy
   ansible.builtin.import_tasks: caddy.yml
-
-- name: Tailscale
-  ansible.builtin.import_tasks: tailscale.yml
-  when: tailscale_enabled
-  tags: [tailscale]

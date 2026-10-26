@@ -1,0 +1,108 @@
+---
+# Developers reach their VM only through the jump account: `ssh -W <address>:22 -l hades <box>`.
+# Root owns its home and authorized_keys, which hades-keys writes from the developer list and the
+# static keys below, hourly from its timer and in every apply.
+- name: Create the jump account
+  ansible.builtin.user:
+    name: hades
+    system: true
+    shell: /bin/sh
+    home: /var/lib/hades-jump
+    create_home: false
+
+- name: Create the jump account's home and the static key directory
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: [/var/lib/hades-jump, /var/lib/hades-jump/.ssh, "{{ hades_config_dir }}/ssh-keys"]
+
+# sshd adds up every AllowUsers line it reads: where another file restricts logins with one, the
+# drop-in admits the jump account too. Only the last grep's status counts. The jump account may
+# open local TCP forwards only (permitopen limits them): no remote or Unix-socket forwards, no
+# terminal, no X11 or agent forwarding. sshd checks the drop-in on its own before it is written.
+- name: Look for an AllowUsers line outside the hades drop-in # noqa: risky-shell-pipe
+  ansible.builtin.shell: >-
+    grep -lis '^[[:space:]]*AllowUsers' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf
+    | grep -v /hades.conf
+  register: host_allowusers
+  changed_when: false
+  failed_when: host_allowusers.rc > 1
+  check_mode: false
+
+- name: Write the sshd drop-in
+  ansible.builtin.copy:
+    content: |
+      # Ansible managed
+      {% if host_allowusers.rc == 0 %}
+      AllowUsers hades
+      {% endif %}
+      Match User hades
+          AllowTcpForwarding local
+          AllowStreamLocalForwarding no
+          PermitTTY no
+          X11Forwarding no
+          AllowAgentForwarding no
+    dest: /etc/ssh/sshd_config.d/hades.conf
+    mode: "0644"
+    validate: sshd -t -f %s
+  notify: sshd reload
+
+- name: Install hades-keys
+  ansible.builtin.template:
+    src: hades-keys.sh.j2
+    dest: /usr/local/sbin/hades-keys
+    mode: "0755"
+
+- name: Write the hades-keys units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: /etc/systemd/system/{{ item }}
+    mode: "0644"
+  loop: [hades-keys.service, hades-keys.timer]
+  register: host_keys_units
+
+# In check mode a unit file that is about to be written does not exist yet.
+- name: Enable and start the hades-keys timer
+  ansible.builtin.systemd_service:
+    name: hades-keys.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ host_keys_units is changed }}"
+  when: not (ansible_check_mode and host_keys_units is changed)
+
+- name: Write each present developer's static SSH keys
+  ansible.builtin.copy:
+    content: "{{ item.ssh_keys | default([]) | join('\n') }}\n"
+    dest: "{{ hades_config_dir }}/ssh-keys/{{ item.name }}"
+    mode: "0644"
+  loop: "{{ dev_present }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Remove the absent developers' static SSH keys
+  ansible.builtin.file:
+    path: "{{ hades_config_dir }}/ssh-keys/{{ item.name }}"
+    state: absent
+  loop: "{{ dev_absent }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+# The present developers only, so an absent one's jump keys go with this run.
+- name: Write the developer list for hades-keys
+  ansible.builtin.copy:
+    content: |
+      # login:github:address
+      {% for d in dev_present %}
+      {{ d.name }}:{{ d.github | default('') }}:{{ d.address }}
+      {% endfor %}
+    dest: "{{ hades_config_dir }}/github-logins"
+    mode: "0644"
+
+# A VM this run has yet to create, or a stopped one, prints `no account yet, skipped`.
+- name: Write the jump account's and the VMs' authorized_keys
+  ansible.builtin.command: /usr/local/sbin/hades-keys
+  register: host_keys
+  changed_when: "'updated' in host_keys.stdout"

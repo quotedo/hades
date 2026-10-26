@@ -62,32 +62,29 @@ func hashedSuffix(full string) string {
 }
 
 func TestSuffix(t *testing.T) {
-	if got := Suffix("alice", "fix-login"); got != "_alice_fix_login" {
+	if got := Suffix("shop", "fix-login"); got != "_shop_fix_login" {
 		t.Fatal(got)
 	}
-	if got := Suffix("alice", "feature-x1"); got != "_alice_feature_x1_" {
+	if got := Suffix("shop", "feature-x1"); got != "_shop_feature_x1_" {
 		t.Fatal(got)
 	}
-	if got := Suffix("Alice", "Ünïcode!"); got != "_alice_ncode" {
+	if got := Suffix("Shop", "Ünïcode!"); got != "_shop_ncode" {
 		t.Fatal(got)
 	}
-	// The user part keeps only [a-z0-9], so the first segment is the login.
-	if got := Suffix("al.ice-b_x", "a"); got != "_alicebx_a" {
-		t.Fatal(got)
+	// "_<project>_<name>" is the label "<project>-<name>" with "_" for "-".
+	if a, b := Suffix("my-shop", "x"), Suffix("my", "shop-x"); a != "_my_shop_x" || b != a {
+		t.Fatal(a, b)
 	}
-	if a, b := Suffix("alice-feature", "x"), Suffix("alice", "feature/x"); a == b {
-		t.Fatalf("both %q", a)
-	}
-	if a, b := Suffix("alice_feature", "x"), Suffix("alice", "feature_x"); a == b {
+	if a, b := Suffix("my-shop", "x"), Suffix("myshop", "x"); a == b {
 		t.Fatalf("both %q", a)
 	}
 	// 31 bytes ending in a digit: the trailing "_" makes 32, no hash.
-	if got := Suffix("alice", strings.Repeat("a", 23)+"1"); got != "_alice_"+strings.Repeat("a", 23)+"1_" {
+	if got := Suffix("shop", strings.Repeat("a", 24)+"1"); got != "_shop_"+strings.Repeat("a", 24)+"1_" {
 		t.Fatal(got)
 	}
 	// 32 bytes ending in a digit would be 33 with the "_": hashed.
-	edge := "_alice_" + strings.Repeat("a", 24) + "1"
-	if got := Suffix("alice", strings.Repeat("a", 24)+"1"); got != hashedSuffix(edge) {
+	edge := "_shop_" + strings.Repeat("a", 25) + "1"
+	if got := Suffix("shop", strings.Repeat("a", 25)+"1"); got != hashedSuffix(edge) {
 		t.Fatalf("%q want %q", got, hashedSuffix(edge))
 	}
 
@@ -96,8 +93,8 @@ func TestSuffix(t *testing.T) {
 	var letter, digit bool
 	for i := 0; !(letter && digit) && i < 1000; i++ {
 		name := strings.Repeat("x", 40) + strconv.Itoa(i) + "y"
-		full := "_alice_" + name
-		got, want := Suffix("alice", name), hashedSuffix(full)
+		full := "_shop_" + name
+		got, want := Suffix("shop", name), hashedSuffix(full)
 		if got != want {
 			t.Fatalf("%q want %q", got, want)
 		}

@@ -1,0 +1,76 @@
+---
+# One developer's VM (`dev`, their dev_present entry), configured as root.
+# Named after its box, as the developer's laptop and tailnet know it; the image comes with its
+# builder's name. The hosts line first, so sudo resolves the new name.
+- name: Resolve the box's name locally
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1\s'
+    line: 127.0.1.1 {{ hades_box }}
+
+- name: Name the VM after its box
+  ansible.builtin.hostname:
+    name: "{{ hades_box }}"
+
+- name: Packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Write the kernel settings
+  ansible.builtin.template:
+    src: sysctl-hades.conf.j2
+    dest: /etc/sysctl.d/90-hades.conf
+    mode: "0644"
+  notify: sysctl reload
+
+- name: Chrome for Testing
+  ansible.builtin.import_tasks: chrome.yml
+
+# Ubuntu's AppArmor lets only profiled binaries create the user namespaces Chrome's sandbox needs.
+- name: Write the Chrome for Testing AppArmor profile
+  ansible.builtin.template:
+    src: apparmor-chrome-for-testing.j2
+    dest: /etc/apparmor.d/chrome-for-testing
+    mode: "0644"
+    validate: apparmor_parser -Q -K %s
+  notify: apparmor load chrome
+
+- name: Postgres
+  ansible.builtin.import_tasks: postgres.yml
+
+# Compose refuses an empty project.
+- name: Dev services
+  ansible.builtin.import_tasks: services.yml
+  when: dev_services | length > 0
+
+- name: Account and shell environment
+  ansible.builtin.import_tasks: account.yml
+
+- name: Write the hades CLI's host config
+  ansible.builtin.template:
+    src: host.toml.j2
+    dest: "{{ hades_config_dir }}/host.toml"
+    mode: "0644"
+
+- name: Caddy
+  ansible.builtin.import_tasks: caddy.yml
+
+- name: GPG key
+  ansible.builtin.import_tasks: gpg.yml
+  when: dev.gpg_key | default(false)
+  vars:
+    vm_gpg_uid: "{{ dev.name }}+{{ hades_box }}@{{ hades_domain }}"
+
+- name: Hex, as the developer
+  ansible.builtin.import_tasks: toolchain.yml
+  become: true
+  become_user: "{{ dev.name }}"
+  environment:
+    PATH: "{{ hades_bin_dir }}:{{ mise_shims }}:/usr/local/bin:/usr/bin:/bin"
+    # Otherwise mise points both into the root-owned Elixir install (env.sh.j2).
+    MIX_HOME: "{{ vm_home }}/.mix"
+    MIX_ARCHIVES: "{{ vm_home }}/.mix/archives"
+
+- name: ADEs, as the developer
+  ansible.builtin.import_tasks: ades.yml
+  become: true
+  become_user: "{{ dev.name }}"

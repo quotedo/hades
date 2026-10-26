@@ -1,0 +1,20 @@
+---
+# Ubuntu's main cluster (packages.yml) listens on localhost:5432 and takes passwords over TCP, as
+# its pg_hba.conf says. Superuser postgres with password postgres: the CLI's laptop defaults.
+- name: Set the postgres password
+  community.postgresql.postgresql_user:
+    name: postgres
+    password: postgres
+  become: true
+  become_user: postgres
+
+- name: Apply the dev tuning
+  community.postgresql.postgresql_alter_system:
+    param: "{{ item.key }}"
+    value: "{{ item.value | string }}"
+  become: true
+  become_user: postgres
+  loop: "{{ postgres_settings | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  notify: postgres restart

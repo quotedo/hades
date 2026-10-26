@@ -1,18 +1,12 @@
 ---
-# caddy_port, caddy_config, caddy_reload_command, hades_live_dir, hades_loopback_address and
-# hades_domain are shared defaults in roles/host.
-
-# `systemctl reload caddy` runs `caddy reload`, which needs Caddy's API. A unix socket that
-# Caddy creates mode 0200 for its own account keeps local users from rewriting the config.
-ingress_caddy_api_socket: /var/lib/caddy/api.sock
-# Orca pairs over Tailscale.
-tailscale_enabled: "{{ user_present | map(attribute='ades') | flatten is contains('orca') }}"
+# caddy_port, caddy_config, hades_loopback_address and hades_domain are shared defaults in
+# roles/host.
 
 # Cloudflare, managed through the API by cloudflare.yml.
 ingress_cloudflare_api: https://api.cloudflare.com/client/v4
 # The Access policy admits the present dev users' emails and access_allow: the plain emails in
 # that order, then the @domain entries, each admitting a whole mail domain.
-ingress_access_entries: "{{ (user_present | map(attribute='email', default='') | list + access_allow) | unique }}"
+ingress_access_entries: "{{ (dev_present | map(attribute='email', default='') | list + access_allow) | unique }}"
 ingress_access_include: >-
   {{ ingress_access_entries | reject('match', '@') | map('community.general.dict_kv', 'email')
      | map('community.general.dict_kv', 'email') | list

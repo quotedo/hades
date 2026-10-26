@@ -14,13 +14,12 @@ import (
 
 	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/execx"
-	"github.com/quotedo/hades/internal/registry"
 	"github.com/quotedo/hades/internal/wtctx"
 )
 
 func TestDownRemovesEverythingItOwns(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
-	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x", "demo_test_alice_feature_x1", "demo_dev_alice_other"}
+	d, c := newDeps(t, "phoenix")
+	d.PG.(*fakePG).names = []string{"demo_dev_demo_feature_x", "demo_test_demo_feature_x1", "demo_dev_demo_other"}
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	res, err := Down(context.Background(), d, c, false)
 	if err != nil {
@@ -31,7 +30,7 @@ func TestDownRemovesEverythingItOwns(t *testing.T) {
 			t.Fatalf("%+v", r)
 		}
 	}
-	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_alice_feature_x", "demo_test_alice_feature_x1"}) {
+	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_demo_feature_x", "demo_test_demo_feature_x1"}) {
 		t.Fatal(got)
 	}
 	if all, _, _ := d.Reg.All(); len(all) != 0 {
@@ -43,42 +42,29 @@ func TestDownRemovesEverythingItOwns(t *testing.T) {
 }
 
 func TestDownWithoutManifestExitsCleanly(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	res, err := Down(context.Background(), d, c, true)
 	if err != nil || len(res) != 1 || !res[0].Skipped {
 		t.Fatalf("%+v %v", res, err)
 	}
 }
 
-func TestDownRefusesOtherUsersManifest(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
-	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
-	d.User.UID = 999
-	res, _ := Down(context.Background(), d, c, false)
-	if !res[0].Skipped || !strings.Contains(res[0].Step, "manifest") {
-		t.Fatalf("%+v", res)
-	}
-	if all, _, _ := d.Reg.All(); len(all) != 1 {
-		t.Fatal("touched another user's manifest")
-	}
-}
-
 func TestDownUsesManifestBasesNotCurrentConfig(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	os.WriteFile(filepath.Join(c.Worktree, "hades.toml"), []byte("databases = [\"other\"]\n"), 0o644)
-	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x", "other_dev_alice_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_demo_feature_x", "other_dev_demo_feature_x"}
 	Down(context.Background(), d, c, false)
-	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_alice_feature_x"}) {
+	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_demo_feature_x"}) {
 		t.Fatal(got)
 	}
 }
 
 func TestDownBestEffortAndStrict(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
 	d.PG.(*fakePG).failDrop = true
-	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x"}
+	d.PG.(*fakePG).names = []string{"demo_dev_demo_feature_x"}
 	var log bytes.Buffer
 	d.Log = &log
 	res, err := Down(context.Background(), d, c, false)
@@ -112,46 +98,18 @@ func TestDownBestEffortAndStrict(t *testing.T) {
 	}
 }
 
-func TestGCReleasesVanishedWorktreesAndOwner(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+func TestGCReleasesVanishedWorktrees(t *testing.T) {
+	d, c := newDeps(t, "phoenix")
 	Up(context.Background(), d, c, UpOptions{SkipSetup: true})
-	d2, c2 := newServerDepsSharing(t, d, "phoenix", "alice") // second worktree, same registry and user
-	Up(context.Background(), d2, c2, UpOptions{SkipSetup: true})
+	c2 := secondWorktree(t, "phoenix")
+	Up(context.Background(), d, c2, UpOptions{SkipSetup: true})
 	os.RemoveAll(c.Worktree)
-	rep, _ := GC(context.Background(), d, "", false)
+	rep, _ := GC(context.Background(), d, false)
 	if len(rep.Released) != 1 || rep.Released[0] != "demo-feature-x" {
 		t.Fatalf("%+v", rep)
 	}
-	rep, _ = GC(context.Background(), d, "alice", false)
-	if len(rep.Released) != 1 {
-		t.Fatalf("%+v", rep)
-	}
-	if all, _, _ := d.Reg.All(); len(all) != 0 {
+	if all, _, _ := d.Reg.All(); len(all) != 1 {
 		t.Fatal(len(all))
-	}
-}
-
-// gc --owner selects by the manifest file's owner, never by its user field.
-func TestGCOwnerSelectsByFileOwner(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
-	mustUp(t, d, c)
-	d2, c2 := newServerDepsSharing(t, d, "phoenix", "other") // user field "other", file owned by alice
-	mustUp(t, d2, c2)
-	rep, err := GC(context.Background(), d, "other", false)
-	if err != nil || len(rep.Released) != 0 || len(rep.Errors) != 0 {
-		t.Fatalf("released by the user field: %+v %v", rep, err)
-	}
-	if all, _, _ := d.Reg.All(); len(all) != 2 {
-		t.Fatal(len(all))
-	}
-	if _, err := GC(context.Background(), d, "nobody", false); err == nil || !strings.Contains(err.Error(), "nobody") {
-		t.Fatal(err)
-	}
-	// alice's run selects both files alice owns, and then verification
-	// refuses the one whose suffix was computed for "other".
-	rep, err = GC(context.Background(), d, "alice", false)
-	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 1 || !strings.Contains(rep.Errors[0].Error(), "refusing ") {
-		t.Fatalf("%+v %v", rep, err)
 	}
 }
 
@@ -182,10 +140,8 @@ func countCalls(f *execx.Fake, want string) int {
 	return n
 }
 
-const sudoReload = "sudo -n /usr/local/bin/hades caddy-reload"
-
 func TestDownRunsTeardownInWorktreeWithItsEnv(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
 	writeFile(t, filepath.Join(c.Worktree, "hades.toml"), "teardown = [\"mix ecto.drop\", \"echo bye\"]\n")
 	if _, err := Down(context.Background(), d, c, true); err != nil {
@@ -203,7 +159,7 @@ func TestDownRunsTeardownInWorktreeWithItsEnv(t *testing.T) {
 }
 
 func TestDownTeardownFailureIsReportedAndOthersStillRun(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
 	writeFile(t, filepath.Join(c.Worktree, "hades.toml"), "teardown = [\"false\", \"echo after\"]\n")
 	var log bytes.Buffer
@@ -234,7 +190,7 @@ func TestDownTeardownFailureIsReportedAndOthersStillRun(t *testing.T) {
 }
 
 func TestDownSkipsTeardownWhenWorktreeIsGone(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
 	if err := os.RemoveAll(c.Worktree); err != nil {
 		t.Fatal(err)
@@ -256,8 +212,8 @@ func TestDownSkipsTeardownWhenWorktreeIsGone(t *testing.T) {
 	}
 }
 
-func TestDownRemovesSiteAndReloadsCaddy(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+func TestDownWithDomainRemovesSiteAndReloads(t *testing.T) {
+	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
 	f := d.Run.(*execx.Fake)
 	f.Calls = nil
@@ -267,13 +223,24 @@ func TestDownRemovesSiteAndReloadsCaddy(t *testing.T) {
 	if _, err := os.Stat(sitePath(t, d, "demo-feature-x")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatal("site left")
 	}
-	if countCalls(f, sudoReload) != 1 {
+	if countCalls(f, reloadCall) != 1 {
 		t.Fatalf("%v", argvs(f))
 	}
 }
 
+func TestDownWithoutDomainMakesNoSiteOrCaddyCall(t *testing.T) {
+	d, c := newLaptopDeps(t, "phoenix")
+	mustUp(t, d, c)
+	f := d.Run.(*execx.Fake)
+	f.Calls = nil
+	res, err := Down(context.Background(), d, c, true)
+	if _, ok := findStep(res, "site"); err != nil || ok || slices.ContainsFunc(f.Calls, func(c execx.Cmd) bool { return c.Argv[0] == "caddy" }) {
+		t.Fatalf("%+v %v %v", res, err, argvs(f))
+	}
+}
+
 func TestDownDeletesVhostOrSkipsWithoutRabbit(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	rmq := &fakeRabbit{}
 	d.Rabbit = rmq
 	d.Host.RabbitMQ = &config.RabbitMQ{AMQPURL: "amqp://u:p@127.0.0.1:5672"}
@@ -297,49 +264,26 @@ func TestDownDeletesVhostOrSkipsWithoutRabbit(t *testing.T) {
 	}
 }
 
-func TestDownAsRootActsOnAnyManifestButSkipsTeardown(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("the manifest would be root's own")
-	}
-	d, c := newServerDeps(t, "phoenix")
-	mustUp(t, d, c)
-	writeFile(t, filepath.Join(c.Worktree, "hades.toml"), "teardown = [\"mix ecto.drop\"]\n")
-	d.User.UID = 0
-	res, err := Down(context.Background(), d, c, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if all, _, _ := d.Reg.All(); len(all) != 0 {
-		t.Fatal("manifest left")
-	}
-	if r, ok := findStep(res, "teardown"); !ok || !r.Skipped || r.Reason != "teardown runs only as the owner; use gc" {
-		t.Fatalf("%+v", res)
-	}
-	if slices.ContainsFunc(argvs(d.Run.(*execx.Fake)), func(c string) bool { return strings.HasPrefix(c, "sh -c mix ecto.drop") }) {
-		t.Fatal("ran another user's teardown as root")
-	}
-}
-
 func TestDownNeverDropsOtherWorktreesDatabases(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
 	d.PG.(*fakePG).names = []string{
-		"demo_dev_alice_feature_x",
-		"demo_test_alice_feature_x2",   // this worktree's MIX_TEST_PARTITION=2
-		"demo_dev_alice_feature_x1_",   // alice's worktree feature/x1
-		"demo_dev_bob_alice_feature_x", // bob's worktree alice-feature-x
-		"demoapp_dev_alice_feature_x",  // another project
+		"demo_dev_demo_feature_x",
+		"demo_test_demo_feature_x2",    // this worktree's MIX_TEST_PARTITION=2
+		"demo_dev_demo_feature_x1_",    // worktree feature/x1
+		"demo_dev_shop_demo_feature_x", // project shop's worktree demo-feature-x
+		"demoapp_dev_demo_feature_x",   // another Mix app
 	}
 	if _, err := Down(context.Background(), d, c, true); err != nil {
 		t.Fatal(err)
 	}
-	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_alice_feature_x", "demo_test_alice_feature_x2"}) {
+	if got := d.PG.(*fakePG).dropped; !reflect.DeepEqual(got, []string{"demo_dev_demo_feature_x", "demo_test_demo_feature_x2"}) {
 		t.Fatal(got)
 	}
 }
 
 func TestDownWithoutDatabaseBasesIsSilent(t *testing.T) {
-	d, c := newServerDeps(t, "go")
+	d, c := newDeps(t, "go")
 	mustUp(t, d, c)
 	var log bytes.Buffer
 	d.Log = &log
@@ -358,7 +302,7 @@ func TestDownWithoutDatabaseBasesIsSilent(t *testing.T) {
 // A port link pointing at another worktree is nothing to release: a skip,
 // and the other worktree's claim stays.
 func TestDownPortClaimedByAnotherWorktreeIsASkip(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
 	link := filepath.Join(d.Reg.PortsDir, "4100")
 	if err := os.Remove(link); err != nil {
@@ -392,14 +336,14 @@ func TestDownOnLaptopWithoutRegistrySkips(t *testing.T) {
 }
 
 func TestGCDryRunChangesNothing(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
 	if err := os.RemoveAll(c.Worktree); err != nil {
 		t.Fatal(err)
 	}
 	f := d.Run.(*execx.Fake)
 	f.Calls = nil
-	rep, err := GC(context.Background(), d, "", true)
+	rep, err := GC(context.Background(), d, true)
 	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 0 {
 		t.Fatalf("%+v %v", rep, err)
 	}
@@ -415,10 +359,10 @@ func TestGCDryRunChangesNothing(t *testing.T) {
 }
 
 func TestGCReloadsCaddyOnceForSeveralSites(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
-	d2, c2 := newServerDepsSharing(t, d, "phoenix", "alice")
-	mustUp(t, d2, c2)
+	c2 := secondWorktree(t, "phoenix")
+	mustUp(t, d, c2)
 	for _, wt := range []string{c.Worktree, c2.Worktree} {
 		if err := os.RemoveAll(wt); err != nil {
 			t.Fatal(err)
@@ -426,17 +370,17 @@ func TestGCReloadsCaddyOnceForSeveralSites(t *testing.T) {
 	}
 	f := d.Run.(*execx.Fake)
 	f.Calls = nil
-	rep, err := GC(context.Background(), d, "", false)
+	rep, err := GC(context.Background(), d, false)
 	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x", "demo-feature-y"}) || len(rep.Errors) != 0 {
 		t.Fatalf("%+v %v", rep, err)
 	}
-	if countCalls(f, sudoReload) != 1 {
+	if countCalls(f, reloadCall) != 1 {
 		t.Fatalf("%v", argvs(f))
 	}
 }
 
 func TestGCRemovesStalePortLinks(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
 	if err := os.RemoveAll(c.Worktree); err != nil { // referenced by a manifest: released with it
 		t.Fatal(err)
@@ -448,7 +392,7 @@ func TestGCRemovesStalePortLinks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	rep, err := GC(context.Background(), d, "", false)
+	rep, err := GC(context.Background(), d, false)
 	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x", "port 4110"}) || len(rep.Errors) != 0 {
 		t.Fatalf("%+v %v", rep, err)
 	}
@@ -461,11 +405,11 @@ func TestGCRemovesStalePortLinks(t *testing.T) {
 }
 
 func TestGCReportsStepErrorsAndCarriesOn(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
-	d2, c2 := newServerDepsSharing(t, d, "phoenix", "alice")
-	mustUp(t, d2, c2)
-	d.PG.(*fakePG).names = []string{"demo_dev_alice_feature_x"}
+	c2 := secondWorktree(t, "phoenix")
+	mustUp(t, d, c2)
+	d.PG.(*fakePG).names = []string{"demo_dev_demo_feature_x"}
 	d.PG.(*fakePG).failDrop = true
 	for _, wt := range []string{c.Worktree, c2.Worktree} {
 		if err := os.RemoveAll(wt); err != nil {
@@ -474,7 +418,7 @@ func TestGCReportsStepErrorsAndCarriesOn(t *testing.T) {
 	}
 	var log bytes.Buffer
 	d.Log = &log
-	rep, err := GC(context.Background(), d, "", false)
+	rep, err := GC(context.Background(), d, false)
 	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-y"}) || len(rep.Errors) != 1 {
 		t.Fatalf("%+v %v", rep, err)
 	}
@@ -489,38 +433,18 @@ func TestGCReportsStepErrorsAndCarriesOn(t *testing.T) {
 	}
 	// The next gc retries, and finds the port already released.
 	d.PG.(*fakePG).failDrop = false
-	rep, err = GC(context.Background(), d, "", false)
+	rep, err = GC(context.Background(), d, false)
 	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 0 {
 		t.Fatalf("retry: %+v %v", rep, err)
 	}
-	if !reflect.DeepEqual(d.PG.(*fakePG).dropped, []string{"demo_dev_alice_feature_x"}) {
+	if !reflect.DeepEqual(d.PG.(*fakePG).dropped, []string{"demo_dev_demo_feature_x"}) {
 		t.Fatal(d.PG.(*fakePG).dropped)
-	}
-}
-
-func TestGCOnLaptopLeavesOtherUsersManifests(t *testing.T) {
-	d, c := newLaptopDeps(t, "phoenix")
-	mustUp(t, d, c)
-	d2, c2 := newServerDepsSharing(t, d, "phoenix", "other")
-	mustUp(t, d2, c2)
-	for _, wt := range []string{c.Worktree, c2.Worktree} {
-		if err := os.RemoveAll(wt); err != nil {
-			t.Fatal(err)
-		}
-	}
-	rep, err := GC(context.Background(), d, "", false)
-	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) {
-		t.Fatalf("%+v %v", rep, err)
-	}
-	all, _, _ := d.Reg.All()
-	if !slices.ContainsFunc(all, func(m *registry.Manifest) bool { return m.User == "other" }) {
-		t.Fatal("released another user's manifest")
 	}
 }
 
 // A port link that is already gone is a skip, so it cannot keep the manifest.
 func TestDownMissingPortLinkIsASkip(t *testing.T) {
-	d, c := newServerDeps(t, "phoenix")
+	d, c := newDeps(t, "phoenix")
 	mustUp(t, d, c)
 	if err := os.Remove(filepath.Join(d.Reg.PortsDir, "4100")); err != nil {
 		t.Fatal(err)
@@ -534,5 +458,37 @@ func TestDownMissingPortLinkIsASkip(t *testing.T) {
 	}
 	if all, _, _ := d.Reg.All(); len(all) != 0 {
 		t.Fatal("manifest left")
+	}
+}
+
+// A manifest kept after a failed step no longer claims the port it released,
+// so the port's reuse by the next up does not stop gc from converging.
+func TestKeptManifestPortReuseConverges(t *testing.T) {
+	d, c := newDeps(t, "phoenix")
+	mustUp(t, d, c)
+	d.PG.(*fakePG).names = []string{"demo_dev_demo_feature_x"}
+	d.PG.(*fakePG).failDrop = true
+	if err := os.RemoveAll(c.Worktree); err != nil {
+		t.Fatal(err)
+	}
+	if rep, _ := GC(context.Background(), d, false); len(rep.Released) != 0 || len(rep.Errors) != 1 {
+		t.Fatalf("gc1: %+v", rep)
+	}
+	kept, err := d.Reg.ByLabel("demo-feature-x")
+	if err != nil || kept.Port != 0 || !reflect.DeepEqual(kept.DBBases, []string{"demo_dev", "demo_test"}) {
+		t.Fatalf("kept manifest %+v %v", kept, err)
+	}
+	c2 := secondWorktree(t, "phoenix")
+	mustUp(t, d, c2)
+	if owner, _ := d.Reg.PortOwner(4100); owner != c2.Worktree {
+		t.Fatalf("port 4100 -> %s", owner)
+	}
+	d.PG.(*fakePG).failDrop = false
+	rep, err := GC(context.Background(), d, false)
+	if err != nil || !reflect.DeepEqual(rep.Released, []string{"demo-feature-x"}) || len(rep.Errors) != 0 {
+		t.Fatalf("gc2: %+v %v", rep, err)
+	}
+	if owner, _ := d.Reg.PortOwner(4100); owner != c2.Worktree {
+		t.Fatal("gc released the reused port")
 	}
 }

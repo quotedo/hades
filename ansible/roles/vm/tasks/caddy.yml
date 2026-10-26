@@ -1,0 +1,28 @@
+---
+# The VM's Caddy (packages.yml) runs as the developer, so `hades up` and `hades down` reload it
+# without root through its default admin API on localhost.
+- name: Run Caddy as the developer
+  ansible.builtin.copy:
+    content: |
+      [Service]
+      User={{ dev.name }}
+      Group={{ dev.name }}
+    dest: /etc/systemd/system/caddy.service.d/hades.conf
+    mode: "0644"
+  notify: caddy restart
+
+- name: Write the Caddyfile
+  ansible.builtin.template:
+    src: Caddyfile.j2
+    dest: "{{ caddy_config }}"
+    mode: "0644"
+    validate: caddy validate --adapter caddyfile --config %s
+  notify: caddy restart
+
+# In check mode a new repository's package is not installed yet.
+- name: Enable and start Caddy
+  ansible.builtin.systemd_service:
+    name: caddy.service
+    enabled: true
+    state: started
+  when: not (ansible_check_mode and vm_repos is changed)

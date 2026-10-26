@@ -74,8 +74,8 @@ func TestDryRunPrintsInsteadOfRunning(t *testing.T) {
 }
 
 func TestToolPrependIncludesMiseShims(t *testing.T) {
-	got := execx.ToolPrepend("/h", []string{"/x"})
-	want := []string{"/h/.asdf/shims", "/h/.local/share/mise/shims", "/usr/local/share/mise/shims", "/h/.local/bin", "/x"}
+	got := execx.ToolPrepend("/h")
+	want := []string{"/h/.asdf/shims", "/h/.local/share/mise/shims", "/usr/local/share/mise/shims", "/h/.local/bin"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %q, want %q", got, want)
 	}

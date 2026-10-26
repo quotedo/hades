@@ -1,0 +1,48 @@
+---
+# Adds every present developer's VM of every box to group dev_vms as <name>.<box>: root at the
+# VM's address through the box (ProxyJump as the box's ansible_user), with the box's inventory
+# variables, `hades_box` and `dev` (its dev_present entry). Plays on dev_vms list the host role
+# for its defaults. A VM stopped after it ran is left out until it runs again (`incus stop`,
+# apply, `incus start`); one that never ran is one the host role starts.
+- name: Read the box's VMs
+  ansible.builtin.command: incus list -f json
+  become: true
+  register: vm_hosts_list
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# Without Incus there are no VMs yet.
+- name: Pair the box with its present developers whose VM runs or is yet to start
+  ansible.builtin.set_fact:
+    vm_hosts_pairs: "{{ [inventory_hostname] | product(dev_present | rejectattr('name', 'in', vm_hosts_stopped)) }}"
+    vm_hosts_left_out: "{{ dev_present | map(attribute='name') | select('in', vm_hosts_stopped) | list }}"
+  vars:
+    vm_hosts_stopped: >-
+      {{ (vm_hosts_list.stdout if vm_hosts_list.rc == 0 else '[]') | from_json | rejectattr('status', 'eq', 'Running')
+         | rejectattr('last_used_at', 'match', '^(1970|0001)-') | map(attribute='name') | list }}
+
+- name: Report the VMs left out
+  ansible.builtin.debug:
+    msg: "{{ item }}: not running, not configured"
+  loop: "{{ vm_hosts_left_out }}"
+
+- name: Add the VMs
+  ansible.builtin.add_host:
+    name: "{{ item.1.name }}.{{ item.0 }}"
+    groups: dev_vms
+    ansible_host: "{{ item.1.address }}"
+    ansible_user: root
+    ansible_ssh_common_args: >-
+      -o ProxyJump={{ hostvars[item.0].ansible_user }}@{{ hostvars[item.0].ansible_host }}
+      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+    hades_box: "{{ item.0 }}"
+    dev: "{{ item.1 }}"
+  changed_when: false
+  # The box's variables without Ansible's own and this file's.
+  args: "{{ dict(vm_hosts_keys | zip(vm_hosts_keys | map('extract', hostvars[item.0]))) }}"
+  vars:
+    vm_hosts_keys: "{{ hostvars[item.0].keys() | reject('match', '^(ansible_|inventory_|group|hostvars|omit|play|role|vm_hosts_)') | list }}"
+  loop: "{{ ansible_play_hosts | map('extract', hostvars, 'vm_hosts_pairs') | flatten(levels=1) }}"
+  loop_control:
+    label: "{{ item.1.name }}.{{ item.0 }}"

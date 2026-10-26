@@ -5,4 +5,3 @@
 /ansible/.ansible/
 /.envrc
 /.superpowers/
-/ansible/.cache/

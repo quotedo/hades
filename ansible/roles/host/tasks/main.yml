@@ -1,38 +1,23 @@
 ---
-# Loopback isolation (isolation.yml) is included by site.yml at the end of the play.
 - name: Install the host packages
   ansible.builtin.apt:
-    name: "{{ host_packages + host_extra_packages }}"
+    name: "{{ dev_packages }}"
     state: present
     update_cache: true
     cache_valid_time: 3600
     install_recommends: false
 
-- name: Create group hades
-  ansible.builtin.group:
-    name: "{{ hades_group }}"
-    system: true
-
-# The registry directories are setgid so entries get the group, sticky so users cannot remove
-# each other's entries.
-- name: Create the registry, Caddy live, host config, backup and journald drop-in directories
+- name: Create the share directories
   ansible.builtin.file:
-    path: "{{ item.path }}"
+    path: "{{ item }}"
     state: directory
-    group: "{{ item.group | default(omit) }}"
-    mode: "{{ item.mode | default('0755') }}"
-  loop:
-    - { path: "{{ hades_registry_root }}" }
-    - { path: "{{ hades_registry_root }}/ports", group: "{{ hades_group }}", mode: "3775" }
-    - { path: "{{ hades_registry_root }}/sites", group: "{{ hades_group }}", mode: "3775" }
-    - { path: "{{ hades_registry_root }}/manifests", group: "{{ hades_group }}", mode: "3775" }
-    - { path: "{{ hades_live_dir | dirname }}" }
-    - { path: "{{ hades_live_dir }}" }
-    - { path: "{{ hades_config_dir }}" }
-    - { path: "{{ backup_dir }}", mode: "0700" }
-    - { path: /etc/systemd/journald.conf.d }
-  loop_control:
-    label: "{{ item.path }}"
+    mode: "0755"
+  loop: ["{{ hades_share }}", "{{ hades_bin_dir }}"]
+  register: host_dirs
+
+# Before the tool store, whose prune guard looks into the running VMs.
+- name: Incus, its storage pool and bridge
+  ansible.builtin.import_tasks: incus.yml
 
 - name: Shared tool store
   ansible.builtin.import_tasks: toolchain.yml
@@ -60,26 +45,20 @@
 - name: Agent CLIs, Paseo and Orca
   ansible.builtin.import_tasks: agents.yml
 
-- name: Kernel settings and CPU governor
-  ansible.builtin.import_tasks: sysctl.yml
-
-- name: Write hades.slice
-  ansible.builtin.template:
-    src: hades.slice.j2
-    dest: /etc/systemd/system/hades.slice
-    mode: "0644"
-  notify: daemon-reload
-
-- name: Hades CLI, host config and sudoers
+- name: Hades CLI and hades-onboard
   ansible.builtin.import_tasks: hades.yml
 
-- name: Gc, backup and keys timers, status and the journal cap
-  ansible.builtin.import_tasks: ops.yml
+- name: CPU governor
+  ansible.builtin.import_tasks: governor.yml
 
-- name: Chrome for Testing
-  ansible.builtin.import_tasks: chrome.yml
+- name: Bridge firewall
+  ansible.builtin.import_tasks: firewall.yml
 
-- name: Protected workloads
-  ansible.builtin.import_tasks: protected.yml
-  tags: [protected]
-  when: protected is defined
+- name: SSH jump account and keys
+  ansible.builtin.import_tasks: jump.yml
+
+- name: Developer VMs
+  ansible.builtin.import_tasks: vms.yml
+
+- name: Offboarding
+  ansible.builtin.import_tasks: offboard.yml

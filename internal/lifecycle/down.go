@@ -30,30 +30,26 @@ type StepResult struct {
 }
 
 // Down releases everything the worktree's manifest records: it runs the
-// project's teardown commands (only as the manifest's owner, not as root),
-// drops the databases, deletes the vhost, removes the site and releases the
-// port. The steps run whether or not the earlier ones succeeded. The manifest
-// is removed only when every step that ran succeeded; otherwise it is kept,
-// so ls still shows the leak and gc retries it, and Down says so. Every skip
-// and failure is a StepResult and a line on d.Log. Down returns an error only
-// when strict is set and a step failed.
+// project's teardown commands, drops the databases, deletes the vhost,
+// removes the site and releases the port. The steps run whether or not the
+// earlier ones succeeded. The manifest is removed only when every step that
+// ran succeeded; otherwise it is kept, so ls still shows the leak and gc
+// retries it, and Down says so. Every skip and failure is a StepResult and a
+// line on d.Log. Down returns an error only when strict is set and a step
+// failed.
 func Down(ctx context.Context, d Deps, c wtctx.Context, strict bool) ([]StepResult, error) {
 	if d.Log == nil {
 		d.Log = io.Discard
 	}
-	m, owner, guard := ownManifest(d, c)
+	m, why := findManifest(d, c)
 	if m == nil {
-		res := []StepResult{guard}
+		res := []StepResult{why}
 		logResults(d.Log, "down", res)
 		return res, failure(res, strict)
 	}
 	var res []StepResult
-	if owner {
-		if r := teardown(ctx, d, c); r != nil {
-			res = append(res, *r)
-		}
-	} else {
-		res = append(res, StepResult{Step: "teardown", Skipped: true, Reason: "teardown runs only as the owner; use gc"})
+	if r := teardown(ctx, d, c); r != nil {
+		res = append(res, *r)
 	}
 	logResults(d.Log, "down", res)
 	rel, _, kept := release(ctx, d, m, true, failedSteps(res))
@@ -78,45 +74,22 @@ func failedSteps(res []StepResult) []string {
 	return failed
 }
 
-// ownManifest returns the worktree's manifest when this user may release it,
-// else nil and the result saying why not. Ownership is the manifest file's
-// uid and only this user's manifests are looked up; root sees every
-// manifest, and one it does not own is released only after its claims are
-// verified against its file owner. owner reports whether this user owns the
-// manifest rather than acting as root.
-func ownManifest(d Deps, c wtctx.Context) (m *registry.Manifest, owner bool, r StepResult) {
-	r = StepResult{Step: "manifest"}
-	if d.Mode == config.Laptop {
-		if err := d.Reg.Check(); errors.Is(err, registry.ErrRegistryMissing) {
-			r.Skipped, r.Reason = true, fmt.Sprintf("no manifest for worktree %s (%v)", c.Worktree, err)
-			return nil, false, r
-		}
+// findManifest returns the worktree's manifest, else nil and the result
+// saying why there is none.
+func findManifest(d Deps, c wtctx.Context) (*registry.Manifest, StepResult) {
+	r := StepResult{Step: "manifest"}
+	if err := d.Reg.Exists(); errors.Is(err, registry.ErrRegistryMissing) {
+		r.Skipped, r.Reason = true, fmt.Sprintf("no manifest for worktree %s (%v)", c.Worktree, err)
+		return nil, r
 	}
-	m, err := d.Reg.ByWorktree(c.Worktree, d.User.UID)
-	if errors.Is(err, registry.ErrNoManifest) {
-		r.Skipped, r.Reason = true, err.Error()
-		return nil, false, r
-	}
-	if err != nil {
-		r.Err = err
-		return nil, false, r
-	}
-	uid := m.OwnerUID()
+	m, err := d.Reg.ByWorktree(c.Worktree)
 	switch {
-	case d.User.UID != 0 && uid != d.User.UID:
-		r.Skipped, r.Reason = true, fmt.Sprintf("manifest %s is owned by uid %d, not uid %d", m.Label, uid, d.User.UID)
-	case !sameDir(m.Worktree, c.Worktree):
-		r.Skipped, r.Reason = true, fmt.Sprintf("manifest %s records worktree %s, not %s", m.Label, m.Worktree, c.Worktree)
-	case uid != d.User.UID:
-		if reason := verifyClaims(d, m); reason != "" {
-			r.Err = fmt.Errorf("refusing %s: %s", m.Path(), reason)
-			return nil, false, r
-		}
-		return m, false, r
-	default:
-		return m, true, r
+	case errors.Is(err, registry.ErrNoManifest):
+		r.Skipped, r.Reason = true, err.Error()
+	case err != nil:
+		r.Err = err
 	}
-	return nil, false, r
+	return m, r
 }
 
 // teardown runs the project's teardown commands from the worktree, with the
@@ -200,8 +173,8 @@ func release(ctx context.Context, d Deps, m *registry.Manifest, reload bool, fai
 // that are settled: the bases once the databases step succeeded, the vhost
 // once it was deleted, and the port once its link was removed or is no
 // longer this worktree's (ports are reused lowest-first, so a stale port
-// would make the next gc or up trip over someone else's claim). The failed
-// claims stay for the next down or gc. The file keeps its owner.
+// would make the next gc or up trip over another worktree's claim). The
+// failed claims stay for the next down or gc.
 func keepManifest(d Deps, m *registry.Manifest, dbs, vhost, port *StepResult) error {
 	settled := func(r *StepResult) bool { return r != nil && r.Err == nil && !r.Skipped }
 	c := *m
@@ -266,9 +239,9 @@ func deleteVhost(ctx context.Context, d Deps, m *registry.Manifest) *StepResult 
 	return r
 }
 
-// removeSite removes the site file in server mode, when there is one.
+// removeSite removes the site file, when there is one (only with a domain).
 func removeSite(ctx context.Context, d Deps, m *registry.Manifest, reload bool) (*StepResult, bool) {
-	if d.Mode != config.Server {
+	if d.Host.Domain == "" {
 		return nil, false
 	}
 	r := &StepResult{Step: "site"}
@@ -288,7 +261,7 @@ func removeSite(ctx context.Context, d Deps, m *registry.Manifest, reload bool) 
 		return r, false
 	}
 	if reload {
-		r.Err = caddy.SudoReload(ctx, d.Run, d.Bin, false)
+		r.Err = caddy.Reload(ctx, d.Run)
 	}
 	return r, true
 }

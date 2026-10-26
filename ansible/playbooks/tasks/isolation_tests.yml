@@ -2,120 +2,83 @@
 - name: Read the hades nftables table
   ansible.builtin.command: nft list table inet hades
   become: true
-  register: host_test_nft
+  register: isolation_test_nft
   changed_when: false
   failed_when: false
 
-- name: Assert the table holds the port range bounds and the dev Postgres port
+# The rules as `nft list` prints them, without their counters.
+- name: Assert the table drops the bridge's other input and its forwarding to the bridge, Docker and published ports
   ansible.builtin.assert:
     that:
-      - host_test_nft.rc == 0
-      - host_test_nft.stdout is search('\\b' ~ host_test_range[0] ~ '\\b')
-      - host_test_nft.stdout is search('\\b' ~ host_test_range[-1] ~ '\\b')
-      - host_test_nft.stdout is search('\\b' ~ dev_pg_port ~ '\\b')
-    fail_msg: >-
-      table inet hades is missing or lacks {{ hades_port_range }} or {{ dev_pg_port }}:
-      {{ host_test_nft.stderr | default('') }}
+      - isolation_test_nft.rc == 0
+      - isolation_test_missing == []
+    fail_msg: "table inet hades lacks {{ isolation_test_missing | to_json }}: {{ isolation_test_nft.stdout }} {{ isolation_test_nft.stderr }}"
     quiet: true
   vars:
-    host_test_range: "{{ hades_port_range | string | split('-') }}"
+    isolation_test_rules:
+      - iifname "{{ vm_bridge }}" drop
+      - iifname "{{ vm_bridge }}" oifname "{{ vm_bridge }}" drop
+      - iifname "{{ vm_bridge }}" oifname "docker0" drop
+      - iifname "{{ vm_bridge }}" oifname "br-*" drop
+      - iifname "{{ vm_bridge }}" ct status dnat drop
+    isolation_test_missing: >-
+      {{ isolation_test_rules | reject('in', isolation_test_nft.stdout | regex_replace(' counter packets [0-9]+ bytes [0-9]+', '')) | list }}
 
-- name: Read the state of the isolation unit
+- name: Read the state of the rules unit
   ansible.builtin.systemd_service:
     name: hades-nftables.service
-  register: host_test_nft_unit
+  register: isolation_test_unit
 
-- name: Assert the isolation unit is enabled and active, so the rules return on boot
+- name: Assert the rules unit is enabled and active, so the rules return on boot
   ansible.builtin.assert:
     that:
-      - host_test_nft_unit.status.UnitFileState == 'enabled'
-      - host_test_nft_unit.status.ActiveState == 'active'
+      - isolation_test_unit.status.UnitFileState == 'enabled'
+      - isolation_test_unit.status.ActiveState == 'active'
     fail_msg: >-
-      hades-nftables.service is {{ host_test_nft_unit.status.UnitFileState | default('missing') }}
-      and {{ host_test_nft_unit.status.ActiveState | default('missing') }}
+      hades-nftables.service is {{ isolation_test_unit.status.UnitFileState | default('missing') }}
+      and {{ isolation_test_unit.status.ActiveState | default('missing') }}
     quiet: true
 
-# `nc -z` cannot tell a reject from a closed port, so the test runs its own root listener on a
-# port of the range that nothing listens on and no worktree has claimed.
-- name: Probe loopback isolation as a non-dev account
+# Probes run from the last present developer's VM (a) towards the first one's (b), whose SSH the
+# box reaches: so a refused connection is the firewall's doing, not a closed port.
+- name: Probe the VMs' network from inside
+  when: dev_present | length > 0
   become: true
   vars:
-    host_test_probe_unit: hades-probe-listener.service
-    host_test_probe_port: "{{ host_test_probe_pick.stdout }}"
+    isolation_test_a: "{{ dev_present[-1].name }}"
+    isolation_test_b: "{{ dev_present[0].address }}"
+    isolation_test_gateway: "{{ vm_subnet | regex_replace('0/16$', '1') }}"
   block:
-    - name: Pick a free, unclaimed port of the range
-      ansible.builtin.shell: |
-        set -o pipefail
-        for port in $(seq {{ (hades_port_range | split('-'))[0] | int }} {{ (hades_port_range | split('-'))[1] | int }}); do
-          claim={{ (hades_registry_root ~ '/ports') | quote }}/$port
-          if [ -e "$claim" ] || [ -L "$claim" ]; then continue; fi
-          if [ -n "$(ss -Hltn "sport = :$port")" ]; then continue; fi
-          echo "$port"
-          exit 0
-        done
-        exit 1
-      args:
-        executable: /bin/bash
-      register: host_test_probe_pick
+    - name: Connect from the box to the first VM's SSH
+      ansible.builtin.command: nc -z -w 3 {{ isolation_test_b }} 22
       changed_when: false
-      failed_when: false
 
-    - name: Assert a probe port was found
-      ansible.builtin.assert:
-        that:
-          - host_test_probe_pick.rc == 0
-        fail_msg: "every port of {{ hades_port_range }} is listening or claimed; the probe has no port to listen on"
-        quiet: true
-
-    - name: Start a root listener on the probe port
-      ansible.builtin.command: >-
-        systemd-run --unit={{ host_test_probe_unit }} --collect
-        nc -dlk {{ hades_loopback_address }} {{ host_test_probe_port }}
-      changed_when: true
-
-    - name: Wait for the listener
-      ansible.builtin.wait_for:
-        host: "{{ hades_loopback_address }}"
-        port: "{{ host_test_probe_port | int }}"
-        timeout: 10
-
-    # Vacuous for a port nothing listens on yet (dev Postgres before the postgres role, say); the
-    # listener carries the real check.
-    - name: Connect to the listener, dev Postgres, Caddy and the Paseo ports as the probe account
-      ansible.builtin.command: runuser -u {{ verify_unprivileged_user }} -- nc -z -w 3 {{ hades_loopback_address }} {{ item }}
-      register: host_test_probe_dev
+    - name: Connect from a VM to another VM's SSH and to the host's SSH
+      ansible.builtin.command: incus exec {{ isolation_test_a }} -- nc -z -w 3 {{ item }} 22
+      register: isolation_test_refused
       changed_when: false
-      failed_when: false
-      loop: >-
-        {{ [host_test_probe_port, dev_pg_port, caddy_port]
-           + user_present | selectattr('ades', 'contains', 'paseo') | map(attribute='paseo_port') | list }}
+      failed_when: isolation_test_refused.rc == 0
+      loop: "{{ ([isolation_test_b] if dev_present | length > 1 else []) + [isolation_test_gateway] }}"
 
-    - name: Connect to the listener as root
-      ansible.builtin.command: nc -z -w 3 {{ hades_loopback_address }} {{ host_test_probe_port }}
-      register: host_test_probe_root
+    - name: Resolve and fetch github.com from a VM
+      ansible.builtin.command: incus exec {{ isolation_test_a }} -- sh -c 'getent hosts github.com && curl -fsS -o /dev/null https://github.com'
       changed_when: false
-      failed_when: false
 
-    - name: Connect to ssh as the probe account
-      ansible.builtin.command: runuser -u {{ verify_unprivileged_user }} -- nc -z -w 3 {{ hades_loopback_address }} {{ ansible_port | default(22) }}
-      register: host_test_probe_ssh
-      changed_when: false
-      failed_when: false
+    # A VM's root could route to another VM through the host; the forward chain drops it.
+    - name: Route from a VM to another VM through the host
+      when: dev_present | length > 1
+      block:
+        - name: Add a route to the other VM through the host
+          ansible.builtin.command: incus exec {{ isolation_test_a }} -- ip route add {{ isolation_test_b }}/32 via {{ isolation_test_gateway }}
+          changed_when: true
 
-    - name: Assert the dev ports refuse the probe account and nothing else changed
-      ansible.builtin.assert:
-        that:
-          - host_test_probe_dev.results | selectattr('rc', 'eq', 0) | list == []
-          - host_test_probe_root.rc == 0
-          - host_test_probe_ssh.rc == 0
-        fail_msg: >-
-          probe results by port (0 = connected): {{ host_test_probe_dev.results | items2dict(key_name='item', value_name='rc') }} (expected refused),
-          as root {{ host_test_probe_root.rc }} (expected 0), ssh {{ host_test_probe_ssh.rc }} (expected 0)
-        quiet: true
-
-  always:
-    - name: Stop the listener
-      ansible.builtin.systemd_service:
-        name: "{{ host_test_probe_unit }}"
-        state: stopped
-      failed_when: false
+        - name: Connect to the other VM's SSH through the host
+          ansible.builtin.command: incus exec {{ isolation_test_a }} -- nc -z -w 3 {{ isolation_test_b }} 22
+          register: isolation_test_routed
+          changed_when: false
+          failed_when: isolation_test_routed.rc == 0
+      always:
+        - name: Remove the route
+          ansible.builtin.command: incus exec {{ isolation_test_a }} -- ip route del {{ isolation_test_b }}/32
+          changed_when: true
+          failed_when: false

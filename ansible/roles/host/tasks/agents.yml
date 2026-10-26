@@ -17,20 +17,27 @@
   register: host_npm
   when: not (ansible_check_mode and host_mise_binary is changed)
 
-# Not a handler: the user role starts Paseo through its shim later in the same play.
+# Not a handler: running VMs see the new binaries as soon as they are installed.
 - name: Create the shims for the new npm binaries
   ansible.builtin.command: mise reshim --system
+  environment:
+    PATH: "{{ hades_bin_dir }}:{{ ansible_facts.env.PATH }}"
   changed_when: true
   when: host_npm is changed # noqa: no-handler
 
+# Otherwise every version ever installed stays in root's caches: mise's downloads and builds,
+# npm's packages.
+- name: Clear mise's and npm's caches
+  ansible.builtin.shell: mise cache clear && {{ mise_shims }}/npm cache clean --force
+  args:
+    chdir: /
+  changed_when: true
+  when: host_tools_install is changed or host_npm is changed # noqa: no-handler
+
+# The VMs install the libraries Orca needs.
 - name: Orca
   when: host_orca_wanted
   block:
-    - name: Install the libraries Orca needs
-      ansible.builtin.apt:
-        name: "{{ orca_packages }}"
-        state: present
-
     - name: Create the Orca directory
       ansible.builtin.file:
         path: "{{ orca_root }}"
@@ -43,13 +50,14 @@
         dest: "{{ orca_root }}/orca-{{ orca_version }}.AppImage"
         mode: "0755"
 
-    # --appimage-extract-and-run unpacks to a temporary directory instead of mounting, so no FUSE.
+    # --appimage-extract-and-run unpacks to a temporary directory on the VM's disk instead of
+    # mounting: no FUSE, and no shared memory map of a file in the share, which the share refuses.
     - name: Write the orca-ide wrapper
       ansible.builtin.copy:
         content: |
           #!/bin/sh
           exec {{ orca_root }}/orca-{{ orca_version }}.AppImage --appimage-extract-and-run "$@"
-        dest: /usr/local/bin/orca-ide
+        dest: "{{ hades_bin_dir }}/orca-ide"
         mode: "0755"
 
     - name: Find other Orca versions
@@ -66,3 +74,10 @@
       loop: "{{ host_orca_old.files }}"
       loop_control:
         label: "{{ item.path }}"
+
+- name: Remove Orca while no developer lists it
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: ["{{ orca_root }}", "{{ hades_bin_dir }}/orca-ide"]
+  when: not host_orca_wanted

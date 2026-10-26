@@ -3,7 +3,6 @@ package lifecycle
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -54,11 +53,14 @@ func (f *fakeRabbit) Delete(_ context.Context, v string) error {
 	return nil
 }
 
-// newServerDeps builds server-mode Deps around a fresh git worktree holding
-// the preset fixture. The root checkout carries hades.toml with
-// project = "demo", so the label is demo-feature-x whatever later tests write
-// into the worktree's own hades.toml.
-func newServerDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
+// newDeps builds Deps for a host with domain example.test around a fresh git
+// worktree holding the preset fixture. The root checkout carries hades.toml
+// with project = "demo", so the label is demo-feature-x whatever later tests
+// write into the worktree's own hades.toml. config.Load pairs a domain with
+// DomainLabelTemplate; here the domain comes with the laptop template, so the
+// label stays demo-feature-x (not alice-demo-feature-x) while the domain
+// still drives the site files and Caddy reloads.
+func newDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 	t.Helper()
 	root, wt := testutil.TempGitRepoWithWorktree(t)
 	root, wt = resolved(t, root), resolved(t, wt)
@@ -75,12 +77,7 @@ func newServerDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 		PortsDir:      filepath.Join(state, "ports"),
 		SitesDir:      filepath.Join(state, "sites"),
 		ManifestsDir:  filepath.Join(state, "manifests"),
-		Caddy: config.Caddy{
-			Config:  filepath.Join(state, "Caddyfile"),
-			Reload:  []string{"caddy", "reload", "--config", filepath.Join(state, "Caddyfile")},
-			LiveDir: filepath.Join(state, "live"),
-		},
-		Postgres: config.Postgres{Host: "127.0.0.1", Port: 5433, User: "postgres", Password: "postgres"},
+		Postgres:      config.Postgres{Host: "127.0.0.1", Port: 5433, User: "postgres", Password: "postgres"},
 	}
 	reg := registry.New(host)
 	if err := reg.EnsureDirs(0o700); err != nil {
@@ -88,7 +85,6 @@ func newServerDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 	}
 	d := Deps{
 		Host:     host,
-		Mode:     config.Server,
 		Reg:      reg,
 		Run:      &execx.Fake{},
 		PG:       &fakePG{},
@@ -97,52 +93,32 @@ func newServerDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 		Version:  "test",
 		Now:      time.Now,
 		Log:      io.Discard,
-		Bin:      "/usr/local/bin/hades",
 		LookPath: func(string) (string, error) { return "", exec.ErrNotFound },
-		// The test process is "alice"; "other" is a user owning no files.
-		LoginOf: func(uid int) (string, error) {
-			if uid == os.Getuid() {
-				return "alice", nil
-			}
-			return "", fmt.Errorf("unknown uid %d", uid)
-		},
-		UIDOf: func(login string) (int, error) {
-			switch login {
-			case "alice":
-				return os.Getuid(), nil
-			case "other":
-				return os.Getuid() + 1, nil
-			}
-			return 0, fmt.Errorf("unknown user %s", login)
-		},
 	}
 	return d, wtctx.Context{Root: root, Worktree: wt, Name: "feature/x", ADE: "shell"}
 }
 
-// newServerDepsSharing returns Deps and Context for a second worktree,
-// feature/y of another demo checkout, sharing d's host, registry and fakes.
-// The user is named userName with the same UID, because tests cannot chown:
-// "alice" is the same user, "other" a manifest whose user field differs from
-// its file owner.
-func newServerDepsSharing(t *testing.T, d Deps, fixture, userName string) (Deps, wtctx.Context) {
+// secondWorktree returns the Context of a second worktree, feature/y of
+// another demo checkout, for the same Deps.
+func secondWorktree(t *testing.T, fixture string) wtctx.Context {
 	t.Helper()
 	root, wt := testutil.TempGitRepoWithWorktree(t)
 	root, wt = resolved(t, root), resolved(t, wt)
 	testutil.CopyDir(t, filepath.Join("..", "preset", "testdata", fixture), wt)
 	writeFile(t, filepath.Join(root, "hades.toml"), "project = \"demo\"\n")
-	d.User.Name = userName
-	return d, wtctx.Context{Root: root, Worktree: wt, Name: "feature/y", ADE: "shell"}
+	return wtctx.Context{Root: root, Worktree: wt, Name: "feature/y", ADE: "shell"}
 }
 
-// newLaptopDeps is newServerDeps in laptop mode: no domain, no Caddy.
+// newLaptopDeps is newDeps without a domain.
 func newLaptopDeps(t *testing.T, fixture string) (Deps, wtctx.Context) {
 	t.Helper()
-	d, c := newServerDeps(t, fixture)
-	d.Mode = config.Laptop
+	d, c := newDeps(t, fixture)
 	d.Host.Domain = ""
-	d.Host.Caddy = config.Caddy{}
 	return d, c
 }
+
+// reloadCall is the Caddy reload as argvs prints it.
+var reloadCall = strings.Join(caddy.ReloadArgv, " ")
 
 // sitePath is the site file of label in d's sites directory.
 func sitePath(t *testing.T, d Deps, label string) string {

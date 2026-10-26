@@ -1,14 +1,23 @@
 ---
 # Shared tool store: mise installs every `tools` version as root under
-# mise_store, and the store holds exactly that list. /etc/mise/config.toml, which every user
+# mise_store, and the store holds exactly that list. /etc/mise/config.toml, which every VM
 # reads, sets the defaults and turns off auto-install and the fall-through to other binaries.
 - name: Install mise
   ansible.builtin.get_url:
     url: https://github.com/jdx/mise/releases/download/v{{ mise_version }}/mise-v{{ mise_version }}-linux-x64
-    dest: /usr/local/bin/mise
+    dest: "{{ mise_bin }}"
     mode: "0755"
     checksum: sha256:https://github.com/jdx/mise/releases/download/v{{ mise_version }}/SHASUMS256.txt
   register: host_mise_binary
+  # In check mode a new share directory does not exist yet.
+  when: not (ansible_check_mode and host_dirs is changed)
+
+- name: Put mise on the host's PATH
+  ansible.builtin.file:
+    src: "{{ mise_bin }}"
+    dest: /usr/local/bin/mise
+    state: link
+    force: true
 
 - name: Create the store and the mise config directory
   ansible.builtin.file:
@@ -33,10 +42,11 @@
   when: not (ansible_check_mode and host_mise_binary is changed)
 
 # Every listed version in one command, in inventory order: installed ones are skipped, and an
-# Elixir build finds the Erlang listed before it.
+# Elixir build finds the Erlang listed before it. A low CPU and IO weight leaves the running VMs
+# their share while a toolchain builds.
 - name: Install the listed tool versions
   ansible.builtin.command:
-    argv: "{{ ['mise', 'install', '--system'] + host_tools_listed }}"
+    argv: "{{ ['systemd-run', '--scope', '-q', '-p', 'CPUWeight=20', '-p', 'IOWeight=20', 'mise', 'install', '--system'] + host_tools_listed }}"
   environment:
     KERL_CONFIGURE_OPTIONS: "{{ kerl_configure_options }}"
     MISE_YES: "1"
@@ -44,20 +54,55 @@
   changed_when: true
   when: host_tools_listed | difference(host_tools_installed) | length > 0
 
-- name: Remove unlisted tool versions
-  ansible.builtin.command:
-    argv: "{{ ['mise', 'uninstall'] + host_tools_installed | difference(host_tools_listed) }}"
-  changed_when: true
+# Prune guard: a version stays while a process in a running VM maps a file under its install
+# directory (a binary or a library) or names it on its command line (Elixir's code is read, not
+# mapped); the run names it and removes the rest. The path goes in on stdin, so that the probing
+# shell's own command line does not hold it.
+- name: Read the running VMs
+  ansible.builtin.command: incus list status=running -c n -f csv
+  register: host_tools_vms
+  changed_when: false
+  check_mode: false
   when: host_tools_installed | difference(host_tools_listed) | length > 0
 
-- name: Stat the shims directory
-  ansible.builtin.stat:
-    path: "{{ mise_shims }}"
-  register: host_tools_shims
+- name: Look in the running VMs for processes that use a version to remove
+  ansible.builtin.command:
+    argv: [incus, exec, "{{ item.0 }}", --, sh, -c, 'grep -lsFf - /proc/[0-9]*/maps /proc/[0-9]*/cmdline || :']
+    stdin: "{{ mise_store }}/installs/{{ item.1 | replace('@', '/') }}/"
+  register: host_tools_inuse
+  changed_when: false
+  check_mode: false
+  loop: "{{ host_tools_vms.stdout_lines | default([]) | product(host_tools_installed | difference(host_tools_listed)) | list }}"
 
-# install --system creates no shims; uninstall removes its own. A missing directory means a run
-# stopped between the install and this step.
+- name: Keep the versions in use
+  ansible.builtin.debug:
+    msg: "{{ item.item.1 }} kept: in use in {{ item.item.0 }}"
+  when: item.stdout | default('') | length > 0
+  loop: "{{ host_tools_inuse.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.1 }} in {{ item.item.0 }}"
+
+- name: Remove unlisted tool versions
+  ansible.builtin.command:
+    argv: "{{ ['mise', 'uninstall'] + host_tools_unused }}"
+  changed_when: true
+  when: host_tools_unused | length > 0
+  vars:
+    host_tools_unused: >-
+      {{ host_tools_installed | difference(host_tools_listed) | difference(host_tools_inuse.results | default([])
+         | rejectattr('stdout', 'eq', '') | map(attribute='item.1') | list) }}
+
+- name: Stat the node shim
+  ansible.builtin.stat:
+    path: "{{ mise_shims }}/node"
+  register: host_tools_shim
+
+# install --system creates no shims; uninstall removes its own. A missing shim means a run stopped
+# between the install and this step. Shims link to the first mise on PATH, which must be mise_bin:
+# the VMs have no /usr/local/bin/mise.
 - name: Create the shims
   ansible.builtin.command: mise reshim --system
+  environment:
+    PATH: "{{ hades_bin_dir }}:{{ ansible_facts.env.PATH }}"
   changed_when: true
-  when: host_tools_install is changed or not host_tools_shims.stat.exists
+  when: host_tools_install is changed or host_mise_binary is changed or host_tools_shim.stat.lnk_target | default('') != mise_bin

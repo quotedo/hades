@@ -1,0 +1,33 @@
+---
+- name: Reload sysctl
+  ansible.builtin.command: sysctl --system
+  changed_when: true
+  listen: sysctl reload
+
+- name: Load the Chrome for Testing AppArmor profile
+  ansible.builtin.command: apparmor_parser -r -T -W /etc/apparmor.d/chrome-for-testing
+  changed_when: true
+  listen: apparmor load chrome
+
+# postgresql@<major>-main is PartOf postgresql.service.
+- name: Restart Postgres
+  ansible.builtin.systemd_service:
+    name: postgresql.service
+    state: restarted
+  listen: postgres restart
+
+# --force-recreate: the plugins file and the init script are single-file bind mounts, which keep
+# the old inode when the template replaces them, and compose does not see a change to them.
+- name: Recreate the service containers
+  ansible.builtin.command: docker compose -f {{ services_dir }}/docker-compose.yml up -d --force-recreate --remove-orphans
+  changed_when: true
+  listen: services recreate
+
+# A restart: the drop-in's account applies at start only. In check mode the unit may not exist yet.
+- name: Restart Caddy
+  ansible.builtin.systemd_service:
+    name: caddy.service
+    state: restarted
+    daemon_reload: true
+  when: not ansible_check_mode
+  listen: caddy restart
