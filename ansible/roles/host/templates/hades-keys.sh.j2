@@ -25,7 +25,7 @@ while IFS=: read -r login github address; do
   keys=$(grep -sF "permitopen=\"$address:22\"" "$jump" | cut -d' ' -f3-) vm=
   if [ -z "$want" ] || [ "$login" = "$want" ]; then
     gh=
-    if [ -n "$github" ] && ! gh=$(curl -fsS --max-time 20 "https://github.com/$github.keys"); then
+    if [ -n "$github" ] && ! gh=$(curl -fsSL --max-time 20 "https://github.com/$github.keys"); then
       echo "$login: fetch failed, kept"
     else
       keys=$(cat "{{ hades_config_dir }}/ssh-keys/$login" 2>/dev/null; [ -z "$gh" ] || printf '%s\n' "$gh") vm=1
