@@ -71,7 +71,7 @@ func initCmd(ctx *Context, args []string) int {
 	}
 
 	w := &initWriter{root: root, stderr: ctx.Stderr, force: *force}
-	w.file("hades.toml", renderHadesToml(root))
+	w.file("hades.toml", renderHadesToml(root, p))
 	if want["paseo"] {
 		w.hook("paseo.json", paseoJSON, paseoAdd)
 	}
@@ -111,12 +111,34 @@ func repoRoot() (string, error) {
 	return top, nil
 }
 
-func renderHadesToml(root string) string {
+// renderHadesToml fills the template with the project name and, in its
+// commented keys, the values detected in p.
+func renderHadesToml(root string, p preset.Preset) string {
 	line := `# project = "my-project"`
 	if slug, err := naming.Slug(filepath.Base(root)); err == nil {
 		line = fmt.Sprintf("project = %q", slug)
 	}
-	return strings.Replace(hadesTomlTmpl, "@PROJECT@", line, 1)
+	var dbs []string
+	if p.AppName != "" {
+		dbs = []string{p.AppName + "_dev", p.AppName + "_test"}
+	}
+	return strings.NewReplacer(
+		"@PROJECT@", line,
+		"@PRESET@", fmt.Sprintf("%q", p.Kind),
+		"@WEB@", fmt.Sprint(p.Web),
+		"@SETUP@", tomlStrings(p.Setup),
+		"@DATABASES@", tomlStrings(dbs),
+		"@TIDEWAVE@", fmt.Sprint(p.Tidewave),
+	).Replace(hadesTomlTmpl)
+}
+
+// tomlStrings renders ss as a TOML array of strings.
+func tomlStrings(ss []string) string {
+	q := make([]string, len(ss))
+	for i, s := range ss {
+		q[i] = fmt.Sprintf("%q", s)
+	}
+	return "[" + strings.Join(q, ", ") + "]"
 }
 
 func renderPhoenixSnippet(app string) string {
