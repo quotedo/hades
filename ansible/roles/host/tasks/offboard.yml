@@ -46,7 +46,8 @@
     # tar's status 1 means a file changed while it was read; the listing proves the archive whole.
     - name: Archive each home from inside its VM
       ansible.builtin.shell: >-
-        umask 077; incus exec {{ item.name }} -- tar -C /home -czf - {{ item.name }} > {{ host_offboard_archive }};
+        umask 077; incus exec {{ item.name }} -- tar -C /home -czf -
+        --exclude={{ item.name }}/.cache --exclude={{ item.name }}/.paseo/models {{ item.name }} > {{ host_offboard_archive }};
         [ $? -le 1 ] && tar -tzf {{ host_offboard_archive }} {{ item.name }}/ > /dev/null
       vars:
         host_offboard_archive: "{{ backup_dir }}/{{ item.name }}-offboard-{{ ansible_facts.date_time.iso8601_basic_short }}.tar.gz"

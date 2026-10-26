@@ -215,7 +215,7 @@ the request; other paths are open to every allowed email.
 ## Offboarding a developer
 
 1. Set `state: absent` on the entry.
-2. Apply `site.yml`. While the VM exists, the host role starts it if stopped, logs it out of Tailscale, archives `/home/<name>` from inside it to `/var/backups/hades/<name>-offboard-<YYYYmmddTHHMMSS>.tar.gz` (root, 0600, never pruned), then deletes the VM with its databases and Docker volumes. The same run drops their jump keys, Caddy route and Access email.
+2. Apply `site.yml`. While the VM exists, the host role starts it if stopped, logs it out of Tailscale, archives `/home/<name>`, without `.cache` and `.paseo/models`, from inside it to `/var/backups/hades/<name>-offboard-<YYYYmmddTHHMMSS>.tar.gz` (root, 0600, never pruned), then deletes the VM with its databases and Docker volumes. The same run drops their jump keys, Caddy route and Access email.
 3. Verify `--tags offboard`.
 4. Revoke by hand: production certificate and keys, GitHub access.
 5. The archive holds the developer's credentials (kubeconfig, GitHub token, agent logins). Verify expects one per absent entry: delete the entry, then the archive, when you no longer need it.
