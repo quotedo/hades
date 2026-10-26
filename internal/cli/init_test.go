@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/quotedo/hades/internal/config"
 	"github.com/quotedo/hades/internal/testutil"
 )
 
@@ -97,6 +98,44 @@ func TestInitPhoenixPrintsConfigSnippet(t *testing.T) {
 		if !strings.Contains(out.stderr, want) {
 			t.Fatalf("missing %q in %s", want, out.stderr)
 		}
+	}
+}
+
+// The commented keys show what hades detected, so they cannot be mistaken for
+// the project's settings when they differ from them.
+func TestInitHadesTomlShowsDetectedValues(t *testing.T) {
+	root, _ := testutil.TempGitRepoWithWorktree(t)
+	src := filepath.Join("..", "preset", "testdata", "phoenix")
+	for _, f := range []string{"mix.exs", "mix.lock"} {
+		if err := os.WriteFile(filepath.Join(root, f), mustRead(t, filepath.Join(src, f)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, out := runInCapture(t, root, "init"); code != 0 {
+		t.Fatal(code, out.stderr)
+	}
+	toml := string(mustRead(t, filepath.Join(root, "hades.toml")))
+	for _, want := range []string{
+		`# preset = "phoenix"`, "# web = true", `# setup = ["mix setup"]`,
+		`# databases = ["demo_dev", "demo_test"]`, "# tidewave = true",
+	} {
+		if !strings.Contains(toml, want) {
+			t.Fatalf("missing %q in\n%s", want, toml)
+		}
+	}
+
+	bare, _ := testutil.TempGitRepoWithWorktree(t)
+	if code, out := runInCapture(t, bare, "init"); code != 0 {
+		t.Fatal(code, out.stderr)
+	}
+	toml = string(mustRead(t, filepath.Join(bare, "hades.toml")))
+	for _, want := range []string{`# preset = "none"`, "# web = false", "# setup = []", "# tidewave = false"} {
+		if !strings.Contains(toml, want) {
+			t.Fatalf("missing %q in\n%s", want, toml)
+		}
+	}
+	if _, err := config.LoadProject(bare, bare); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -1,32 +1,33 @@
 # hades.toml: optional per-project settings for hades.
-# Every key is commented out with its default; uncomment to override.
+# The commented keys show what hades detected in this repository; uncomment one to override it.
 
 # Project name used in labels, hostnames and database names.
 @PROJECT@
 
-# Project kind: phoenix | elixir | go | node | none. Default: detected.
-# preset = "none"
+# Project kind: phoenix | elixir | go | node | none.
+# preset = @PRESET@
 
-# Whether the project serves HTTP and gets a port and URL. Default: per preset.
-# web = false
+# Whether the project serves HTTP and gets a port and URL.
+# web = @WEB@
 
-# Setup commands run by `hades up`; replaces the preset's steps.
-# setup = ["mix deps.get", "mix ecto.setup"]
+# Setup commands run by `hades up`, after `git secret reveal` in a repository that uses git-secret.
+# setup = @SETUP@
 
 # Extra commands run by `hades down`, before the environment is removed.
 # teardown = []
 
-# Database base names (everything before the suffix). Default: <app>_dev and <app>_test.
-# databases = ["shop_dev", "shop_internal_dev", "shop_test"]
+# Database base names (everything before the suffix), all of them, so `hades down` drops them all.
+# databases = @DATABASES@
 
-# Extra environment variables. Values may use {{host}} {{port}} {{url}} {{suffix}} {{name}} {{project}} {{label}}.
+# Extra environment variables, for example the preview URL. Values may use
+# {{host}} {{port}} {{url}} {{suffix}} {{name}} {{project}} {{label}}.
 # [env]
 # PUBLIC_URL = "{{url}}"
 
-# Give each worktree its own RabbitMQ vhost. Default: false.
+# Give each worktree its own RabbitMQ vhost.
 # [services.rabbitmq]
 # vhost = false
 
-# Expose Tidewave MCP for the worktree. Default: detected from mix.lock.
+# Wire Tidewave into the agents' MCP configs (detected from mix.lock).
 # [mcp]
-# tidewave = false
+# tidewave = @TIDEWAVE@
