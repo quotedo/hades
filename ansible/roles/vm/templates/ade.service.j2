@@ -16,9 +16,10 @@ ExecStart={{ mise_shims }}/paseo daemon run
 # orca-ide runs orca {{ orca_version }}. It pairs on the VM's tailnet address, so it fails to
 # start, and tries again, until hades-onboard has logged Tailscale in.
 Environment=ORCA_TERMINAL_MEMORY_MAX={{ orca_terminal_memory_max }} ORCA_TERMINAL_MEMORY_SWAP_MAX={{ orca_terminal_swap_max }}
-# Orca unpacks about 700 MB at every start: into the home's cache, not the tmpfs /tmp.
+# Orca unpacks about 700 MB at every start: into the home's cache, not the tmpfs /tmp; every stop removes it.
 Environment=TMPDIR=%h/.cache
 ExecStartPre=/bin/mkdir -p %h/.cache
+ExecStopPost=/bin/sh -c 'rm -rf %h/.cache/appimage_extracted_*'
 ExecStart=/bin/sh -c 'ip=$$(tailscale ip -4) && exec {{ hades_bin_dir }}/orca-ide serve --port {{ orca_port }} --pairing-address "$$ip"'
 RestartSec=30
 {% endif %}
