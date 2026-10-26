@@ -137,7 +137,8 @@
       register: ingress_cf_apps
       check_mode: false
 
-    # The organization caps every application's session, so both carry access_session.
+    # The organization caps every application's session, so both carry access_session. The login
+    # page lists every login method: a redirect would skip it for the account's first provider.
     - name: Create the Access application or set its session length and login flags
       ansible.builtin.uri:
         url: "{{ ingress_cf_account }}/access/apps{{ ('/' ~ ingress_cf_app.id) if ingress_cf_app else '' }}"
@@ -148,12 +149,12 @@
           domain: "*.{{ hades_domain }}"
           session_duration: "{{ access_session }}"
           app_launcher_visible: false
-          auto_redirect_to_identity: true
+          auto_redirect_to_identity: false
       register: ingress_cf_app_new
       changed_when: true
       when: >-
         ingress_cf_app == {} or ingress_cf_app.session_duration != access_session
-        or ingress_cf_app.app_launcher_visible or not ingress_cf_app.auto_redirect_to_identity
+        or ingress_cf_app.app_launcher_visible or ingress_cf_app.auto_redirect_to_identity
 
     # An account without Zero Trust answers with an error: the organization is then created, which
     # enables Zero Trust where the account allows it through the API.
@@ -219,6 +220,7 @@
           type: onetimepin
           name: One-time PIN
           config: {}
+        status_code: [200, 201]
       changed_when: true
       when:
         - ingress_cf_idps.json is defined

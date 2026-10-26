@@ -140,10 +140,12 @@
       register: ingress_test_idps
       no_log: true
 
-    - name: Assert the account has the One-time PIN login
+    - name: Assert the login page offers the One-time PIN
       ansible.builtin.assert:
-        that: ingress_test_idps.json.result | selectattr('type', 'eq', 'onetimepin') | list | length == 1
-        fail_msg: "identity providers: {{ ingress_test_idps.json.result | map(attribute='type') | list }}"
+        that:
+          - ingress_test_idps.json.result | selectattr('type', 'eq', 'onetimepin') | list | length == 1
+          - not (ingress_test_apps.json.result | selectattr('domain', 'eq', '*.' ~ hades_domain) | first).auto_redirect_to_identity
+        fail_msg: "identity providers: {{ ingress_test_idps.json.result | map(attribute='type') | list }}; the application must not redirect"
         quiet: true
 
     - name: Assert the Access policy admits exactly the inventory's list
