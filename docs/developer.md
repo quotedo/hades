@@ -17,8 +17,6 @@ For a developer with a VM on a hades box. Command flags, exit codes and files ar
 
 | Need | Why |
 |---|---|
-| Read access to the hades GitHub repository | Its releases are private; the CLI download goes through your GitHub login. |
-| `gh` on your laptop, logged in (`gh auth login`) | Downloads the CLI; `hades join` reads your GitHub login from it and uploads a key when GitHub has none of yours. |
 | A Tailscale account, Tailscale on your laptop (and phone) | Your VM joins your own tailnet during onboarding; daily use goes over it. |
 | Paseo Desktop on your laptop (Orca users: the Orca app) | Connects to your ADE. |
 | An entry in the box's inventory | Send the administrator your GitHub login and the email you will log in with; they apply and send you the host name. |
@@ -33,9 +31,8 @@ For a developer with a VM on a hades box. Command flags, exit codes and files ar
    hades join <host>
    ```
 
-   Add `--as <name>` when your name in the inventory differs from your laptop's `$USER`,
-   `--alias <alias>` for an IP address or a host name without a dot, `--github <GitHub login>` when
-   `gh` is not logged in.
+   The box tells it your name. Add `--alias <alias>` for an IP address or a host name without a dot,
+   `--github <GitHub login>` when `gh` is missing or not logged in.
 3. Go through the [first-login steps](#first-login-steps) it starts in your VM.
 4. Connect your ADE with what they print at the end (see [Connect your ADE](#connect-your-ade)).
 
@@ -44,7 +41,7 @@ else; the [CLI reference](cli.md#join) has every step.
 
 | Alias | Reaches your VM | For |
 |---|---|---|
-| `<alias>` | written once onboarding completes: at its tailnet name when this laptop reaches it there, else through the box | daily use: `ssh <alias>`, Paseo Desktop |
+| `<alias>` | written once onboarding completes: at its tailnet name or address when this laptop reaches it there, else through the box | daily use: `ssh <alias>`, Paseo Desktop |
 | `<alias>-via-host` | always through the box: `ProxyCommand ssh -W %h:%p -l hades … <host>` | first contact, and when your VM's tailnet login has lapsed |
 
 The alias is the host's first DNS label (`box` for `box.example.test`) unless you pass `--alias`.
@@ -63,10 +60,11 @@ second `<alias>` goes into the printed Paseo address. Each step prints `already 
 |---|---|
 | GitHub | `gh auth login -h github.com -p https -w`: a code to enter in your browser. |
 | git | `gh auth setup-git`, so git reaches GitHub with your `gh` login. |
+| Commit identity | When unset, git's `user.name` and `user.email`: your GitHub name (else login) and public email (else its noreply address). |
 | Claude Code, Codex | `claude auth login` and `codex login --device-auth`, for each one not logged in. |
 | Repositories | Clones each repository the administrator listed into `~/<name>`, unless that directory exists. A failed clone ends the run with `onboarding incomplete: clone <names> failed; run hades-onboard again`. |
 | Tailscale | `sudo tailscale up` prints a login link and waits: log in to your own tailnet. Your VM joins it named after the box. A failure ends the run with `onboarding incomplete`. |
-| Orca | When Orca runs for you: restarted, so it pairs on your VM's tailnet address. |
+| Orca | When Orca runs for you: restarted after a Tailscale login in this run, or when it is not running, so it pairs on your VM's tailnet address. |
 | Check | `hades doctor`. A FAIL ends the run with `onboarding incomplete: fix the FAIL lines above and run hades-onboard again`. |
 | Done | Writes `~/.config/hades/onboarded`, prints `onboarding complete`, then the connection details. |
 
@@ -81,7 +79,7 @@ Until onboarding completes, every interactive shell prints
 Paseo Desktop: Settings > Add host > Remote SSH
   ssh://<you>@<alias>
   Daemon password: <password>
-Paseo on your phone (Tailscale on): <tailnet name>:6767, same password
+Paseo on your phone (Tailscale on): <tailnet address>:6767, same password
 Orca pairing: <url>
 Tailscale: disable key expiry for <tailnet name> in your Tailscale admin console, or it leaves your tailnet after 180 days.
 ```
@@ -89,7 +87,7 @@ Tailscale: disable key expiry for <tailnet name> in your Tailscale admin console
 | | |
 |---|---|
 | Paseo Desktop | Settings, Add host, Remote SSH: the address and the daemon password. It follows `<alias>` in your `~/.ssh/config`. |
-| Paseo on your phone | With Tailscale on, `<tailnet name>:6767` and the same password. |
+| Paseo on your phone | With Tailscale on, `<tailnet address>:6767` and the same password. |
 | Orca | Printed when Orca runs for you: with your laptop on your tailnet, open the URL in the Orca app. |
 | Tailscale | Disable key expiry for your VM as the last line says. |
 
@@ -105,7 +103,7 @@ Your ADE's worktree hooks run `hades up` when a worktree opens and `hades down` 
 | Fact | Value |
 |---|---|
 | Label | `<you>-<project>-<name>`, at most 63 characters. `hades up` prints `hades: <label> up at <url>` on stderr. |
-| Databases | `<app>_dev<suffix>` and `<app>_test<suffix>`, suffix `_<you>_<name>`. The project's setup creates them; `hades down` drops only those. |
+| Databases | `<app>_dev<suffix>` and `<app>_test<suffix>`, suffix `_<project>_<name>` (a worktree from before keeps its own). The project's setup creates them; `hades down` drops only those. |
 | Variables | `hades env` prints them; the [CLI reference](cli.md#what-up-writes) lists them. |
 
 Day to day: `hades ls` lists your worktrees, `hades env` and `hades port` describe the current
@@ -117,6 +115,7 @@ one, and `hades doctor` says what is wrong and how to fix it.
 |---|---|
 | sudo | Without a password: install what you need with `apt`. The shared tools stay read-only, also for root. |
 | Docker | Docker CE; you are in group `docker`. |
+| Cleanup | Daily (`hades-cleanup.timer`): `hades gc`, then the Docker images no container uses and the build cache, both older than 7 days. |
 | Postgres | Ubuntu's `postgresql` with PostGIS on `127.0.0.1:5432`, `postgres`/`postgres`: hades' laptop defaults, exported as `DB_*`. Tuned for speed (`fsync` off), so the data is throwaway. `shared_buffers` is a quarter of the VM's memory, at most 8 GB. |
 | RabbitMQ | When the box lists it: AMQP `127.0.0.1:5672`, MQTT `127.0.0.1:1883`, management `http://127.0.0.1:15672`, `guest`/`guest`; a vhost per worktree when `hades.toml` asks for one. |
 | LocalStack | When the box lists it: S3 at `http://127.0.0.1:14566`, no credentials, state lost on restart. |
@@ -130,19 +129,20 @@ one, and `hades doctor` says what is wrong and how to fix it.
 - A version the store lacks fails with `Tool not installed for shim: <tool>`. Ask the administrator to add it; every VM has it at once.
 - `~/.tool-versions` in your home overrides the box default for you alone.
 - Hex, rebar and Mix archives live in your own `~/.mix`.
-- Agent CLIs do not self-update; the administrator moves everyone together.
+- Agent CLIs do not self-update; the administrator moves everyone together, and agents started afterwards run the new version.
+- A new Paseo, Orca or default Node waits for your `systemctl --user restart paseo.service` (or `orca.service`).
 
 ## Your SSH keys
 
 - The box writes your VM's `~/.ssh/authorized_keys` and your keys for the jump account from `https://github.com/<GitHub login>.keys`, plus any key the administrator listed for you, every hour and at every apply.
-- A key you add on GitHub works within the hour, and so does a removal, except of your last GitHub key: an empty fetch keeps the keys.
+- A key you add or remove on GitHub takes effect within the hour.
 - A new laptop: run `hades join` there.
 
 ## Who can see what
 
 - The administrator is root in your VM.
 - Other VMs cannot reach yours; your tailnet reaches every port of it.
-- Every email on the Access allow-list can open every worktree URL, yours included.
+- Every email on the Access allow-list can open every worktree URL, yours included, except the dev paths (`/dev*`, `/tidewave*`, `/phoenix/live_reload*`): only your email opens yours.
 - Every agent your ADE runs is you, with `sudo`: it can use your logins and credentials at any time.
 
 ## Intranet and production
@@ -161,7 +161,7 @@ says whether your key is on GitHub. The causes:
 | Your key is not on GitHub | Follow the `github:` line printed earlier. `gh is not logged in`: `gh auth login`, then rerun. `gh lacks the admin:public_key scope`: `gh auth refresh -h github.com -s admin:public_key`, then rerun. `gh is logged in as <account>, not <GitHub login>`, or any other error: add the printed key at https://github.com/settings/keys. Without GitHub: send the printed key to the administrator. |
 | Your key is on GitHub, the box has not refreshed yet | Wait for the hourly refresh, or ask the administrator to run `sudo hades-keys <name>`. Then rerun. |
 | Your entry names another GitHub login | The message names the GitHub login your key is on; the administrator sets that as `github:` in your entry and applies. |
-| Your name in the inventory differs from your laptop's `$USER` | Rerun with `--as <name>`. |
+| `the VM refused login <login>` | The box copies your key to your VM within the hour; the administrator can run `sudo hades-keys <name>`. With `--as`, pass your inventory name. |
 
 Other symptoms:
 
@@ -169,7 +169,7 @@ Other symptoms:
 |---|---|
 | `join: ssh: Host key verification failed.` | The box's host key changed, or your VM's (kept under `<alias>`). Confirm with the administrator, then `ssh-keygen -R <host>` or `ssh-keygen -R <alias>` and rerun. |
 | `join: ssh: ...` naming a host, timeout or refusal | The host name or network is wrong; check `hades join`'s arguments. |
-| `hades-onboard needs a terminal` | Run `ssh -t <alias>-via-host hades-onboard <alias>`. |
+| `hades-onboard needs a terminal` | Rerun `hades join <host>`, or `ssh -t <alias>-via-host hades-onboard <alias>`. |
 | `onboarding incomplete: clone <name> failed` | You lack access to that repository on GitHub; ask for it, then rerun `hades join <host>`. |
 | `<alias> goes through the box: this laptop does not reach <name> on your tailnet` | Log this laptop in to the tailnet your VM joined, then rerun `hades join <host>`. |
 | `ssh <alias>` or Paseo times out | Turn Tailscale on on your laptop. When your VM's tailnet login has lapsed, `ssh -t <alias>-via-host hades-onboard <alias>` logs it in again. |
@@ -190,4 +190,4 @@ Other symptoms:
 
 The administrator sets your entry to `absent`: your home is archived (root-only, on the box) and
 your VM is deleted with its databases and Docker volumes. Revoke your own credentials too:
-production certificate and keys, GitHub access, and the VM in your tailnet.
+production certificate and keys, GitHub access, and the VM in your tailnet (the box logs it out).

@@ -47,7 +47,7 @@ flowchart LR
 
 1. Send the administrator your GitHub login and the email you will log in with.
 2. Install Tailscale on your laptop and log in to your own tailnet.
-3. Log `gh` in on your laptop and [install the CLI](docs/cli.md#install).
+3. [Install the CLI](docs/cli.md#install) on your laptop.
 4. Run `hades join <host>`. It sets up SSH, then runs the first-login steps in your VM, the Tailscale login included.
 5. Add your VM in Paseo Desktop with the address and password printed at the end.
 
@@ -64,6 +64,6 @@ Full journey: [Developer guide](docs/developer.md).
    ansible-playbook playbooks/verify.yml
    ```
 
-4. Give each developer read access to the hades repository and send them the host name.
+4. Send each developer the host name.
 
 Full reference: [Server reference](docs/server.md).
