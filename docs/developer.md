@@ -59,7 +59,7 @@ second `<alias>` goes into the printed Paseo address. Each step prints `already 
 | Step | Does |
 |---|---|
 | GitHub | `gh auth login -h github.com -p https -w`: a code to enter in your browser. |
-| git | `gh auth setup-git`, so git reaches GitHub with your `gh` login. |
+| git | git reaches GitHub with your `gh` login. A second account: `gh auth login` again (the last login is active; `gh auth switch` changes it), then `git config --global credential.https://github.com/<owner>.username <login>` for each owner of its repositories. |
 | Commit identity | When unset, git's `user.name` and `user.email`: your GitHub name (else login) and public email (else its noreply address). |
 | Claude Code, Codex | `claude auth login` and `codex login --device-auth`, for each one not logged in. |
 | Repositories | Clones each repository the administrator listed into `~/<name>`, unless that directory exists. A failed clone ends the run with `onboarding incomplete: clone <names> failed; run hades-onboard again`. |

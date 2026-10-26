@@ -11,10 +11,11 @@ dir=$HOME/.config/hades
 
 command -v gh >/dev/null 2>&1 || { echo "gh: not installed; the administrator adds gh to tools"; exit 1; }
 if gh auth status >/dev/null 2>&1; then echo "gh: already done"; else gh auth login -h github.com -p https -w; fi
-case $(git config --global credential.https://github.com.helper) in
-*gh*) echo "git: already done" ;;
-*) gh auth setup-git && echo "git: credentials through gh" ;;
-esac
+# git takes the token of the account a remote names (credential.<url>.username), else the active
+# one's; gh comes from PATH, so a gh upgrade in the store does not break git.
+helper='!f() { test "$1" = get || exit 0; u=$(sed -n "s/^username=//p"); echo "username=${u:-x-access-token}"; echo "password=$(gh auth token -h github.com ${u:+-u "$u"})"; }; f'
+if [ "$(git config --global --get-all credential.https://github.com.helper | tail -n 1)" = "$helper" ]; then echo "git: already done"
+else git config --global --replace-all credential.https://github.com.helper '' && git config --global --add credential.https://github.com.helper "$helper" && echo "git: credentials through gh"; fi
 # An unset commit identity is the GitHub account's: its name (else login) and its public email
 # (else its noreply address).
 identity() {
